@@ -1,4 +1,6 @@
 import express from 'express'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import cors from 'cors'
 import compression from 'compression'
 import helmet from 'helmet'
@@ -20,9 +22,13 @@ import { startBackgroundJobs } from './services/jobs.js'
 import { supabase } from './supabase.js'
 import { setRealtimeServer } from './services/realtime.js'
 const app = express(); const httpServer = createServer(app)
+const frontendDist = resolve(dirname(fileURLToPath(import.meta.url)), '../../dist')
+app.set('trust proxy', 1)
 app.use(helmet()); app.use(cors({ origin: config.FRONTEND_ORIGIN, credentials: true })); app.use(compression()); app.use(express.json({ limit: '2mb', verify: (request, _response, buffer) => { (request as typeof request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer) } })); app.use(rateLimit({ windowMs: 60_000, limit: 120 }))
 app.get('/health', (_request, response) => response.json({ ok: true, service: 'urban-tanker-api' }))
 app.use('/api/auth', authRoutes); app.use('/api/customer', customerRoutes); app.use('/api/customer', customerExtendedRoutes); app.use('/api/vendor', vendorRoutes); app.use('/api/vendor', vendorExtendedRoutes); app.use('/api/admin', adminRoutes); app.use('/api/admin', adminExtendedRoutes); app.use('/api/payment', paymentRoutes); app.use('/api/uploads', uploadRoutes); app.use(errorHandler)
+app.use(express.static(frontendDist, { index: 'index.html', maxAge: '1y', immutable: true }))
+app.use((request, response, next) => { if (request.method !== 'GET' || request.path.startsWith('/api') || request.path === '/health' || request.path.startsWith('/socket.io')) return next(); response.sendFile(resolve(frontendDist, 'index.html')) })
 const io = new Server(httpServer, { cors: { origin: config.FRONTEND_ORIGIN, credentials: true } }); io.use(async (socket, next) => { const token = socket.handshake.auth?.token; if (!token) return next(new Error('Authentication required')); const { data } = await supabase.auth.getUser(token); if (!data.user) return next(new Error('Invalid session')); socket.data.userId = data.user.id; next() }); io.on('connection', (socket) => { socket.emit('connected', { service: 'urban-tanker-realtime' }); socket.on('vendor:join', (vendorId: string) => socket.join(`vendor:${vendorId}`)); socket.on('booking:join', (bookingId: string) => socket.join(`booking:${bookingId}`)) })
 setRealtimeServer(io)
 startBackgroundJobs()

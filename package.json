@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "dev:all": "concurrently -n FE,BE -c blue,green \"npm run dev\" \"npm run dev --prefix backend\"",
+    "start": "npm run start --prefix backend",
+    "build:hostinger": "npm run build && npm run build --prefix backend",
     "test": "vitest run",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
