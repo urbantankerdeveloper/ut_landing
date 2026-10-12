@@ -1,4 +1,4 @@
-@import './customer-invoices';
-@import './customer-operations';
-@import './vendor-operations';
-@import './vendor-management';
+@use 'customer-invoices';
+@use 'customer-operations';
+@use 'vendor-operations';
+@use 'vendor-management';

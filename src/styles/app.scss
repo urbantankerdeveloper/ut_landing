@@ -1,6 +1,6 @@
-@import './foundation';
-@import './site';
-@import './workspace-groups';
-@import './admin';
-@import './operations';
-@import './shared-ui';
+@use 'foundation';
+@use 'site';
+@use 'workspace-groups';
+@use 'admin';
+@use 'operations';
+@use 'shared-ui';

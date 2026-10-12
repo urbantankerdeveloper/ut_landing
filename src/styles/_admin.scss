@@ -1,5 +1,5 @@
-@import './admin-workspace';
-@import './admin-entities';
-@import './admin-service-options';
-@import './admin-reports';
-@import './admin-coupons';
+@use 'admin-workspace';
+@use 'admin-entities';
+@use 'admin-service-options';
+@use 'admin-reports';
+@use 'admin-coupons';

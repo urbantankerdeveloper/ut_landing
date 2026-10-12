@@ -1,4 +1,4 @@
-@import './shell';
-@import './screens';
-@import './booking-flow';
-@import './auth';
+@use 'shell';
+@use 'screens';
+@use 'booking-flow';
+@use 'auth';

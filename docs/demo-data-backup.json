@@ -1,0 +1,85 @@
+{
+  "purpose": "Backup of prototype fixtures removed from the active live-data path.",
+  "customer": {
+    "bookings": [
+      { "id": "UT-2408", "service": "Water tanker - 9 KL", "location": "ECR, Chennai", "status": "In progress", "amountInr": 1850 },
+      { "id": "UT-2394", "service": "Tank & sump cleaning", "location": "Adyar, Chennai", "status": "Delivered", "amountInr": 2400 }
+    ],
+    "addresses": [
+      { "id": 1, "label": "ECR home", "address": "ECR, Chennai", "verified": true },
+      { "id": 2, "label": "Adyar office", "address": "Adyar, Chennai", "verified": false }
+    ],
+    "subscriptions": [
+      { "id": 1, "name": "Home tanker lite", "detail": "Next delivery - 10-14 days", "status": "Active" },
+      { "id": 2, "name": "Property care", "detail": "Next delivery - 18 Oct 2026", "status": "Paused" }
+    ],
+    "offers": [
+      { "code": "WATER10", "title": "10% off water services", "detail": "Valid through 31 Dec 2026" },
+      { "code": "FIRST500", "title": "INR 500 off your first booking", "detail": "Valid for new customers" }
+    ],
+    "notifications": [
+      { "id": 1, "title": "Vendor assigned", "detail": "Your tanker request UT-2408 has been accepted.", "unread": true },
+      { "id": 2, "title": "Invoice ready", "detail": "Invoice INV-UT-2409 is ready to download.", "unread": true },
+      { "id": 3, "title": "Booking delivered", "detail": "Your previous delivery was completed.", "unread": false }
+    ]
+  },
+  "vendor": {
+    "orders": [
+      { "id": "UT-2412", "service": "Water tanker - 12 KL", "location": "OMR, Chennai", "distanceKm": 5.2, "amountInr": 2250, "status": "Available" },
+      { "id": "UT-2411", "service": "Sewage tanker - 9 KL", "location": "Guindy, Chennai", "distanceKm": 11.4, "amountInr": 2900, "status": "Accepted", "vehicle": "TN 38 AB 4120", "driver": "Arun Kumar" },
+      { "id": "UT-2409", "service": "Water tanker - 6 KL", "location": "Sholinganallur, Chennai", "distanceKm": 18.7, "amountInr": 1500, "status": "En route", "vehicle": "TN 09 CD 1811", "driver": "Meena S" }
+    ],
+    "vehicles": [
+      { "id": 1, "name": "TN 38 AB 4120", "detail": "12 KL tanker - Chennai", "active": true },
+      { "id": 2, "name": "TN 09 CD 1811", "detail": "9 KL tanker - Maintenance due", "active": false }
+    ],
+    "drivers": [
+      { "id": 1, "name": "Arun Kumar", "detail": "Assigned to TN 38 AB 4120", "active": true },
+      { "id": 2, "name": "Sanjay R", "detail": "Documents pending review", "active": false }
+    ],
+    "complaints": [
+      { "id": 1, "subject": "Customer requested a reschedule", "order": "UT-2409", "status": "Open", "detail": "Created today - Awaiting operations review" },
+      { "id": 2, "subject": "Access note updated after delivery", "order": "UT-2388", "status": "Resolved", "detail": "Resolved yesterday" }
+    ]
+  },
+  "admin": {
+    "coupons": [
+      { "id": 1, "code": "WATER10", "label": "Water service offer", "discount": "10%", "expires": "2026-12-31", "active": true },
+      { "id": 2, "code": "FIRST500", "label": "First booking benefit", "discount": "INR 500", "expires": "2026-11-30", "active": true }
+    ],
+    "vendors": [
+      { "name": "BlueDrop Services", "detail": "12 vehicles - 4.8 rating", "status": "Approved" },
+      { "name": "ClearSpring Water", "detail": "Application received today", "status": "Pending review" },
+      { "name": "EcoDrain Works", "detail": "8 vehicles - 4.6 rating", "status": "Approved" }
+    ],
+    "reports": [
+      { "reference": "UT-2412", "label": "Water tanker - 12 KL", "category": "Water", "status": "Awaiting vendor", "amountInr": 2250, "date": "2026-10-10" },
+      { "reference": "UT-2411", "label": "Sewage tanker - 9 KL", "category": "Sewage", "status": "In progress", "amountInr": 2900, "date": "2026-10-09" },
+      { "reference": "UT-2409", "label": "Tank cleaning", "category": "Cleaning", "status": "Delivered", "amountInr": 2100, "date": "2026-10-08" },
+      { "reference": "UT-2404", "label": "Water tanker - 6 KL", "category": "Water", "status": "Delivered", "amountInr": 1500, "date": "2026-10-07" },
+      { "reference": "UT-2398", "label": "Borewell inspection", "category": "Infrastructure", "status": "Delivered", "amountInr": 4800, "date": "2026-10-05" }
+    ]
+  },
+  "workspace": {
+    "customerRows": [
+      { "id": "UT-2408", "service": "Water tanker - 9 KL", "location": "ECR, Chennai", "status": "In progress", "amountInr": 1850 },
+      { "id": "UT-2394", "service": "Tank & sump cleaning", "location": "Adyar, Chennai", "status": "Delivered", "amountInr": 2400 },
+      { "id": "UT-2388", "service": "Sewage tanker", "location": "Velachery, Chennai", "status": "Scheduled", "amountInr": 3100 }
+    ],
+    "vendorRows": [
+      { "id": "UT-2412", "service": "Water tanker - 12 KL", "location": "OMR, Chennai", "status": "Available", "amountInr": 2250 },
+      { "id": "UT-2411", "service": "Sewage tanker - 9 KL", "location": "Guindy, Chennai", "status": "Review", "amountInr": 2900 },
+      { "id": "UT-2409", "service": "Water tanker - 6 KL", "location": "Sholinganallur, Chennai", "status": "Accepted", "amountInr": 1500 }
+    ],
+    "adminRows": [
+      { "id": "UT-2412", "service": "Water tanker - 12 KL", "location": "OMR, Chennai", "status": "Awaiting vendor", "amountInr": 2250 },
+      { "id": "UT-2411", "service": "Sewage tanker - 9 KL", "location": "Guindy, Chennai", "status": "In progress", "amountInr": 2900 },
+      { "id": "UT-2409", "service": "Tank cleaning", "location": "Adyar, Chennai", "status": "Delivered", "amountInr": 2100 }
+    ]
+  },
+  "demoAccounts": [
+    { "role": "customer", "username": "customer", "password": "customer123" },
+    { "role": "vendor", "username": "vendor", "password": "vendor123" },
+    { "role": "admin", "username": "admin", "password": "Maneesh@123" }
+  ]
+}
