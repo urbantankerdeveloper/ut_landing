@@ -1,0 +1,9 @@
+{
+  "name": "Urban Tanker",
+  "short_name": "Urban Tanker",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5fbfc",
+  "theme_color": "#007c91",
+  "description": "One app for every water service."
+}

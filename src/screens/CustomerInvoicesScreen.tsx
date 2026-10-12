@@ -1,0 +1,13 @@
+import { Download, FileText, Receipt } from 'lucide-react'
+import { demoDataEnabled } from '../constants/demo'
+import { downloadInvoicePdf, type InvoicePdf } from '../utils/pdf'
+import { useCustomerInvoices } from '../hooks/useCustomerData'
+
+const invoices: InvoicePdf[] = demoDataEnabled ? [{ number: 'INV-UT-2409', date: '2026-10-08', customer: 'Demo Customer', service: 'Tank & sump cleaning', location: 'Adyar, Chennai', amount: 2400, status: 'Paid' }, { number: 'INV-UT-2394', date: '2026-09-28', customer: 'Demo Customer', service: 'Water tanker · 9 KL', location: 'ECR, Chennai', amount: 1850, status: 'Paid' }] : []
+
+export default function CustomerInvoicesScreen({ onNotice }: { onNotice: (message: string) => void }) {
+  const invoiceQuery = useCustomerInvoices()
+  const invoiceList = demoDataEnabled ? invoices : invoiceQuery.data ?? []
+  function download(invoice: InvoicePdf) { downloadInvoicePdf(invoice); onNotice(`${invoice.number} PDF downloaded.`) }
+  return <section className="customer-invoices-screen"><div className="invoice-page-hero"><div><p className="eyebrow">WALLET & BILLS</p><h1>Your invoices, ready when you are.</h1><p>Download clear, branded invoices for every completed Urban Tanker service.</p></div><span className="invoice-hero-icon"><Receipt size={30} /></span></div><div className="invoice-summary"><div><small>Total paid invoices</small><strong>{invoiceList.length}</strong></div><div><small>Billing account</small><strong>Demo Customer</strong></div><div><small>Payment status</small><strong>All settled</strong></div></div><section className="invoice-list-surface"><div className="invoice-list-heading"><div><p className="eyebrow">INVOICE HISTORY</p><h2>Completed services</h2></div><span>{invoiceList.length} records</span></div>{invoiceList.length ? <div className="invoice-card-list">{invoiceList.map((invoice) => <article className="invoice-card" key={invoice.number}><span className="invoice-card-icon"><FileText size={18} /></span><div><b>{invoice.number}</b><p>{invoice.service} · {invoice.location}</p><small>{invoice.date} · {invoice.status}</small></div><strong>INR {invoice.amount.toLocaleString('en-IN')}</strong><button className="button button-quiet" onClick={() => download(invoice)}><Download size={14} /> PDF</button></article>)}</div> : <div className="admin-empty-state">Invoices will appear here after your first completed service.</div>}</section></section>
+}

@@ -1,0 +1,4 @@
+import { supabase } from '../supabase.js'
+export async function runReminderSweep() { const cutoff = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); const { data } = await supabase.from('bookings').select('id,customer_id,scheduled_for').eq('status', 'accepted').lte('scheduled_for', cutoff); return data?.length ?? 0 }
+export async function runDocumentExpirySweep() { const cutoff = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10); const { data } = await supabase.from('documents').select('id,owner_id,expires_on').lte('expires_on', cutoff); return data?.length ?? 0 }
+export function startBackgroundJobs() { const timer = setInterval(() => { void runReminderSweep(); void runDocumentExpirySweep() }, 15 * 60 * 1000); timer.unref(); return () => clearInterval(timer) }

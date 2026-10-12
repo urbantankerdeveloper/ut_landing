@@ -1,0 +1,14 @@
+import { supabase } from '../supabase.js'
+
+export type BookingStatus = 'pending_vendor' | 'vendor_assigned' | 'accepted' | 'en_route' | 'arrived' | 'delivered' | 'cancelled'
+
+export async function transitionBooking(input: { bookingId: string; actorId: string; status: BookingStatus; vendorId?: string; vehicleId?: string; driverId?: string }) {
+  return supabase.rpc('transition_booking', {
+    p_booking_id: input.bookingId,
+    p_actor_id: input.actorId,
+    p_next_status: input.status,
+    p_vendor_id: input.vendorId ?? null,
+    p_vehicle_id: input.vehicleId ?? null,
+    p_driver_id: input.driverId ?? null,
+  })
+}

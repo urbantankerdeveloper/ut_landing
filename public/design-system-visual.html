@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10343a">
+  <title>Urban Tanker | Design System Visual</title>
+  <style>
+    :root {
+      --ink: #10343a;
+      --deep: #062b42;
+      --aqua: #007c91;
+      --aqua-dark: #005c6c;
+      --aqua-light: #e2f5f5;
+      --paper: #f5fbfc;
+      --white: #fff;
+      --muted: #60777a;
+      --line: #dce9e8;
+      --mint: #c7eadb;
+      --coral: #d96250;
+      --shadow: 0 18px 45px rgba(15, 61, 68, .12);
+      font-family: Manrope, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--paper); }
+    a { color: inherit; }
+    .site-header { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 72px; padding: 14px clamp(20px, 5vw, 72px); background: rgba(245, 251, 252, .94); border-bottom: 1px solid var(--line); backdrop-filter: blur(16px); }
+    .brand { display: inline-flex; align-items: center; gap: 9px; color: var(--ink); font-size: 17px; font-weight: 800; text-decoration: none; }
+    .brand-mark { display: grid; place-items: center; width: 32px; height: 32px; color: var(--white); background: var(--aqua); border-radius: 50%; font-size: 10px; }
+    .brand span:last-child { color: var(--aqua); }
+    .header-link { color: var(--aqua-dark); font: 11px "DM Mono", monospace; letter-spacing: .08em; text-decoration: none; text-transform: uppercase; }
+    main { width: min(1240px, calc(100% - 40px)); margin: 0 auto; }
+    .hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, .72fr); gap: 48px; align-items: end; padding: clamp(64px, 10vw, 132px) 0 72px; }
+    .eyebrow { margin: 0 0 14px; color: var(--aqua); font: 11px "DM Mono", monospace; letter-spacing: .16em; text-transform: uppercase; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { max-width: 760px; margin-bottom: 22px; font-size: clamp(42px, 7vw, 82px); line-height: .98; letter-spacing: -.055em; }
+    h1 em { color: var(--aqua); font-style: normal; }
+    h2 { margin-bottom: 12px; font-size: clamp(28px, 4vw, 44px); line-height: 1.06; letter-spacing: -.04em; }
+    h3 { margin-bottom: 8px; font-size: 18px; }
+    .lede { max-width: 680px; color: var(--muted); font-size: 17px; line-height: 1.7; }
+    .hero-card { padding: 26px; color: var(--white); background: linear-gradient(145deg, var(--deep), var(--aqua-dark)); border-radius: 24px 24px 24px 76px; box-shadow: var(--shadow); }
+    .hero-card strong { display: block; margin: 20px 0 8px; font-size: 42px; line-height: 1; }
+    .hero-card p { margin-bottom: 0; color: #c6e0e0; font-size: 13px; line-height: 1.6; }
+    .toc { display: flex; flex-wrap: wrap; gap: 9px; padding: 16px; margin-bottom: 72px; background: var(--white); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 8px 22px rgba(20, 71, 74, .06); }
+    .toc a { padding: 9px 12px; color: var(--aqua-dark); background: var(--aqua-light); border-radius: 999px; font-size: 12px; font-weight: 800; text-decoration: none; }
+    section { padding: 54px 0; border-top: 1px solid var(--line); }
+    .section-heading { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 16px; align-items: start; margin-bottom: 25px; }
+    .section-number { display: grid; place-items: center; width: 42px; height: 42px; color: var(--white); background: var(--ink); border-radius: 13px; font: 12px "DM Mono", monospace; }
+    .section-heading p { max-width: 720px; margin: 0; color: var(--muted); line-height: 1.7; }
+    .diagram { overflow-x: auto; padding: 24px; margin: 20px 0 12px; background: var(--white); border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 10px 25px rgba(20, 71, 74, .06); }
+    .diagram .mermaid { min-width: 720px; text-align: center; }
+    .diagram-note { color: var(--muted); font-size: 12px; line-height: 1.6; }
+    .role-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .role-card { padding: 20px; background: var(--white); border: 1px solid var(--line); border-radius: 16px; }
+    .role-card.customer { border-top: 4px solid var(--aqua); }
+    .role-card.vendor { border-top: 4px solid #3b927c; }
+    .role-card.admin { border-top: 4px solid var(--coral); }
+    .role-card p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+    .role-card ul { padding-left: 18px; margin: 14px 0 0; color: var(--muted); font-size: 12px; line-height: 1.8; }
+    .rule { padding: 24px; color: var(--white); background: var(--ink); border-radius: 16px; font: 14px/1.8 "DM Mono", monospace; white-space: pre-wrap; }
+    footer { padding: 48px 0 64px; color: var(--muted); font-size: 12px; }
+    @media (max-width: 760px) {
+      main { width: min(100% - 32px, 1240px); }
+      .site-header { padding-inline: 16px; }
+      .header-link { display: none; }
+      .hero { grid-template-columns: 1fr; gap: 28px; padding: 64px 0 48px; }
+      .hero-card { border-radius: 20px; }
+      .role-grid { grid-template-columns: 1fr; }
+      .diagram { padding: 12px; }
+    }
+  </style>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({ startOnLoad: true, securityLevel: 'loose', theme: 'base', themeVariables: { primaryColor: '#e2f5f5', primaryTextColor: '#10343a', primaryBorderColor: '#007c91', lineColor: '#60777a', secondaryColor: '#c7eadb', tertiaryColor: '#fff' } });
+  </script>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/"><span class="brand-mark">UT</span><span>Urban Tanker</span></a>
+    <a class="header-link" href="/">React web foundation</a>
+  </header>
+
+  <main>
+    <div class="hero">
+      <div>
+        <p class="eyebrow">Visual architecture handoff</p>
+        <h1>One system.<br><em>Three operating worlds.</em></h1>
+        <p class="lede">How the approved Urban Tanker HTML designs become a shared React web design system for Customer, Vendor, and Admin experiences.</p>
+      </div>
+      <aside class="hero-card"><p class="eyebrow">Design evidence</p><strong>54</strong><p>approved HTML pages distilled into tokens, reusable components, role-based shells, and typed feature flows.</p></aside>
+    </div>
+
+    <nav class="toc" aria-label="Page sections">
+      <a href="/design-system-visual.html">Construction</a><a href="/design-system-visual.html">Shared system</a><a href="/design-system-visual.html">Customer</a><a href="/design-system-visual.html">Vendor</a><a href="/design-system-visual.html">Admin</a><a href="/design-system-visual.html">Cross-role flow</a><a href="/design-system-visual.html">Responsive</a>
+    </nav>
+
+    <section id="construction">
+      <div class="section-heading"><span class="section-number">01</span><div><h2>How the system was constructed</h2><p>Approved screens were analyzed for repeated visual and interaction decisions before any role-specific screen architecture was defined.</p></div></div>
+      <div class="diagram"><div class="mermaid">flowchart TD
+    A[54 approved HTML pages] --> B[Inspect CSS variables, selectors, layouts, and interactions]
+    B --> C[Extract design language]
+    C --> C1[Color tokens]
+    C --> C2[Typography tokens]
+    C --> C3[Spacing, radius, shadows]
+    C --> C4[Responsive breakpoints]
+    C --> C5[Navigation, forms, cards, tables, modals]
+    C1 &amp; C2 &amp; C3 &amp; C4 --> D[Central theme layer]
+    C5 --> E[Reusable component inventory]
+    D --> E
+    E --> E1[Atoms]
+    E --> E2[Molecules]
+    E --> E3[Organisms]
+    E --> E4[Templates]
+    E1 &amp; E2 &amp; E3 --> F[Role-based shells]
+    F --> F1[Customer workspace]
+    F --> F2[Vendor workspace]
+    F --> F3[Admin workspace]
+    F1 &amp; F2 &amp; F3 --> G[Feature screens]
+    G --> H[Typed services, navigation, validation, and API adapters]</div></div>
+    </section>
+
+    <section id="shared">
+      <div class="section-heading"><span class="section-number">02</span><div><h2>Shared design system architecture</h2><p>Every role receives the same visual grammar, while screen templates control role-specific density, navigation, permissions, and workflows.</p></div></div>
+      <div class="diagram"><div class="mermaid">flowchart LR
+    T[Theme tokens\ncolors / type / spacing / radius / shadows] --> A[Atoms]
+    A --> M[Molecules]
+    M --> O[Organisms]
+    O --> S[Screen templates]
+    A --> A1[Text]
+    A --> A2[Button]
+    A --> A3[Input / Select]
+    A --> A4[Badge / Tag]
+    A --> A5[Checkbox / Radio / Switch]
+    M --> M1[Card]
+    M --> M2[FormField]
+    M --> M3[ListItem]
+    M --> M4[InfoCard / ProductCard]
+    O --> O1[Header / Sidebar]
+    O --> O2[Modal / Toast / Alert]
+    O --> O3[Table / EmptyState]
+    O --> O4[Navigation / Footer]
+    S --> C[Customer screens]
+    S --> V[Vendor screens]
+    S --> AD[Admin screens]</div></div>
+    </section>
+
+    <section id="customer">
+      <div class="section-heading"><span class="section-number">03</span><div><h2>Customer experience</h2><p>Customers move from discovery to a coordinated booking, then into tracking, account management, billing, subscriptions, and support.</p></div></div>
+      <div class="role-grid"><article class="role-card customer"><h3>Discover</h3><p>Home, services, subscriptions, yearly contracts, offers, and login.</p><ul><li>Service discovery</li><li>Plan comparison</li><li>Account entry</li></ul></article><article class="role-card customer"><h3>Book and track</h3><p>A single shared slot coordinates multiple requested services.</p><ul><li>Select services</li><li>Location and slot</li><li>Review, payment, confirmation</li><li>Live tracking</li></ul></article><article class="role-card customer"><h3>Manage</h3><p>The customer workspace keeps the delivery relationship organized.</p><ul><li>Orders and addresses</li><li>Subscriptions and membership</li><li>Wallet and bills</li><li>Support and contracts</li></ul></article></div>
+      <div class="diagram"><div class="mermaid">flowchart TD
+    C0[Public Home] --> C1[Explore Services]
+    C0 --> C2[Subscriptions]
+    C0 --> C3[Yearly Contracts]
+    C0 --> C4[Login / Account]
+    C1 --> B0[Booking]
+    C2 --> B0
+    C3 --> B0
+    B0 --> B1[Step 1: Select services]
+    B1 --> B2[Step 2: Contact and location]
+    B2 --> B3[Step 3: Date and time slot]
+    B3 --> B4[Review combined booking]
+    B4 --> B5[Coupon and payment]
+    B5 --> B6[Booking confirmation]
+    B6 --> B7[Track order]
+    C4 --> CW[Customer workspace]
+    CW --> CW1[Overview and metrics]
+    CW --> CW2[Orders and booking history]
+    CW --> CW3[Saved addresses]
+    CW --> CW4[Subscriptions]
+    CW --> CW5[Wallet and bills]
+    CW --> CW6[Membership and benefits]
+    CW --> CW7[Support and contracts]
+    B7 --> CW2
+    B6 --> CW2</div></div>
+    </section>
+
+    <section id="vendor">
+      <div class="section-heading"><span class="section-number">04</span><div><h2>Vendor experience</h2><p>Vendors convert available demand into managed delivery operations through orders, fleet, drivers, earnings, complaints, and alerts.</p></div></div>
+      <div class="role-grid"><article class="role-card vendor"><h3>Operate</h3><p>Dashboard, available orders, active delivery, and earnings.</p><ul><li>Review incoming orders</li><li>Select vehicle and driver</li><li>Accept delivery</li></ul></article><article class="role-card vendor"><h3>Deliver</h3><p>The order state advances from acceptance through OTP-verified completion.</p><ul><li>En route</li><li>Arrived</li><li>Delivery OTP</li><li>Delivered</li></ul></article><article class="role-card vendor"><h3>Manage fleet</h3><p>Operational records support availability and compliance.</p><ul><li>Services</li><li>Vehicles</li><li>Drivers</li><li>Earnings, complaints, notifications</li></ul></article></div>
+      <div class="diagram"><div class="mermaid">flowchart TD
+    V0[Vendor Login] --> V1[Vendor Dashboard]
+    V1 --> V2[Available orders]
+    V1 --> V3[Active delivery]
+    V1 --> V4[Earnings summary]
+    V2 --> V5[Review order]
+    V5 --> V6[Choose vehicle and driver]
+    V6 --> V7[Accept order]
+    V7 --> V8[En route]
+    V8 --> V9[Arrived and delivery OTP]
+    V9 --> V10[Delivered]
+    V10 --> V4
+    V1 --> VF[Vendor workspace]
+    VF --> VF1[Services]
+    VF --> VF2[Vehicles]
+    VF --> VF3[Drivers]
+    VF --> VF4[Earnings]
+    VF --> VF5[Complaints]
+    VF --> VF6[Notifications]
+    VF2 --> VA[Vehicle approval and availability]
+    VF3 --> DA[Driver approval and assignment]
+    VA &amp; DA --> V6</div></div>
+    </section>
+
+    <section id="admin">
+      <div class="section-heading"><span class="section-number">05</span><div><h2>Admin experience</h2><p>Admins operate the platform through a denser command center with oversight, configuration, approval, finance, and exception handling.</p></div></div>
+      <div class="role-grid"><article class="role-card admin"><h3>Monitor</h3><p>KPIs, live operations, order queues, reports, finance, and payments.</p><ul><li>Operational overview</li><li>Live vehicle stream</li><li>Revenue and reconciliation</li></ul></article><article class="role-card admin"><h3>Control</h3><p>Admin manages the entities and rules that make delivery possible.</p><ul><li>Vendors and onboarding</li><li>Vehicles and drivers</li><li>Services and pricing</li><li>Subscriptions and coupons</li></ul></article><article class="role-card admin"><h3>Resolve</h3><p>Exceptions become explicit review and approval workflows.</p><ul><li>Complaints and enquiries</li><li>Notifications and alerts</li><li>Approve, reject, suspend</li><li>Order detail investigation</li></ul></article></div>
+      <div class="diagram"><div class="mermaid">flowchart TD
+    A0[Admin Login] --> A1[Admin Command Center]
+    A1 --> A2[KPI overview]
+    A1 --> A3[Live operations]
+    A1 --> A4[Order management]
+    A1 --> A5[Reports]
+    A1 --> A6[Finance and payments]
+    A1 --> AW[Admin workspace]
+    AW --> AW1[Vendors and onboarding]
+    AW --> AW2[Vehicles and fleet]
+    AW --> AW3[Drivers]
+    AW --> AW4[Customers]
+    AW --> AW5[Services and pricing]
+    AW --> AW6[Subscriptions]
+    AW --> AW7[Complaints and enquiries]
+    AW --> AW8[Coupons and notifications]
+    AW1 --> AP[Approval workflow]
+    AP --> AP1[Review application]
+    AP1 --> AP2[Approve / reject / suspend]
+    AP2 --> AW1
+    A4 --> OD[Order detail]
+    A3 --> LD[Live vehicle and order stream]
+    A6 --> PD[Payment reconciliation]</div></div>
+    </section>
+
+    <section id="cross-role">
+      <div class="section-heading"><span class="section-number">06</span><div><h2>Cross-role domain flow</h2><p>The visual system follows the actual operational handoff: customer request, vendor fulfillment, admin oversight, and customer confirmation.</p></div></div>
+      <div class="diagram"><div class="mermaid">sequenceDiagram
+    participant Customer
+    participant Platform
+    participant Vendor
+    participant Admin
+    Customer-&gt;&gt;Platform: Create booking
+    Platform-&gt;&gt;Vendor: Broadcast available order
+    Platform-&gt;&gt;Admin: Add order to operations queue
+    Vendor-&gt;&gt;Platform: Select vehicle and driver
+    Vendor-&gt;&gt;Platform: Accept order
+    Platform--&gt;&gt;Customer: Order accepted and tracking enabled
+    Vendor-&gt;&gt;Platform: Update en route / arrived
+    Platform--&gt;&gt;Customer: Live status update
+    Vendor-&gt;&gt;Platform: Verify delivery OTP
+    Platform-&gt;&gt;Customer: Mark delivered and create invoice
+    Platform-&gt;&gt;Admin: Update finance and operational metrics
+    Customer-&gt;&gt;Platform: Rate, subscribe, or request support
+    Admin-&gt;&gt;Platform: Resolve exceptions and manage configuration</div></div>
+    </section>
+
+    <section id="responsive">
+      <div class="section-heading"><span class="section-number">07</span><div><h2>Responsive transformation</h2><p>The same components change layout density at the approved breakpoints instead of becoming separate role-specific designs.</p></div></div>
+      <div class="diagram"><div class="mermaid">flowchart LR
+    D[Desktop\n1240px content cap] --> D1[235px sidebar]
+    D --> D2[3-column cards]
+    D --> D3[4-column KPI grid]
+    D --> D4[Two-column forms]
+    T[Tablet\n900px to 760px] --> T1[Narrow sidebar]
+    T --> T2[2-column grids]
+    T --> T3[Stacked dashboard panels]
+    M[Mobile\nbelow 760px] --> M1[Top or bottom navigation]
+    M --> M2[Single-column forms]
+    M --> M3[Scrollable tables]
+    M --> M4[Full-width dialogs]
+    D --> T --> M</div></div>
+    </section>
+
+    <section>
+      <div class="section-heading"><span class="section-number">08</span><div><h2>Construction rule</h2><p>Each role follows the same design-system path while keeping its own workflow and information density.</p></div></div>
+      <div class="rule">Approved HTML pattern
+  -&gt; extracted token
+  -&gt; reusable atom
+  -&gt; composed molecule
+  -&gt; role organism
+  -&gt; screen template
+  -&gt; typed feature flow</div>
+    </section>
+
+    <footer>Urban Tanker design system visual handoff. Generated from the approved HTML design set.</footer>
+  </main>
+</body>
+</html>

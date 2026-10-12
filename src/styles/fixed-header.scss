@@ -1,0 +1,7 @@
+/* Shared fixed header behavior for public and role workspace shells. */
+.site-header { position:fixed !important; top:0; right:0; left:0; z-index:50; width:100%; max-width:none; }
+.app-shell:not(.app-shell-workspace) > #main-content { padding-top:72px; }
+.workspace-main-new { padding-top:78px; }
+.workspace-topbar-new { position:fixed; top:0; right:0; left:235px; z-index:40; }
+@media (max-width:1080px) { .workspace-topbar-new { left:200px; } }
+@media (max-width:760px) { .site-header { min-height:67px; }.app-shell:not(.app-shell-workspace) > #main-content { padding-top:67px; }.workspace-main-new { padding-top:66px; }.workspace-topbar-new { right:0; left:0; } }

@@ -1,0 +1,6 @@
+/* Dense workspace controls match the approved operational UI. */
+.workspace-app .button:not(.button-large) { min-height:34px; padding:8px 12px; border-radius:8px; font-size:11px; }
+.workspace-app .button:not(.button-large) svg { width:14px; height:14px; }
+.workspace-app .view-panel-heading .button,.workspace-app .admin-view-panel .button,.workspace-app .coupon-toolbar .button { min-height:32px; padding:7px 10px; font-size:10px; }
+.workspace-app .topbar-logout { min-height:32px; padding:7px 10px; }
+.workspace-app .text-button { font-size:10px; }
