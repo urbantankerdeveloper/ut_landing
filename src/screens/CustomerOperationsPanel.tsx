@@ -6,6 +6,7 @@ import { downloadInvoicePdf } from '../utils/pdf'
 import { normalizeNotification } from '../utils/customerData'
 import { CustomerTrackingPanel } from './CustomerTrackingPanel'
 import { CustomerMembershipPanel } from './CustomerMembershipPanel'
+import { CustomerPushSettings } from './CustomerPushSettings'
 
 type Mode = 'bookings' | 'tracking' | 'addresses' | 'profile' | 'subscriptions' | 'usage' | 'wallet' | 'invoices' | 'membership' | 'offers' | 'notifications' | 'contracts'
 type Props = { mode: Mode; onNavigate: (screen: 'booking' | 'home') => void; onNotice: (message: string) => void }
@@ -32,7 +33,7 @@ export function CustomerOperationsPanel({ mode, onNavigate, onNotice }: Props) {
   if (mode === 'wallet') return <CustomerWallet onNotice={onNotice} />
   if (mode === 'membership') return <CustomerMembershipPanel onNotice={onNotice} />
   if (mode === 'offers') return <CustomerOffers onNotice={onNotice} />
-  if (mode === 'notifications') return <CustomerNotifications notifications={notifications} setNotifications={setNotifications} onNotice={onNotice} />
+  if (mode === 'notifications') return <><CustomerNotifications notifications={notifications} setNotifications={setNotifications} onNotice={onNotice} /><CustomerPushSettings onNotice={onNotice} /></>
   return <CustomerContracts onNotice={onNotice} />
 }
 

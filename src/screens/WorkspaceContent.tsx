@@ -1,12 +1,17 @@
 import { ArrowRight, Bell, CheckCircle2, CircleDollarSign, ClipboardList, FileText, MapPin, PackageCheck, Plus, Search, Settings2, Truck, UserRound, Users } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { WorkspaceRole } from '../stores/navigationStore'
-import { ResourcePanel, ServiceRequestPanel } from './WorkspaceInteractive'
+import { ServiceRequestPanel } from './WorkspaceInteractive'
 import { AdminWorkspaceContent } from './AdminWorkspaceContent'
 import CustomerInvoicesScreen from './CustomerInvoicesScreen'
 import { VendorOperationsPanel } from './VendorOperationsPanel'
 import VendorOrderPanel from './VendorOrderPanel'
 import { VendorManagementPanel } from './VendorManagementPanel'
+import { VendorFleetPanel } from './VendorFleetPanel'
+import { VendorComplaintsPanel } from './VendorComplaintsPanel'
+import { VendorServicesPanel } from './VendorServicesPanel'
+import { VendorDocumentsPanel } from './VendorDocumentsPanel'
+import { VendorPayoutPanel } from './VendorPayoutPanel'
 import { CustomerOperationsPanel } from './CustomerOperationsPanel'
 import { demoDataEnabled } from '../constants/demo'
 
@@ -23,11 +28,14 @@ export function WorkspaceContent({ role, item, onNavigate, onNotice }: Props) {
   if (role === 'customer' && ['bookings', 'tracking', 'addresses', 'profile', 'subscriptions', 'usage', 'wallet', 'invoices', 'membership', 'offers', 'notifications', 'contracts'].includes(item)) return <CustomerOperationsPanel mode={item as 'bookings' | 'tracking' | 'addresses' | 'profile' | 'subscriptions' | 'usage' | 'wallet' | 'invoices' | 'membership' | 'offers' | 'notifications' | 'contracts'} onNavigate={onNavigate} onNotice={onNotice} />
   if (role === 'customer' && item === 'membership') return <CardPanel eyebrow="MEMBERSHIP" title="Benefits for every delivery." cards={['Priority support', 'Member pricing', 'Delivery history'].map((name) => [name, 'Available with your Urban Tanker account', ClipboardList])} action="View benefits" onAction={() => onNotice('Membership benefits opened.')} />
   if (role === 'customer' && item === 'contracts') return <CardPanel eyebrow="YEARLY CONTRACTS" title="Plan a whole year around your property." cards={['Residential plan', 'Commercial plan', 'Apartment plan'].map((name) => [name, 'Build a combined annual estimate', FileText])} action="Build yearly plan" onAction={() => onNavigate('booking')} />
-  if (role === 'vendor' && item === 'vehicles') return <ResourcePanel kind="vehicle" />
-  if (role === 'vendor' && item === 'drivers') return <ResourcePanel kind="driver" />
+  if (role === 'vendor' && (item === 'vehicles' || item === 'drivers')) return <VendorFleetPanel mode={item} onNotice={onNotice} />
   if (role === 'vendor' && item === 'orders') return <VendorOrderPanel onNotice={onNotice} />
-  if (role === 'vendor' && (item === 'services' || item === 'earnings' || item === 'attendance')) return <VendorManagementPanel mode={item} onNotice={onNotice} />
-  if (role === 'vendor' && (item === 'complaints' || item === 'notifications')) return <VendorOperationsPanel mode={item} onNotice={onNotice} />
+  if (role === 'vendor' && item === 'services') return <VendorServicesPanel onNotice={onNotice} />
+  if (role === 'vendor' && item === 'documents') return <VendorDocumentsPanel onNotice={onNotice} />
+  if (role === 'vendor' && item === 'earnings') return <VendorPayoutPanel onNotice={onNotice} />
+  if (role === 'vendor' && item === 'attendance') return <VendorManagementPanel mode={item} onNotice={onNotice} />
+  if (role === 'vendor' && item === 'complaints') return <VendorComplaintsPanel onNotice={onNotice} />
+  if (role === 'vendor' && item === 'notifications') return <VendorOperationsPanel mode={item} onNotice={onNotice} />
   if (role === 'customer') return <CustomerView item={item} onNavigate={onNavigate} onNotice={onNotice} />
   if (role === 'vendor') return <VendorView item={item} onNavigate={onNavigate} onNotice={onNotice} />
   return <AdminView item={item} onNavigate={onNavigate} onNotice={onNotice} />

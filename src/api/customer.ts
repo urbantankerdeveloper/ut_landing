@@ -49,6 +49,9 @@ export const customerApi = {
   membershipPlans: () => apiFetch<MembershipPlan[]>('/customer/membership-plans'),
   membership: () => apiFetch<CustomerMembership | null>('/customer/membership'),
   requestMembership: (planId: string) => apiFetch<CustomerMembership>('/customer/membership', { method: 'POST', body: JSON.stringify({ planId }) }),
+  updateMembership: (status: CustomerMembership['status']) => apiFetch<CustomerMembership>('/customer/membership', { method: 'PATCH', body: JSON.stringify({ status }) }),
+  savePushSubscription: (subscription: PushSubscriptionJSON) => apiFetch<void>('/customer/push-subscription', { method: 'POST', body: JSON.stringify(subscription) }),
+  removePushSubscription: (endpoint: string) => apiFetch<void>('/customer/push-subscription', { method: 'DELETE', body: JSON.stringify({ endpoint }) }),
   notifications: () => apiFetch<unknown[]>('/customer/notifications'),
   markNotificationRead: (id: string) => apiFetch<unknown>(`/customer/notifications/${id}/read`, { method: 'PATCH' }),
 }

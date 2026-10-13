@@ -20,3 +20,13 @@ self.addEventListener('fetch', (event) => {
   }
   event.respondWith(caches.match(event.request).then((cached) => cached ?? fetch(event.request).then((response) => { const copy = response.clone(); caches.open(CACHE).then((cache) => cache.put(event.request, copy)); return response })))
 })
+
+self.addEventListener('push', (event) => {
+  const data = event.data?.json() ?? { title: 'Urban Tanker update', body: 'You have a new booking update.' }
+  event.waitUntil(self.registration.showNotification(data.title ?? 'Urban Tanker update', { body: data.body ?? data.detail ?? '', icon: '/manifest.json', data: { url: data.url ?? '/' } }))
+})
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  event.waitUntil(clients.openWindow(event.notification.data?.url ?? '/'))
+})
