@@ -9,3 +9,6 @@ export function setRealtimeServer(server: Server) {
 export function emitRealtime(event: string, payload: unknown = {}) {
   realtimeServer?.emit(event, payload)
 }
+export function emitRealtimeToUser(userId: string, event: string, payload: unknown = {}) {
+  realtimeServer?.to(`customer:${userId}`).emit(event, payload)
+}
