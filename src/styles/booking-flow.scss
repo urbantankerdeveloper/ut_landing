@@ -1,3 +1,75 @@
 @use "../theme/colors";
 
 .booking-review-panel { display:grid; gap:0; }.review-item { padding:13px 0; border-top:1px solid #e2eae6; }.review-item p { margin:4px 0 0; color:colors.$muted; font-size:11px; }.payment-choice-list { display:grid; gap:10px; padding-top:14px; }.payment-choice-list label { display:flex; gap:10px; align-items:center; padding:13px; color:colors.$ink; background:#f8fbfa; border:1px solid #dce7e3; border-radius:10px; cursor:pointer; }.payment-choice-list label.selected { color:colors.$aqua-dark; background:colors.$aqua-light; border-color:colors.$aqua; }.payment-choice-list input { flex:none; min-height:auto; }.payment-choice-list label svg { color:colors.$aqua; }.payment-choice-list label span { display:flex; flex:1; flex-direction:column; gap:3px; }.payment-choice-list label small { color:colors.$muted; font-size:9px; }.payment-choice-list .button { margin-top:8px; }
+.coupon-entry {
+    display: grid;
+    gap: 7px;
+    padding: 15px 0;
+    border-top: 1px solid #e2eae6;
+}
+
+.coupon-entry label {
+    color: colors.$muted;
+    font-size: 10px;
+    font-weight: 800;
+}
+
+.coupon-entry>div {
+    display: flex;
+    gap: 8px;
+}
+
+.coupon-entry input {
+    flex: 1;
+    min-width: 0;
+    min-height: 40px;
+    padding: 9px 10px;
+    border: 1px solid #d2e1dc;
+    border-radius: 8px;
+    color: colors.$ink;
+}
+
+.coupon-entry .button {
+    flex: none;
+    padding: 8px 12px;
+}
+
+.coupon-success,
+.coupon-error {
+    margin: 0;
+    font-size: 10px;
+}
+
+.coupon-success {
+    color: #297567;
+}
+
+.coupon-error {
+    color: #a14f44;
+}
+
+.booking-price-summary {
+    display: grid;
+    gap: 8px;
+    padding: 15px 0;
+    border-top: 1px solid #e2eae6;
+}
+
+.booking-price-summary>div {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    color: colors.$muted;
+    font-size: 11px;
+}
+
+.booking-price-summary b {
+    color: colors.$ink;
+}
+
+.booking-price-total {
+    padding-top: 10px;
+    border-top: 1px solid #e2eae6;
+    color: colors.$ink !important;
+    font-size: 14px !important;
+}
