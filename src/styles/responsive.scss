@@ -2,4 +2,58 @@
 @use "../theme/variables";
 
 @media (max-width: 760px) { .site-header { height:67px; padding:0 17px; }.main-nav { position:absolute; z-index:5; top:67px; right:17px; left:17px; display:none; flex-direction:column; gap:0; padding:10px; background:#fff; border:1px solid colors.$line; border-radius:12px; box-shadow:variables.$shadow; }.main-nav.is-open { display:flex; }.main-nav button { padding:11px; text-align:left; }.header-actions .account-button { display:none; }.menu-toggle { display:grid; }.hero { min-height:680px; }.hero-photo { align-items:end; background:linear-gradient(0deg,rgba(246,252,252,.99) 0%,rgba(246,252,252,.94) 50%,rgba(246,252,252,.15) 100%),url('/assets/urban-tanker-hero.jpg') 66% center/cover no-repeat; }.hero-copy { padding:280px 20px 32px; }.hero h1,.section-intro h1 { font-size:45px; letter-spacing:-2.5px; }.hero-lede { font-size:15px; }.home-subscription-teaser { grid-template-columns:1fr; gap:24px; padding:48px 20px; }.reference-showcase,.content-screen { padding:55px 20px 70px; }.reference-header { align-items:flex-start; flex-direction:column; }.service-showcase-grid,.plan-grid,.account-grid,.about-story { grid-template-columns:1fr; }.plan-card.is-featured { transform:none; }.booking-layout { grid-template-columns:1fr; gap:20px; }.quote-panel { order:-1; }.field-row { grid-template-columns:1fr; gap:0; }.service-row { align-items:flex-start; flex-wrap:wrap; }.service-row .button { width:100%; margin-left:60px; }.benefit-strip,.feature-strip { grid-template-columns:1fr; padding:25px 20px; }.footer-grid { grid-template-columns:1fr 1fr; gap:20px; }.social-card { grid-column:1 / -1; }.site-footer { padding:29px 20px; }.product-grid { grid-template-columns:1fr 1fr; }.success-panel { padding:28px 20px; } }
+@media (min-width: 761px) and (max-width: 900px) {
+    .site-header {
+        gap: 12px;
+        padding: 12px 22px;
+    }
+
+    .brand {
+        flex: none;
+        font-size: 18px;
+    }
+
+    .main-nav {
+        display: none;
+    }
+
+    .header-actions .account-button {
+        display: inline-flex;
+    }
+
+    .menu-toggle {
+        display: grid;
+    }
+}
+
+@media (min-width: 901px) and (max-width: 1080px) {
+    .site-header {
+        gap: 14px;
+        padding-right: 24px;
+        padding-left: 24px;
+    }
+
+    .main-nav {
+        gap: 14px;
+        flex: 1;
+        justify-content: center;
+    }
+
+    .main-nav button {
+        white-space: nowrap;
+    }
+
+    .header-actions {
+        flex: none;
+    }
+
+    .account-button {
+        min-width: 88px;
+    }
+
+    .header-actions .button-primary {
+        padding-right: 13px;
+        padding-left: 13px;
+    }
+}
 @media (prefers-reduced-motion: reduce) { *,*::before,*::after { scroll-behavior:auto!important; transition:none!important; animation:none!important; } }

@@ -16,5 +16,6 @@ export function AppShell() {
 		if (user && !activeScreen.endsWith('-workspace')) openWorkspace(user.role as WorkspaceRole)
 	}, [activeScreen, openWorkspace, user])
 	const isWorkspace = activeScreen.endsWith('-workspace')
-	return <div className={`app-shell ${isWorkspace ? 'app-shell-workspace' : ''}`}><a className="skip-link" href="#main-content">Skip to main content</a>{!isWorkspace && <Header />}<main id="main-content"><ScreenRenderer /></main>{!isWorkspace && <Footer />}</div>
+	const isAuthScreen = activeScreen === 'login'
+	return <div className={`app-shell ${isWorkspace ? 'app-shell-workspace' : ''} ${isAuthScreen ? 'app-shell-auth' : ''}`}><a className="skip-link" href="#main-content">Skip to main content</a>{!isWorkspace && !isAuthScreen && <Header />}<main id="main-content"><ScreenRenderer /></main>{!isWorkspace && !isAuthScreen && <Footer />}</div>
 }

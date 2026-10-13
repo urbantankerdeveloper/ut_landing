@@ -57,6 +57,7 @@ export function useFormGuards() {
     const onInput = (event: Event) => {
       const input = event.target
       if (!(input instanceof HTMLInputElement)) return
+      if (input.form?.classList.contains('auth-form')) return
       const label = fieldLabel(input)
       if (input.type === 'tel' || /mobile number|phone number/.test(label)) {
         input.value = input.value.replace(/\D/g, '').slice(0, 10)
