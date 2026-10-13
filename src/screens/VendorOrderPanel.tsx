@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Check, ClipboardList, MapPin, ShieldCheck, Truck, UserRound } from 'lucide-react'
 import { demoDataEnabled } from '../constants/demo'
 import { Modal } from './WorkspaceInteractive'
-import { useVendorDrivers, useVendorOrderMutation, useVendorOrders, useVendorVehicles } from '../hooks/useVendorData'
+import { useVendorDeliveryVerification, useVendorDrivers, useVendorOrderMutation, useVendorOrders, useVendorVehicles } from '../hooks/useVendorData'
+import { useFileUpload } from '../hooks/useFrontendFeatures'
 
 type OrderStatus = 'Available' | 'Accepted' | 'En route' | 'Arrived' | 'Delivered' | 'Rejected'
 type VendorOrder = { id: string; service: string; location: string; distance: number; amount: string; status: OrderStatus; vehicle?: string; driver?: string }
@@ -18,6 +19,8 @@ export default function VendorOrderPanel({ onNotice }: Props) {
   const vehiclesQuery = useVendorVehicles()
   const driversQuery = useVendorDrivers()
   const orderMutation = useVendorOrderMutation()
+  const deliveryVerification = useVendorDeliveryVerification()
+  const proofUpload = useFileUpload()
   const [radius, setRadius] = useState('25')
   const [selected, setSelected] = useState<VendorOrder | null>(null)
   const [dialog, setDialog] = useState<'assignment' | 'delivery' | null>(null)
@@ -37,7 +40,7 @@ export default function VendorOrderPanel({ onNotice }: Props) {
   function reject(order: VendorOrder) { updateOrder(order.id, { status: 'Rejected' }); orderMutation.mutate({ orderId: order.id, action: 'reject', status: 'Rejected' }); onNotice(`${order.id} rejected.`) }
   function advance(order: VendorOrder) { const status = nextStatus[order.status]; if (status) { updateOrder(order.id, { status }); orderMutation.mutate({ orderId: order.id, action: 'status', status }); onNotice(`${order.id} marked ${status}.`) } }
   function assign(event: FormEvent<HTMLFormElement>) { event.preventDefault(); if (!selected) return; const values = new FormData(event.currentTarget); const vehicle = String(values.get('vehicle')); const driver = String(values.get('driver')); const vehicleId = vehicleRecords.find((item) => item.label === vehicle)?.id; const driverId = driverRecords.find((item) => item.label === driver)?.id; if (!vehicleId || !driverId || !vehicle || !driver) return; updateOrder(selected.id, { vehicle, driver }); orderMutation.mutate({ orderId: selected.id, action: 'assign', vehicleId, driverId }); setDialog(null); onNotice(`${selected.id} assigned to vehicle and driver.`) }
-  function completeDelivery(event: FormEvent<HTMLFormElement>) { event.preventDefault(); if (!selected) return; const values = new FormData(event.currentTarget); if (!values.get('otp') || !values.get('proof')) return; updateOrder(selected.id, { status: 'Delivered' }); orderMutation.mutate({ orderId: selected.id, action: 'status', status: 'Delivered' }); setDialog(null); onNotice(`${selected.id} delivery verified and completed.`) }
+  async function completeDelivery(event: FormEvent<HTMLFormElement>) { event.preventDefault(); if (!selected) return; const values = new FormData(event.currentTarget); const otp = String(values.get('otp') || ''); const file = values.get('proof'); if (!otp || !(file instanceof File) || !file.size) return; try { const signed = await proofUpload.upload(file, 'booking', selected.id); await deliveryVerification.mutateAsync({ id: selected.id, otp, proofPath: signed.path }); updateOrder(selected.id, { status: 'Delivered' }); setDialog(null); onNotice(`${selected.id} delivery verified and completed.`) } catch { onNotice('Delivery verification or proof upload failed.') } }
   function toggleOffline() { setOffline((value) => !value); onNotice(!offline ? 'Offline draft mode enabled. Changes will sync when connected.' : 'Connection restored. Drafts are syncing.') }
   if (!demoDataEnabled && ordersQuery.isLoading) return <section className="workspace-view-panel vendor-order-panel"><p className="eyebrow">ORDER INBOX</p><h2>Loading nearby orders…</h2></section>
   if (!demoDataEnabled && ordersQuery.isError) return <section className="workspace-view-panel vendor-order-panel"><p className="eyebrow">ORDER INBOX</p><h2>Orders are unavailable.</h2><p>We could not load the Vendor order queue.</p><button className="button button-primary" onClick={() => ordersQuery.refetch()}>Retry</button></section>

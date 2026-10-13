@@ -1,0 +1,15 @@
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { CircleDollarSign, RefreshCw, Wallet } from 'lucide-react'
+import { adminApi } from '../api/admin'
+import { adminQueryKeys, useAdminPayments, useAdminPayouts } from '../hooks/useAdminData'
+
+export function AdminFinanceLiveScreen({ onNotice }: { onNotice: (message: string) => void }) {
+  const payments = useAdminPayments()
+  const payouts = useAdminPayouts()
+  const queryClient = useQueryClient()
+  const refund = useMutation({ mutationFn: (id: string) => adminApi.refundPayment(id), onSuccess: () => { queryClient.invalidateQueries({ queryKey: adminQueryKeys.payments }); onNotice('Refund completed.') } })
+  const settle = useMutation({ mutationFn: () => { const now = new Date(); const from = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10); const to = now.toISOString().slice(0, 10); return adminApi.settlePayouts({ from, to }) }, onSuccess: () => { queryClient.invalidateQueries({ queryKey: adminQueryKeys.payouts }); onNotice('Payout settlement calculated.') }, onError: () => onNotice('Payout settlement could not be calculated.') })
+  if (payments.isLoading || payouts.isLoading) return <section className="admin-view-panel"><h2>Loading finance records...</h2></section>
+  if (payments.isError || payouts.isError) return <section className="admin-view-panel"><h2>Finance records are unavailable.</h2><button className="button button-primary" onClick={() => { void payments.refetch(); void payouts.refetch() }}>Retry</button></section>
+  return <section className="admin-view-panel"><div className="view-panel-heading"><div><p className="eyebrow">FINANCE & PAYMENTS</p><h2>Live payment and payout operations.</h2></div><div><button className="button button-primary" disabled={settle.isPending} onClick={() => settle.mutate()}>{settle.isPending ? 'Calculating...' : 'Calculate payouts'}</button><button className="button button-quiet" onClick={() => { void payments.refetch(); void payouts.refetch(); onNotice('Finance records refreshed.') }}><RefreshCw size={15} /> Refresh</button></div></div><div className="admin-card-grid"><article className="admin-card"><CircleDollarSign size={18} /><b>{payments.data?.length ?? 0}</b><p>Payment records</p></article><article className="admin-card"><Wallet size={18} /><b>{payouts.data?.length ?? 0}</b><p>Payout records</p></article></div><div className="admin-entity-list">{(payments.data ?? []).map((payment) => { const item = payment as Record<string, unknown>; const paid = item.status === 'paid'; return <article key={String(item.id)}><div className="admin-entity-copy"><b>{String(item.provider_payment_id ?? item.provider_order_id ?? item.id)}</b><p>{String(item.status)} · INR {(Number(item.amount_paise ?? 0) / 100).toLocaleString('en-IN')}</p></div><span className="status-tag">{String(item.status)}</span>{paid && <button className="entity-status-button" disabled={refund.isPending} onClick={() => refund.mutate(String(item.id))}>Refund</button>}</article> })}{!payments.data?.length && <div className="admin-empty-state">No payment records found.</div>}</div></section>
+}

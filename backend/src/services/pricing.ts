@@ -1,0 +1,21 @@
+import { supabase } from '../supabase.js'
+
+export const GST_RATE = 0.18
+
+export async function quoteServices(serviceCodes: string[], couponCode?: string) {
+  const codes = serviceCodes.map((code) => code.trim()).filter(Boolean)
+  const { data: services, error: servicesError } = await supabase.from('service_catalog').select('code,base_price_paise').in('code', codes).eq('is_active', true)
+  if (servicesError) throw new Error(servicesError.message)
+  if (!services || services.length !== new Set(codes).size) throw new Error('One or more selected services are unavailable')
+  const subtotalPaise = services.reduce((sum, service) => sum + Number(service.base_price_paise), 0)
+  const gstPaise = Math.round(subtotalPaise * GST_RATE)
+  let discountPaise = 0
+  if (couponCode?.trim()) {
+    const { data: coupon } = await supabase.from('coupons').select('discount_type,discount_value').eq('code', couponCode.trim().toUpperCase()).eq('is_active', true).maybeSingle()
+    if (!coupon) throw new Error('Coupon is not available')
+    const value = Number(coupon.discount_value)
+    discountPaise = coupon.discount_type === 'percentage' ? Math.round(subtotalPaise * value / 100) : Math.round(value * 100)
+    discountPaise = Math.min(Math.max(discountPaise, 0), subtotalPaise + gstPaise)
+  }
+  return { subtotalPaise, gstPaise, discountPaise, totalPaise: Math.max(0, subtotalPaise + gstPaise - discountPaise) }
+}

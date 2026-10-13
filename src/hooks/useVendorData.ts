@@ -12,6 +12,14 @@ export function useVendorDashboard() { return useQuery({ queryKey: vendorQueryKe
 export function useVendorOrders() { const query = useQuery({ queryKey: vendorQueryKeys.orders, queryFn: vendorApi.orders, ...liveOptions }); useRealtimeInvalidation(vendorQueryKeys.orders); return query }
 export function useVendorVehicles() { return useQuery({ queryKey: vendorQueryKeys.vehicles, queryFn: vendorApi.vehicles, ...liveOptions }) }
 export function useVendorDrivers() { return useQuery({ queryKey: vendorQueryKeys.drivers, queryFn: vendorApi.drivers, ...liveOptions }) }
+export function useVendorPayouts() { return useQuery({ queryKey: vendorQueryKeys.payouts, queryFn: vendorApi.payouts, ...liveOptions }) }
+export function useVendorServices() { return useQuery({ queryKey: vendorQueryKeys.services, queryFn: vendorApi.services, ...liveOptions }) }
+export function useVendorAttendance() { return useMutation({ mutationFn: vendorApi.attendance }) }
+export function useVendorDeliveryVerification() { return useMutation({ mutationFn: ({ id, otp, proofPath }: { id: string; otp: string; proofPath?: string }) => vendorApi.verifyDelivery(id, { otp, proofPath }) }) }
+export function useVendorComplaints() { return useQuery({ queryKey: ['vendor', 'complaints'], queryFn: vendorApi.complaints, ...liveOptions }) }
+export function useVendorNotifications() { const query = useQuery({ queryKey: ['vendor', 'notifications'], queryFn: vendorApi.notifications, ...liveOptions }); useRealtimeInvalidation(['vendor', 'notifications']); return query }
+export function useCreateVendorComplaint() { const queryClient = useQueryClient(); return useMutation({ mutationFn: vendorApi.createComplaint, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['vendor', 'complaints'] }) }) }
+export function useMarkVendorNotificationRead() { const queryClient = useQueryClient(); return useMutation({ mutationFn: vendorApi.markNotificationRead, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['vendor', 'notifications'] }) }) }
 export function useVendorLocation(bookingId: string | null) { const mutation = useMutation({ mutationFn: vendorApi.location }); useEffect(() => { if (!bookingId || demoDataEnabled || !navigator.geolocation) return; const watchId = navigator.geolocation.watchPosition((position) => { mutation.mutate({ bookingId, latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy }) }, undefined, { enableHighAccuracy: true, maximumAge: 15_000, timeout: 10_000 }); return () => navigator.geolocation.clearWatch(watchId) }, [bookingId, mutation]); return mutation }
 export function useVendorOrderMutation() {
   const queryClient = useQueryClient()
