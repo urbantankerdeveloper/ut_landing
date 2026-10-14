@@ -9,6 +9,7 @@ export type VendorComplaint = { id: string; subject: string; booking_id?: string
 export type VendorNotification = { id: string; title: string; detail?: string; event_type?: string; read_at?: string; created_at: string }
 export type VendorDocument = { id: string; owner_type: string; owner_id: string; document_type: string; object_key: string; expires_on?: string; verification: string; created_at: string }
 export type VendorOrderMutation = { orderId: string; action: 'accept' | 'reject' | 'status' | 'assign'; status?: VendorOrderStatus; vehicleId?: string; driverId?: string }
+export type VendorOfflineMutation = { id: string; endpoint?: string; conflict_status: 'queued' | 'processing' | 'conflict' | 'applied' | 'discarded'; client_version: number; last_error?: string; created_at: string }
 
 export const vendorApi = {
   dashboard: () => apiFetch<VendorDashboard>('/vendor/dashboard'),
@@ -33,4 +34,8 @@ export const vendorApi = {
   notifications: () => apiFetch<VendorNotification[]>('/vendor/notifications'),
   markNotificationRead: (id: string) => apiFetch<unknown>(`/vendor/notifications/${id}/read`, { method: 'PATCH' }),
   verifyDelivery: async (id: string, payload: { otp: string; proofPath?: string }) => { const result = await apiFetch<VendorOrder>(`/vendor/orders/${id}/delivery/verify`, { method: 'POST', body: JSON.stringify(payload) }); await apiFetch<void>(`/vendor/orders/${id}/delivery/realtime`, { method: 'POST' }); return result },
+  offlineMutations: () => apiFetch<VendorOfflineMutation[]>('/vendor/offline-mutations'),
+  registerOfflineMutation: (payload: { mutationType: string; entityType: string; entityId?: string; payload: Record<string, unknown>; clientVersion: number }) => apiFetch<{ id: string }>('/vendor/offline-mutations', { method: 'POST', body: JSON.stringify(payload) }),
+  retryOfflineMutation: (id: string) => apiFetch<VendorOfflineMutation>(`/vendor/offline-mutations/${id}/retry`, { method: 'POST' }),
+  discardOfflineMutation: (id: string) => apiFetch<void>(`/vendor/offline-mutations/${id}`, { method: 'DELETE' }),
 }

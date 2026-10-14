@@ -34,7 +34,7 @@ export function useVendorOrderMutation() {
   const queryClient = useQueryClient()
   const [queuedCount, setQueuedCount] = useState(() => queuedMutationCount())
   useEffect(() => {
-    const flush = async () => { const count = await flushMutationQueue((endpoint, init) => apiFetch(endpoint, init)); if (count) { setQueuedCount(queuedMutationCount()); queryClient.invalidateQueries({ queryKey: vendorQueryKeys.orders }) } }
+    const flush = async () => { const count = await flushMutationQueue((endpoint, init) => apiFetch(endpoint, init), (payload) => vendorApi.registerOfflineMutation(payload)); if (count) { setQueuedCount(queuedMutationCount()); queryClient.invalidateQueries({ queryKey: vendorQueryKeys.orders }) } }
     window.addEventListener('online', flush)
     void flush()
     return () => window.removeEventListener('online', flush)
