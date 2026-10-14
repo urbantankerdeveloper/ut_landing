@@ -1,2 +1,2 @@
 import type { ErrorRequestHandler } from 'express'
-export const errorHandler: ErrorRequestHandler = (error, _request, response, next) => { void next; console.error(error); response.status(error?.statusCode ?? 500).json({ error: error?.message ?? 'Internal server error' }) }
+export const errorHandler: ErrorRequestHandler = (error, request, response, next) => { void next; const requestId = response.locals.requestId ?? request.header('x-request-id'); console.error(JSON.stringify({ event: 'http.error', requestId, path: request.originalUrl, error: error?.message })); response.status(error?.statusCode ?? 500).json({ error: error?.message ?? 'Internal server error', requestId }) }

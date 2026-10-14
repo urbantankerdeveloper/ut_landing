@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 
 export type ScreenId = 'home' | 'services' | 'subscriptions' | 'booking' | 'account' | 'login' | 'about' | 'customer-workspace' | 'vendor-workspace' | 'admin-workspace'
-export type WorkspaceRole = 'customer' | 'vendor' | 'admin'
+export type WorkspaceRole = 'customer' | 'vendor' | 'admin' | 'dispatcher'
 type NavigationState = { activeScreen: ScreenId; previousScreen: ScreenId | null; history: ScreenId[]; activeRole: WorkspaceRole; mobileMenuOpen: boolean; navigate: (screen: ScreenId) => void; openWorkspace: (role: WorkspaceRole) => void; goBack: () => void; setMobileMenuOpen: (open: boolean) => void }
 
 export const useNavigationStore = create<NavigationState>((set) => ({

@@ -166,3 +166,4 @@ vite.config.ts.timestamp-*
 # Turbo Repo
 .turbo
 *.md
+IMPLEMENTATION_BACKLOG.md
