@@ -18,6 +18,7 @@ import adminExtendedRoutes from './routes/adminExtended.js'
 import paymentRoutes from './routes/payments.js'
 import uploadRoutes from './routes/uploads.js'
 import supportRoutes from './routes/support.js'
+import analyticsRoutes from './routes/analytics.js'
 import { errorHandler } from './middleware/errors.js'
 import { startBackgroundJobs } from './services/jobs.js'
 import { supabase } from './supabase.js'
@@ -28,7 +29,7 @@ const frontendDist = resolve(dirname(fileURLToPath(import.meta.url)), '../../dis
 app.set('trust proxy', 1)
 app.use(helmet()); app.use(cors({ origin: config.FRONTEND_ORIGIN, credentials: true })); app.use(compression()); app.use(express.json({ limit: '2mb', verify: (request, _response, buffer) => { (request as typeof request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer) } })); app.use(rateLimit({ windowMs: 60_000, limit: 120 }))
 app.use(requestObservability); app.get('/health', (_request, response) => response.json({ ok: true, service: 'urban-tanker-api' }))
-app.use('/api/auth', authRoutes); app.use('/api/customer', customerRoutes); app.use('/api/customer', customerExtendedRoutes); app.use('/api/vendor', vendorRoutes); app.use('/api/vendor', vendorExtendedRoutes); app.use('/api/admin', adminRoutes); app.use('/api/admin', adminExtendedRoutes); app.use('/api/payment', paymentRoutes); app.use('/api/uploads', uploadRoutes); app.use('/api/support', supportRoutes); app.use(errorHandler)
+app.use('/api/auth', authRoutes); app.use('/api/customer', customerRoutes); app.use('/api/customer', customerExtendedRoutes); app.use('/api/vendor', vendorRoutes); app.use('/api/vendor', vendorExtendedRoutes); app.use('/api/admin', adminRoutes); app.use('/api/admin', adminExtendedRoutes); app.use('/api/payment', paymentRoutes); app.use('/api/uploads', uploadRoutes); app.use('/api/support', supportRoutes); app.use('/api/analytics', analyticsRoutes); app.use(errorHandler)
 app.use(express.static(frontendDist, { index: 'index.html', maxAge: '1y', immutable: true }))
 app.use((request, response, next) => { if (request.method !== 'GET' || request.path.startsWith('/api') || request.path === '/health' || request.path.startsWith('/socket.io')) return next(); response.sendFile(resolve(frontendDist, 'index.html')) })
 const io = new Server(httpServer, { cors: { origin: config.FRONTEND_ORIGIN, credentials: true } })
@@ -48,7 +49,15 @@ io.on('connection', async (socket) => {
   if (vendor) socket.join(`vendor:${vendor.id}`)
   socket.emit('connected', { service: 'urban-tanker-realtime', vendorId: vendor?.id ?? null, role: profile?.role ?? null })
   socket.on('vendor:join', (vendorId: unknown) => { if (vendor?.id === vendorId) socket.join(`vendor:${vendorId}`) })
-  socket.on('booking:join', (bookingId: unknown) => { if (typeof bookingId === 'string' && bookingId.length <= 100) socket.join(`booking:${bookingId}`) })
+  socket.on('booking:join', async (bookingId: unknown) => {
+    if (typeof bookingId !== 'string' || !/^[0-9a-f-]{36}$/i.test(bookingId)) return
+    const { data: booking } = await supabase.from('bookings').select('customer_id,vendor_id').eq('id', bookingId).maybeSingle()
+    if (!booking) return
+    const isCustomer = booking.customer_id === socket.data.userId
+    const isAdmin = profile?.role === 'admin'
+    const isVendor = Boolean(vendor?.id && booking.vendor_id === vendor.id)
+    if (isCustomer || isAdmin || isVendor) socket.join(`booking:${bookingId}`)
+  })
 })
 setRealtimeServer(io)
 const stopBackgroundJobs = startBackgroundJobs()

@@ -18,6 +18,8 @@ import { AdminBookingOperationsScreen } from './AdminBookingOperationsScreen'
 import { AdminProgramsScreen } from './AdminProgramsScreen'
 import { AdminPricingScreen } from './AdminPricingScreen'
 import { AdminNotificationsPanel } from './AdminNotificationsPanel'
+import { useAdminAnalyticsSummary } from '../hooks/useAdminData'
+import { adminApi } from '../api/admin'
 
 type Props = { item: string; onNotice: (message: string) => void }
 type DialogState = { title: string; eyebrow: string; body: ReactNode } | null
@@ -30,6 +32,7 @@ export function AdminWorkspaceContent({ item, onNotice }: Props) {
   const open = (next: DialogState) => setDialog(next)
   const finish = (message: string) => { close(); onNotice(message) }
   if (item === 'notifications') return <AdminNotificationsPanel />
+  if (item === 'analytics' && !demoDataEnabled) return <AdminAnalyticsScreen />
   if (item === 'system-health') return <AdminSystemHealthScreen />
   if (item === 'bookings' && !demoDataEnabled) return <AdminBookingOperationsScreen onNotice={onNotice} />
   if (item === 'pricing' && !demoDataEnabled) return <AdminPricingScreen onNotice={onNotice} />
@@ -39,6 +42,16 @@ export function AdminWorkspaceContent({ item, onNotice }: Props) {
   if (item === 'onboarding') return <AdminExtraView item={item} open={open} />
   const content = item === 'live' ? (demoDataEnabled ? <LiveView open={open} finish={finish} /> : <AdminDispatchLiveView onNotice={onNotice} />) : item === 'bookings' ? <BookingView open={open} /> : item === 'reports' ? (demoDataEnabled ? <AdminReportsScreen onNotice={onNotice} /> : <AdminReportsLiveScreen onNotice={onNotice} />) : item === 'vendors' ? <VendorView open={open} /> : item === 'fleet' ? (demoDataEnabled ? <ResourceView eyebrow="TANKER FLEET" title="Fleet approval and availability." icon={Truck} action="Review vehicle" open={open} /> : <AdminEntityManagerLive entity="fleet" onNotice={onNotice} />) : item === 'drivers' ? (demoDataEnabled ? <ResourceView eyebrow="DRIVERS" title="Driver approval and assignment." icon={UserRound} action="Review driver" open={open} /> : <AdminEntityManagerLive entity="drivers" onNotice={onNotice} />) : item === 'customers' ? (demoDataEnabled ? <ResourceView eyebrow="CUSTOMERS" title="Customer records and support context." icon={Users} action="Open customer" open={open} /> : <AdminEntityManagerLive entity="customers" onNotice={onNotice} />) : item === 'finance' || item === 'payments' ? (demoDataEnabled ? <FinanceView open={open} /> : <AdminFinanceLiveScreen onNotice={onNotice} />) : item === 'services' || item === 'complaints' || item === 'alerts' ? (demoDataEnabled ? (item === 'services' ? <ServicesView open={open} finish={finish} /> : <AlertsView open={open} finish={finish} />) : <AdminOperationsLiveScreen item={item} onNotice={onNotice} />) : <AlertsView open={open} finish={finish} />
   return <>{content}{dialog && <Modal title={dialog.title} onClose={close}><p className="admin-dialog-eyebrow">{dialog.eyebrow}</p>{dialog.body}</Modal>}</>
+}
+
+function AdminAnalyticsScreen() {
+  const query = useAdminAnalyticsSummary()
+  if (query.isLoading) return <section className="admin-view-panel"><p className="eyebrow">ANALYTICS</p><h2>Loading analytics…</h2></section>
+  if (query.isError) return <section className="admin-view-panel"><p className="eyebrow">ANALYTICS</p><h2>Analytics unavailable</h2><p>Retry after confirming analytics storage is configured.</p></section>
+  const summary = query.data
+  const rates = summary?.funnel.rates ?? {}
+  const warning = (value: number | undefined, threshold: number) => value !== undefined && value < threshold
+  return <section className="admin-view-panel"><p className="eyebrow">ANALYTICS · LAST {summary?.days ?? 30} DAYS</p><h2>Product activity and conversion signals.</h2><p>Events are retained for 90 days and anonymized after 7 days.</p><div className="admin-analytics-actions"><a className="button button-quiet" href={summary ? adminApi.analyticsExport(summary.from, summary.to) : '#'} download="urban-tanker-analytics.csv">Export CSV</a></div><div className="admin-summary-grid"><article><small>Total events</small><strong>{summary?.total ?? 0}</strong></article>{Object.entries(summary?.byEvent ?? {}).map(([name, count]) => <article key={name}><small>{name}</small><strong>{count}</strong></article>)}</div><h3>Conversion funnel</h3><div className="admin-summary-grid">{[['Login → booking started', rates.loginToBookingStarted], ['Booking started → created', rates.bookingStartedToCreated], ['Created → vendor accepted', rates.createdToVendorAccepted], ['Accepted → delivered', rates.acceptedToDelivered]].map(([label, value]) => <article key={String(label)} className={warning(Number(value), 10) ? 'analytics-warning' : ''}><small>{label}</small><strong>{Number(value ?? 0).toFixed(2)}%</strong></article>)}</div></section>
 }
 
 function AdminExtraView({ item, open }: { item: string; open: (dialog: DialogState) => void }) {

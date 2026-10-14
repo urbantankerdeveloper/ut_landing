@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Urban Tanker Production Status Report</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #172033;
+      background: #f3f6fa;
+      line-height: 1.5;
+    }
+    * { box-sizing: border-box; }
+    body { max-width: 1180px; margin: 0 auto; padding: 24px 16px 56px; }
+    header, section, footer {
+      background: #fff;
+      border: 1px solid #dbe3ef;
+      border-radius: 14px;
+      box-shadow: 0 3px 12px rgb(23 32 51 / 6%);
+    }
+    header { padding: 28px; margin-bottom: 20px; }
+    section { padding: 22px 26px; margin: 18px 0; }
+    footer { padding: 18px 26px; margin-top: 20px; color: #526078; }
+    h1, h2, h3 { margin-top: 0; color: #13213a; }
+    h1 { margin-bottom: 6px; font-size: clamp(1.8rem, 4vw, 2.7rem); }
+    h2 { border-bottom: 1px solid #e4eaf2; padding-bottom: 10px; }
+    h3 { margin-bottom: 6px; }
+    .muted { color: #60708a; }
+    .eyebrow { color: #47678d; font-size: .78rem; font-weight: 800; letter-spacing: .12em; }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 22px;
+    }
+    .metric { padding: 16px; border-radius: 10px; background: #f5f8fc; border: 1px solid #e2e9f2; }
+    .metric strong { display: block; font-size: 1.55rem; color: #162c4d; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .card { border: 1px solid #e1e7ef; border-radius: 10px; padding: 16px; }
+    .card ul, .card ol { margin-bottom: 0; padding-left: 21px; }
+    li { margin: 8px 0; }
+    .status {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 9px;
+      margin-right: 6px;
+      font-size: .75rem;
+      font-weight: 800;
+      letter-spacing: .03em;
+      vertical-align: 1px;
+    }
+    .pass { background: #d9f7e8; color: #075e37; }
+    .warn { background: #fff0c7; color: #7a4b00; }
+    .fail { background: #ffe0e0; color: #8d1c1c; }
+    .deferred { background: #eee7ff; color: #4d3d76; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border-bottom: 1px solid #e5eaf1; padding: 10px 8px; text-align: left; vertical-align: top; }
+    th { color: #526078; font-size: .82rem; text-transform: uppercase; letter-spacing: .04em; }
+    code { background: #eef2f7; border-radius: 4px; padding: 1px 5px; }
+    .release { border-left: 5px solid #d48a00; background: #fffaf0; }
+    .release strong { color: #7a4b00; }
+    @media (max-width: 760px) {
+      .summary, .grid { grid-template-columns: 1fr; }
+      body { padding: 12px 10px 36px; }
+      header, section, footer { padding: 18px; }
+      table { display: block; overflow-x: auto; white-space: nowrap; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <p class="eyebrow">URBAN TANKER / MVP PRODUCTION READINESS</p>
+    <h1>Production Status Report</h1>
+    <p class="muted">Generated: 14 October 2026, 23:39 IST. This report reflects repository checks and controlled live-database testing completed with retained test records.</p>
+    <div class="summary">
+      <div class="metric"><span class="muted">Core MVP flow</span><strong>Passed</strong><span class="muted">Customer to vendor</span></div>
+      <div class="metric"><span class="muted">Admin flow</span><strong>Passed</strong><span class="muted">Auth, APIs, UI, live booking</span></div>
+      <div class="metric"><span class="muted">Automated tests</span><strong>15</strong><span class="muted">7 frontend + 8 backend</span></div>
+      <div class="metric"><span class="muted">Release state</span><strong>Not yet</strong><span class="muted">External gates remain</span></div>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>Executive status</h2>
+      <p class="release"><strong>Recommendation: continue hardening before production release.</strong> The primary customer booking, vendor acceptance, and admin visibility flow is working against the live database. Provider delivery, payment, deployment, and broader production validation are still pending.</p>
+      <div class="grid">
+        <div class="card">
+          <h3><span class="status pass">WORKING</span>Validated live flow</h3>
+          <ul>
+            <li>Customer login and authenticated booking creation.</li>
+            <li>Vendor login and live order inbox.</li>
+            <li>Vendor acceptance mutation.</li>
+            <li>Customer sees the accepted booking status.</li>
+            <li>Admin login, workspace routing, and live booking visibility.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3><span class="status warn">PENDING</span>Release gates</h3>
+          <ul>
+            <li>Live Razorpay checkout and webhook verification.</li>
+            <li>Production deployment and domain validation.</li>
+            <li>SMS, email, WhatsApp, and push delivery verification.</li>
+            <li>Full browser-level realtime verification.</li>
+            <li>Stale-session hydration hardening and broader automated coverage.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Working functionality</h2>
+      <table>
+        <thead><tr><th>Area</th><th>Working capability</th><th>Evidence</th></tr></thead>
+        <tbody>
+          <tr><td>Authentication</td><td>Customer, vendor, and admin login; role-based workspace routing.</td><td>Live login tests returned <code>200</code>; admin UI opened successfully.</td></tr>
+          <tr><td>Customer</td><td>Service catalogue, booking form, quote, booking persistence, order retrieval.</td><td>Booking <code>UT-00018866</code> created in the live database with <code>201</code>.</td></tr>
+          <tr><td>Vendor</td><td>Order inbox and booking acceptance.</td><td><code>GET /api/vendor/orders</code> returned <code>200</code>; accept transition returned <code>200</code>.</td></tr>
+          <tr><td>Admin</td><td>System health, orders, vendors, customers, notifications, audit logs.</td><td>All tested admin endpoints returned <code>200</code>.</td></tr>
+          <tr><td>Authorization</td><td>Unauthenticated and wrong-role access protection.</td><td>Missing/invalid tokens returned <code>401</code>; customer-to-admin returned <code>403</code>.</td></tr>
+          <tr><td>Database</td><td>Live Supabase access, policies, migrations, booking lifecycle.</td><td>Migration 014 reconciled live <code>bookings.driver_id</code>; database checks passed.</td></tr>
+          <tr><td>API quality</td><td>Build, lint, lifecycle/schema/payment tests.</td><td>Backend build/lint passed; 8 backend tests passed; frontend 7 tests passed.</td></tr>
+          <tr><td>Offline/PWA</td><td>Service worker, outbox, background sync, retry/discard paths.</td><td>Repository implementation is marked complete in the backlog.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Not working, blocked, or not yet proven</h2>
+      <p class="muted">These items are either known limitations, external dependencies, or capabilities that have not yet been proven in a production-like end-to-end test. “Not proven” does not necessarily mean the implementation is broken.</p>
+      <table>
+        <thead><tr><th>Priority</th><th>Area</th><th>Current state</th><th>Impact</th></tr></thead>
+        <tbody>
+          <tr><td>High</td><td>Payment</td><td>Razorpay configuration exists, but live checkout, webhook, refund, and reconciliation were not verified.</td><td>Payments cannot be treated as production-ready.</td></tr>
+          <tr><td>High</td><td>Deployment</td><td>No production deployment, domain, TLS, CSP, observability, or rollback validation has been completed.</td><td>Release infrastructure remains unapproved.</td></tr>
+          <tr><td>High</td><td>Realtime</td><td>Room authorization is implemented, but complete browser-level customer/vendor event delivery is not fully verified.</td><td>Live status updates need final confirmation.</td></tr>
+          <tr><td>Medium</td><td>Notifications</td><td>Email/SMS/WhatsApp provider delivery is not validated. VAPID push is currently not configured.</td><td>Out-of-band notifications may not reach users.</td></tr>
+          <tr><td>Medium</td><td>Session restoration</td><td>Persisted workspace state can appear after the access token is absent from session storage.</td><td>Users may see a workspace while protected requests return <code>401</code>.</td></tr>
+          <tr><td>Medium</td><td>OTP and proof</td><td>Repository paths exist, but SMS delivery and production storage lifecycle are not validated.</td><td>Delivery completion evidence remains unproven.</td></tr>
+          <tr><td>Low</td><td>Quality coverage</td><td>Focused frontend/backend and analytics tests pass; broader component, accessibility, MSW, and Playwright suites are deferred.</td><td>Regression coverage is narrower than a full release suite.</td></tr>
+          <tr><td>Medium</td><td>Analytics</td><td>Privacy-safe browser events persist to Supabase and an admin summary endpoint/UI is available.</td><td>Retention policy, dashboards beyond event counts, and production-volume validation remain.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Pending work by execution order</h2>
+      <ol>
+        <li><strong>Production deployment:</strong> deploy frontend/backend, configure TLS, domain, environment secrets, CSP, logging, health checks, rollback, and rate-limit monitoring.</li>
+        <li><strong>Payment validation:</strong> run a controlled Razorpay test payment, verify signature and webhook persistence, then test refund/reconciliation.</li>
+        <li><strong>Realtime validation:</strong> keep customer and vendor browsers connected, create a booking, accept it, and confirm the UI receives the event without refresh.</li>
+        <li><strong>Provider validation:</strong> configure and verify email, SMS OTP, WhatsApp, storage proof uploads, and VAPID push if push notifications are in scope.</li>
+        <li><strong>Session hardening:</strong> prevent protected workspaces from rendering until authentication hydration and token validity are resolved.</li>
+        <li><strong>Admin mutation testing:</strong> validate booking status changes, vendor approval, service/pricing changes, and audit records with controlled retained test data.</li>
+        <li><strong>Quality gates:</strong> add focused route authorization tests, component tests, accessibility checks, and a repeatable Playwright smoke suite.</li>
+        <li><strong>Analytics operations:</strong> define event taxonomy, retention/anonymization rules, alerting, and KPI dashboards before collecting production-scale traffic.</li>
+        <li><strong>Final release review:</strong> verify backups, RLS policies, secrets, monitoring, incident runbook, support contacts, and rollback procedure.</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>Test evidence</h2>
+      <table>
+        <thead><tr><th>Check</th><th>Result</th><th>Details</th></tr></thead>
+        <tbody>
+          <tr><td>Customer booking</td><td><span class="status pass">PASS</span></td><td>Created and retained <code>UT-00018866</code>; quote total was 177000 paise.</td></tr>
+          <tr><td>Vendor acceptance</td><td><span class="status pass">PASS</span></td><td>Booking transitioned from <code>pending_vendor</code> to <code>accepted</code>.</td></tr>
+          <tr><td>Admin API access</td><td><span class="status pass">PASS</span></td><td>Health, orders, vendors, customers, notifications, and audit logs returned 200.</td></tr>
+          <tr><td>Authorization negatives</td><td><span class="status pass">PASS</span></td><td>401 for missing/invalid auth and 403 for customer access to admin routes.</td></tr>
+          <tr><td>Backend checks</td><td><span class="status pass">PASS</span></td><td>Build, lint, database check, and 8 tests passed.</td></tr>
+          <tr><td>Frontend checks</td><td><span class="status pass">PASS</span></td><td>Build, lint, and 7 tests passed.</td></tr>
+          <tr><td>Push configuration</td><td><span class="status warn">PENDING</span></td><td>Admin health reported VAPID as not configured.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Current release decision</h2>
+      <div class="card release">
+        <h3>Not production-approved yet</h3>
+        <p>The core MVP workflow is operational and the live customer/vendor/admin path has been demonstrated. Release approval should wait until payment, deployment, provider delivery, realtime browser validation, session hardening, and final security/operations checks are complete.</p>
+      </div>
+      <p class="muted">Live test records are intentionally retained. No credentials or secret keys are included in this report.</p>
+    </section>
+  </main>
+
+  <footer>
+    <strong>Related status document:</strong> <a href="IMPLEMENTATION_BACKLOG.html">Implementation backlog</a>. This report is a point-in-time release assessment and should be regenerated after each major production gate.
+  </footer>
+</body>
+</html>

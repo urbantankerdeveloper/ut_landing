@@ -28,6 +28,8 @@ const schema = z.object({
   RAZORPAY_KEY_SECRET: optionalSecret,
   VAPID_PUBLIC_KEY: optionalSecret,
   VAPID_PRIVATE_KEY: optionalSecret,
+  ANALYTICS_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
+  ANALYTICS_ANONYMIZE_AFTER_DAYS: z.coerce.number().int().positive().default(7),
 })
 const parsed = schema.parse(process.env)
 const serviceRoleKey = parsed.SUPABASE_SERVICE_ROLE_KEY ?? parsed.SUPABASE_SECRET_KEY

@@ -4,6 +4,7 @@ import { useAuthStore } from '../stores/authStore'
 import { useNavigationStore, type WorkspaceRole } from '../stores/navigationStore'
 import { demoDataEnabled } from '../constants/demo'
 import { authApi } from '../api/auth'
+import { trackEvent } from '../services/analytics'
 
 type AuthMode = 'login' | 'signup' | 'reset'
 type SignupRole = 'customer' | 'vendor' | 'admin'
@@ -80,6 +81,7 @@ export default function LoginScreen() {
       const response = await authApi.login(normalizedUsername, password)
       if (!response.user.role) throw new Error('Your account has no valid workspace role.')
       signIn({ username: response.user.username ?? response.user.email ?? normalizedUsername, role: response.user.role, name: response.user.name ?? normalizedUsername }, response.accessToken ?? response.token, response.refreshToken)
+      trackEvent('auth.login', { role: response.user.role, sessionId: sessionStorage.getItem('urban-tanker-analytics-session') ?? '' })
       openWorkspace(response.user.role)
     } catch (submissionError) {
       setError(submissionError instanceof Error ? submissionError.message : 'Unable to complete the request. Please try again.')

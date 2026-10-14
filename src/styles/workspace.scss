@@ -5,3 +5,9 @@
 @media (max-width:760px) { .workspace-screen { width:min(100% - 32px,1240px); padding:54px 0 70px; }.workspace-hero { align-items:flex-start; flex-direction:column; gap:20px; }.workspace-status { align-self:flex-start; }.workspace-stats { grid-template-columns:1fr; }.workspace-grid { grid-template-columns:1fr; }.workflow-panel,.workspace-actions { padding:20px; } }
 .workspace-notice-stack { position:fixed; right:24px; bottom:24px; z-index:20; display:grid; gap:8px; width:min(360px, calc(100vw - 32px)); }
 .workspace-notice-stack .workspace-notice-global { margin:0; }
+.admin-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-top: 20px; }
+.admin-summary-grid article { padding: 16px; border: 1px solid #e1e7ef; border-radius: 10px; background: #f7f9fc; }
+.admin-summary-grid small { display: block; color: #60708a; overflow-wrap: anywhere; }
+.admin-summary-grid strong { display: block; margin-top: 6px; font-size: 1.6rem; color: #162c4d; }
+.admin-analytics-actions { display: flex; justify-content: flex-end; margin: 12px 0; }
+.analytics-warning { border-color: #e2aa35 !important; background: #fffaf0 !important; }
