@@ -6,12 +6,17 @@ import AdminReportsScreen from './AdminReportsScreen'
 import AdminCouponsScreen from './AdminCouponsScreen'
 import AdminCouponsLiveScreen from './AdminCouponsLiveScreen'
 import { AdminEntityManagerLive } from './AdminEntityManagerLive'
+import { AdminEntityManagerModal } from './AdminEntityManagerModal'
 import AdminReportsLiveScreen from './AdminReportsLiveScreen'
 import { AdminDispatchLiveView } from './AdminDispatchLiveView'
 import { AdminOperationsLiveScreen } from './AdminOperationsLiveScreen'
 import { AdminFinanceLiveScreen } from './AdminFinanceLiveScreen'
 import { demoDataEnabled } from '../constants/demo'
 import { useAdminOrders } from '../hooks/useAdminData'
+import { AdminSystemHealthScreen } from './AdminSystemHealthScreen'
+import { AdminBookingOperationsScreen } from './AdminBookingOperationsScreen'
+import { AdminProgramsScreen } from './AdminProgramsScreen'
+import { AdminPricingScreen } from './AdminPricingScreen'
 
 type Props = { item: string; onNotice: (message: string) => void }
 type DialogState = { title: string; eyebrow: string; body: ReactNode } | null
@@ -23,7 +28,11 @@ export function AdminWorkspaceContent({ item, onNotice }: Props) {
   const close = () => setDialog(null)
   const open = (next: DialogState) => setDialog(next)
   const finish = (message: string) => { close(); onNotice(message) }
-  if (item === 'vendors' || item === 'drivers' || item === 'customers' || item === 'fleet') return demoDataEnabled ? <AdminEntityManager entity={item === 'fleet' ? 'vendors' : item} onNotice={onNotice} /> : <AdminEntityManagerLive entity={item} onNotice={onNotice} />
+  if (item === 'system-health') return <AdminSystemHealthScreen />
+  if (item === 'bookings' && !demoDataEnabled) return <AdminBookingOperationsScreen onNotice={onNotice} />
+  if (item === 'pricing' && !demoDataEnabled) return <AdminPricingScreen onNotice={onNotice} />
+  if (['subscriptions', 'contracts', 'enquiries'].includes(item) && !demoDataEnabled) return <AdminProgramsScreen kind={item as 'subscriptions' | 'contracts' | 'enquiries'} onNotice={onNotice} />
+  if (item === 'vendors' || item === 'drivers' || item === 'customers' || item === 'fleet') return demoDataEnabled ? <AdminEntityManager entity={item === 'fleet' ? 'vendors' : item} onNotice={onNotice} /> : <AdminEntityManagerModal entity={item} onNotice={onNotice} />
   if (item === 'coupons') return demoDataEnabled ? <AdminCouponsScreen onNotice={onNotice} /> : <AdminCouponsLiveScreen onNotice={onNotice} />
   if (['onboarding', 'payments', 'complaints', 'enquiries', 'subscriptions', 'pricing', 'contracts'].includes(item)) return <AdminExtraView item={item} open={open} />
   const content = item === 'live' ? (demoDataEnabled ? <LiveView open={open} finish={finish} /> : <AdminDispatchLiveView onNotice={onNotice} />) : item === 'bookings' ? <BookingView open={open} /> : item === 'reports' ? (demoDataEnabled ? <AdminReportsScreen onNotice={onNotice} /> : <AdminReportsLiveScreen onNotice={onNotice} />) : item === 'vendors' ? <VendorView open={open} /> : item === 'fleet' ? (demoDataEnabled ? <ResourceView eyebrow="TANKER FLEET" title="Fleet approval and availability." icon={Truck} action="Review vehicle" open={open} /> : <AdminEntityManagerLive entity="fleet" onNotice={onNotice} />) : item === 'drivers' ? (demoDataEnabled ? <ResourceView eyebrow="DRIVERS" title="Driver approval and assignment." icon={UserRound} action="Review driver" open={open} /> : <AdminEntityManagerLive entity="drivers" onNotice={onNotice} />) : item === 'customers' ? (demoDataEnabled ? <ResourceView eyebrow="CUSTOMERS" title="Customer records and support context." icon={Users} action="Open customer" open={open} /> : <AdminEntityManagerLive entity="customers" onNotice={onNotice} />) : item === 'finance' ? (demoDataEnabled ? <FinanceView open={open} /> : <AdminFinanceLiveScreen onNotice={onNotice} />) : item === 'services' || item === 'complaints' || item === 'alerts' ? (demoDataEnabled ? (item === 'services' ? <ServicesView open={open} finish={finish} /> : <AlertsView open={open} finish={finish} />) : <AdminOperationsLiveScreen item={item} onNotice={onNotice} />) : <AlertsView open={open} finish={finish} />
