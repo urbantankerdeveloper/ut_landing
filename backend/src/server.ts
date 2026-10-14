@@ -31,7 +31,33 @@ app.use(requestObservability); app.get('/health', (_request, response) => respon
 app.use('/api/auth', authRoutes); app.use('/api/customer', customerRoutes); app.use('/api/customer', customerExtendedRoutes); app.use('/api/vendor', vendorRoutes); app.use('/api/vendor', vendorExtendedRoutes); app.use('/api/admin', adminRoutes); app.use('/api/admin', adminExtendedRoutes); app.use('/api/payment', paymentRoutes); app.use('/api/uploads', uploadRoutes); app.use('/api/support', supportRoutes); app.use(errorHandler)
 app.use(express.static(frontendDist, { index: 'index.html', maxAge: '1y', immutable: true }))
 app.use((request, response, next) => { if (request.method !== 'GET' || request.path.startsWith('/api') || request.path === '/health' || request.path.startsWith('/socket.io')) return next(); response.sendFile(resolve(frontendDist, 'index.html')) })
-const io = new Server(httpServer, { cors: { origin: config.FRONTEND_ORIGIN, credentials: true } }); io.use(async (socket, next) => { const token = socket.handshake.auth?.token; if (!token) return next(new Error('Authentication required')); const { data } = await supabase.auth.getUser(token); if (!data.user) return next(new Error('Invalid session')); socket.data.userId = data.user.id; next() }); io.on('connection', async (socket) => { socket.join(`customer:${socket.data.userId}`); const { data: profile } = await supabase.from('profiles').select('role').eq('id', socket.data.userId).maybeSingle(); if (profile?.role === 'admin') socket.join('admins'); const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', socket.data.userId).maybeSingle(); if (vendor) socket.join(`vendor:${vendor.id}`); socket.emit('connected', { service: 'urban-tanker-realtime', vendorId: vendor?.id ?? null, role: profile?.role ?? null }); socket.on('vendor:join', (vendorId: string) => socket.join(`vendor:${vendorId}`)); socket.on('booking:join', (bookingId: string) => socket.join(`booking:${bookingId}`)) })
+const io = new Server(httpServer, { cors: { origin: config.FRONTEND_ORIGIN, credentials: true } })
+io.use(async (socket, next) => {
+  const token = socket.handshake.auth?.token
+  if (typeof token !== 'string' || !token) return next(new Error('Authentication required'))
+  const { data, error } = await supabase.auth.getUser(token)
+  if (error || !data.user) return next(new Error('Invalid session'))
+  socket.data.userId = data.user.id
+  next()
+})
+io.on('connection', async (socket) => {
+  socket.join(`customer:${socket.data.userId}`)
+  const { data: profile } = await supabase.from('profiles').select('role').eq('id', socket.data.userId).maybeSingle()
+  if (profile?.role === 'admin') socket.join('admins')
+  const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', socket.data.userId).maybeSingle()
+  if (vendor) socket.join(`vendor:${vendor.id}`)
+  socket.emit('connected', { service: 'urban-tanker-realtime', vendorId: vendor?.id ?? null, role: profile?.role ?? null })
+  socket.on('vendor:join', (vendorId: unknown) => { if (vendor?.id === vendorId) socket.join(`vendor:${vendorId}`) })
+  socket.on('booking:join', (bookingId: unknown) => { if (typeof bookingId === 'string' && bookingId.length <= 100) socket.join(`booking:${bookingId}`) })
+})
 setRealtimeServer(io)
-startBackgroundJobs()
+const stopBackgroundJobs = startBackgroundJobs()
+const shutdown = (signal: string) => {
+  console.info(JSON.stringify({ event: 'server.shutdown', signal }))
+  stopBackgroundJobs()
+  io.close(() => httpServer.close(() => process.exit(0)))
+  setTimeout(() => process.exit(1), 10_000).unref()
+}
+process.once('SIGTERM', () => shutdown('SIGTERM'))
+process.once('SIGINT', () => shutdown('SIGINT'))
 httpServer.listen(config.PORT, () => console.log(`Urban Tanker API listening on ${config.PORT}`))
