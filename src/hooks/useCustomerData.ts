@@ -6,7 +6,9 @@ import { useRealtimeInvalidation } from './useRealtimeInvalidation'
 const customerQueryOptions = { enabled: !demoDataEnabled, staleTime: 60_000 }
 export const customerQueryKeys = { bookings: ['customer', 'bookings'], addresses: ['customer', 'addresses'], subscriptions: ['customer', 'subscriptions'], invoices: ['customer', 'invoices'], support: ['customer', 'support'], profile: ['customer', 'profile'], wallet: ['customer', 'wallet'], contracts: ['customer', 'contracts'], offers: ['customer', 'offers'], membershipPlans: ['customer', 'membership-plans'], membership: ['customer', 'membership'], notifications: ['customer', 'notifications'], tracking: (orderId: string) => ['customer', 'tracking', orderId] } as const
 
-export function useCustomerBookings() { return useQuery({ queryKey: customerQueryKeys.bookings, queryFn: customerApi.bookings, ...customerQueryOptions }) }
+export function useCustomerBookings() { const query = useQuery({ queryKey: customerQueryKeys.bookings, queryFn: customerApi.bookings, ...customerQueryOptions }); useRealtimeInvalidation(customerQueryKeys.bookings); return query }
+export function useCustomerUsage() { return useQuery({ queryKey: ['customer', 'usage'], queryFn: customerApi.usage, ...customerQueryOptions }) }
+export function useCustomerServices() { return useQuery({ queryKey: ['customer', 'services'], queryFn: customerApi.services, ...customerQueryOptions }) }
 export function useCustomerAddresses() { return useQuery({ queryKey: customerQueryKeys.addresses, queryFn: customerApi.addresses, ...customerQueryOptions }) }
 export function useCreateCustomerAddress() { const queryClient = useQueryClient(); return useMutation({ mutationFn: (payload: Parameters<typeof customerApi.createAddress>[0]) => customerApi.createAddress(payload), onSuccess: () => queryClient.invalidateQueries({ queryKey: customerQueryKeys.addresses }) }) }
 export function useDeleteCustomerAddress() { const queryClient = useQueryClient(); return useMutation({ mutationFn: (id: string) => customerApi.deleteAddress(id), onSuccess: () => queryClient.invalidateQueries({ queryKey: customerQueryKeys.addresses }) }) }

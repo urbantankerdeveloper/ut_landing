@@ -6,7 +6,8 @@ export type CustomerSubscription = { id: string; name: string; status: 'active' 
 export type MembershipPlan = { id: string; name: string; description: string; amount: number; billing_period: string; benefits: string[] }
 export type CustomerMembership = { id: string; plan_id: string; status: 'requested' | 'active' | 'paused' | 'cancelled'; plan?: MembershipPlan }
 export type CustomerInvoice = { id?: string; number: string; date: string; customer: string; service: string; location: string; amount: number; status: string }
-export type SupportRequest = { id: string; subject: string; message: string; status: 'open' | 'in-progress' | 'resolved'; createdAt: string }
+export type SupportRequest = { id: string; subject: string; message: string; response?: string; status: 'open' | 'in-progress' | 'resolved'; createdAt: string; updatedAt?: string }
+export type CustomerUsage = { deliveries: number; totalSpend: number; averageAmount: number }
 export type CustomerProfile = { name: string; email: string; phone: string }
 export type TrackingSnapshot = { orderId: string; status: string; latitude?: number; longitude?: number; eta?: string; vehicle?: string; driver?: string; otpRequired?: boolean; recorded_at?: string; recordedAt?: string }
 export type PaymentOrder = { id: string; amount: number; currency: string; keyId?: string }
@@ -16,12 +17,14 @@ export type CreateSupportRequestPayload = { subject: string; message: string; or
 export type WalletTransaction = { id: string; amount: number; type: string; status: string; createdAt?: string }
 export type CustomerContract = { id: string; property_type: string; service_plan: Record<string, unknown>; address: string; estimate: number; status: string; created_at: string }
 export type CustomerOffer = { id: string; code: string; title: string; discount_type: string; discount_value: number; valid_until?: string }
+export type CustomerService = { code: string; name: string; description?: string; base_price_paise: number; is_active: boolean }
 const bookingStatusMap: Record<string, string> = { pending_vendor: 'pending_vendor', vendor_assigned: 'vendor_assigned', accepted: 'accepted', en_route: 'en_route', arrived: 'arrived', delivered: 'delivered', cancelled: 'cancelled' }
 function normalizeBooking(item: Record<string, unknown>): CustomerBooking { return { id: String(item.id ?? item.reference), service: String(item.service ?? item.service_code ?? 'Service'), location: String(item.location ?? item.address_text ?? ''), status: bookingStatusMap[String(item.status)] ?? String(item.status ?? 'pending_vendor'), amount: Number(item.amount ?? item.quoted_amount_paise ?? 0) / (item.quoted_amount_paise !== undefined && item.amount === undefined ? 100 : 1), scheduledAt: String(item.scheduledAt ?? item.scheduled_for ?? '') } }
 function normalizeSubscription(item: Record<string, unknown>): CustomerSubscription { return { id: String(item.id), name: String(item.name ?? item.plan_id ?? 'Subscription'), status: item.status as CustomerSubscription['status'], nextDelivery: item.nextDelivery as string | undefined ?? item.next_delivery as string | undefined, amount: Number(item.amount ?? 0) } }
 
 export const customerApi = {
   bookings: async () => (await apiFetch<Record<string, unknown>[]>('/customer/orders')).map(normalizeBooking),
+  services: () => apiFetch<CustomerService[]>('/customer/services'),
   createBooking: (payload: CreateBookingPayload) => apiFetch<{ id: string; quotedAmountPaise?: number }>('/customer/orders/quote', { method: 'POST', body: JSON.stringify(payload) }),
   tracking: (orderId: string) => apiFetch<TrackingSnapshot>(`/customer/orders/${orderId}/tracking`),
   requestDeliveryOtp: (orderId: string) => apiFetch<{ expiresAt: string }>(`/customer/orders/${orderId}/delivery-otp`, { method: 'POST' }),
@@ -37,6 +40,7 @@ export const customerApi = {
   invoices: () => apiFetch<CustomerInvoice[]>('/customer/invoices'),
   downloadInvoice: (id: string) => apiFetch<CustomerInvoice>(`/customer/invoices/${id}/download`),
   support: () => apiFetch<SupportRequest[]>('/support/requests'),
+  usage: () => apiFetch<CustomerUsage>('/customer/usage'),
   createSupportRequest: (payload: CreateSupportRequestPayload) => apiFetch<SupportRequest>('/support/requests', { method: 'POST', body: JSON.stringify(payload) }),
   profile: () => apiFetch<CustomerProfile>('/customer/profile'),
   updateProfile: (payload: CustomerProfile) => apiFetch<CustomerProfile>('/customer/profile', { method: 'PATCH', body: JSON.stringify(payload) }),

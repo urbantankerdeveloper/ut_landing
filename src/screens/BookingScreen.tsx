@@ -1,19 +1,18 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { ArrowLeft, ArrowRight, CalendarDays, Check, CreditCard, Droplets, MapPin, Tag, Wallet } from 'lucide-react'
 import { useNavigationStore } from '../stores/navigationStore'
-import { useCreateCustomerBooking } from '../hooks/useCustomerData'
+import { useCreateCustomerBooking, useCustomerServices } from '../hooks/useCustomerData'
 import { useCouponValidation, useRazorpayPayment } from '../hooks/useFrontendFeatures'
 import { useAuthStore } from '../stores/authStore'
 import { demoDataEnabled } from '../constants/demo'
 
-const options = [
-  { code: 'water_tanker', label: 'Water tanker' },
-  { code: 'sewage_tanker', label: 'Sewage tanker' },
-  { code: 'tank_cleaning', label: 'Tank cleaning' },
-  { code: 'borewell_service', label: 'Borewell service' },
+const fallbackOptions = [
+  { code: 'water_tanker', label: 'Water tanker', price: 1850 },
+  { code: 'sewage_tanker', label: 'Sewage tanker', price: 1850 },
+  { code: 'tank_cleaning', label: 'Tank cleaning', price: 1850 },
+  { code: 'borewell_service', label: 'Borewell service', price: 1850 },
 ]
 const GST_RATE = 0.18
-const SERVICE_PRICE = 1850
 type Step = 'details' | 'review' | 'payment' | 'success'
 
 type CouponRecord = { discount_type?: string; discount_value?: number | string; discount?: number | string }
@@ -28,10 +27,12 @@ function calculateDiscount(coupon: CouponRecord, subtotal: number) {
 export default function BookingScreen() {
   const navigate = useNavigationStore((state) => state.navigate)
   const createBooking = useCreateCustomerBooking()
+  const servicesQuery = useCustomerServices()
   const razorpay = useRazorpayPayment()
   const couponValidation = useCouponValidation()
   const user = useAuthStore((state) => state.user)
-  const [selectedServices, setSelectedServices] = useState<string[]>([options[0].code])
+  const options = servicesQuery.data?.length ? servicesQuery.data.map((service) => ({ code: service.code, label: service.name, price: service.base_price_paise / 100 })) : fallbackOptions
+  const [selectedServices, setSelectedServices] = useState<string[]>([fallbackOptions[0].code])
   const [step, setStep] = useState<Step>('details')
   const [details, setDetails] = useState({ location: '', deliveryDate: '', notes: '' })
   const [paymentMethod, setPaymentMethod] = useState('wallet')
@@ -42,8 +43,9 @@ export default function BookingScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [bookingId, setBookingId] = useState<string | null>(null)
   const [quotedTotal, setQuotedTotal] = useState<number | null>(null)
+  useEffect(() => { if (options.length && !options.some((option) => selectedServices.includes(option.code))) setSelectedServices([options[0].code]) }, [options, selectedServices])
 
-  const subtotal = selectedServices.length * SERVICE_PRICE
+  const subtotal = selectedServices.reduce((sum, code) => sum + (options.find((option) => option.code === code)?.price ?? 0), 0)
   const gst = Math.round(subtotal * GST_RATE)
   const total = Math.max(0, subtotal + gst - couponDiscount)
 
