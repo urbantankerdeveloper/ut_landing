@@ -10,6 +10,7 @@ export type AdminCoupon = { id: string; code: string; label: string; discount: s
 export type AdminService = { id: string; code: string; name: string; description?: string; base_price_paise: number; is_active: boolean; config?: { effectiveFrom?: string; effectiveTo?: string } }
 export type AdminProgramRecord = { id: string; status: string; created_at: string; [key: string]: unknown }
 export type AdminSystemHealth = { ok: boolean; migrations: Array<{ table: string; applied: boolean; error?: string }>; configuration: Record<string, boolean>; checkedAt: string }
+export type AdminNotification = { id: string; title: string; event_type: string; payload?: { detail?: string; bookingId?: string; reference?: string; status?: string }; read_at?: string; created_at: string }
 export const adminApi = {
   orders: async () => (await apiFetch<{ rows: AdminOrder[] }>('/admin/orders')).rows,
   vendors: () => apiFetch<AdminVendor[]>('/admin/vendors'),
@@ -56,4 +57,6 @@ export const adminApi = {
   alerts: () => apiFetch<unknown[]>('/admin/alerts'),
   refundPayment: (id: string, amount?: number) => apiFetch<unknown>(`/payment/payments/${id}/refund`, { method: 'POST', body: JSON.stringify(amount ? { amount } : {}) }),
   systemHealth: () => apiFetch<AdminSystemHealth>('/admin/system/health'),
+  notifications: () => apiFetch<AdminNotification[]>('/admin/notifications'),
+  markNotificationRead: (id: string) => apiFetch<AdminNotification>(`/admin/notifications/${id}/read`, { method: 'PATCH' }),
 }

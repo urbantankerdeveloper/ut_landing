@@ -3,7 +3,7 @@ import { adminApi, type AdminReportRequest } from '../api/admin'
 import { demoDataEnabled } from '../constants/demo'
 import { useRealtimeInvalidation } from './useRealtimeInvalidation'
 
-export const adminQueryKeys = { orders: ['admin', 'orders'], vendors: ['admin', 'vendors'], customers: ['admin', 'customers'], vehicles: ['admin', 'vehicles'], drivers: ['admin', 'drivers'], services: ['admin', 'services'], payments: ['admin', 'payments'], payouts: ['admin', 'payouts'], complaints: ['admin', 'complaints'], alerts: ['admin', 'alerts'], coupons: ['admin', 'coupons'], auditLogs: ['admin', 'audit-logs'], flags: ['admin', 'feature-flags'] } as const
+export const adminQueryKeys = { orders: ['admin', 'orders'], vendors: ['admin', 'vendors'], customers: ['admin', 'customers'], vehicles: ['admin', 'vehicles'], drivers: ['admin', 'drivers'], services: ['admin', 'services'], payments: ['admin', 'payments'], payouts: ['admin', 'payouts'], complaints: ['admin', 'complaints'], alerts: ['admin', 'alerts'], notifications: ['admin', 'notifications'], coupons: ['admin', 'coupons'], auditLogs: ['admin', 'audit-logs'], flags: ['admin', 'feature-flags'] } as const
 const liveOptions = { enabled: !demoDataEnabled, staleTime: 30_000, retry: 2 }
 export function useAdminOrders() { const query = useQuery({ queryKey: adminQueryKeys.orders, queryFn: adminApi.orders, ...liveOptions }); useRealtimeInvalidation(adminQueryKeys.orders); return query }
 export const useAdminBookings = useAdminOrders
@@ -19,6 +19,8 @@ export function useAdminPayments() { const query = useQuery({ queryKey: adminQue
 export function useAdminPayouts() { const query = useQuery({ queryKey: adminQueryKeys.payouts, queryFn: adminApi.payouts, ...liveOptions }); useRealtimeInvalidation(adminQueryKeys.payouts); return query }
 export function useAdminComplaints() { const query = useQuery({ queryKey: adminQueryKeys.complaints, queryFn: adminApi.complaints, ...liveOptions }); useRealtimeInvalidation(adminQueryKeys.complaints); return query }
 export function useAdminAlerts() { const query = useQuery({ queryKey: adminQueryKeys.alerts, queryFn: adminApi.alerts, ...liveOptions }); useRealtimeInvalidation(adminQueryKeys.alerts); return query }
+export function useAdminNotifications() { const query = useQuery({ queryKey: adminQueryKeys.notifications, queryFn: adminApi.notifications, ...liveOptions }); useRealtimeInvalidation(adminQueryKeys.notifications); return query }
+export function useMarkAdminNotificationRead() { const queryClient = useQueryClient(); return useMutation({ mutationFn: adminApi.markNotificationRead, onSuccess: () => queryClient.invalidateQueries({ queryKey: adminQueryKeys.notifications }) }) }
 export function useAdminCoupons() { return useQuery({ queryKey: adminQueryKeys.coupons, queryFn: adminApi.coupons, ...liveOptions }) }
 export function useAdminAuditLogs() { return useQuery({ queryKey: adminQueryKeys.auditLogs, queryFn: adminApi.auditLogs, ...liveOptions }) }
 export function useAdminFeatureFlags() { return useQuery({ queryKey: adminQueryKeys.flags, queryFn: adminApi.featureFlags, ...liveOptions }) }

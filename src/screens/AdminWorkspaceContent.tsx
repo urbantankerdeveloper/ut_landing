@@ -17,6 +17,7 @@ import { AdminSystemHealthScreen } from './AdminSystemHealthScreen'
 import { AdminBookingOperationsScreen } from './AdminBookingOperationsScreen'
 import { AdminProgramsScreen } from './AdminProgramsScreen'
 import { AdminPricingScreen } from './AdminPricingScreen'
+import { AdminNotificationsPanel } from './AdminNotificationsPanel'
 
 type Props = { item: string; onNotice: (message: string) => void }
 type DialogState = { title: string; eyebrow: string; body: ReactNode } | null
@@ -28,6 +29,7 @@ export function AdminWorkspaceContent({ item, onNotice }: Props) {
   const close = () => setDialog(null)
   const open = (next: DialogState) => setDialog(next)
   const finish = (message: string) => { close(); onNotice(message) }
+  if (item === 'notifications') return <AdminNotificationsPanel />
   if (item === 'system-health') return <AdminSystemHealthScreen />
   if (item === 'bookings' && !demoDataEnabled) return <AdminBookingOperationsScreen onNotice={onNotice} />
   if (item === 'pricing' && !demoDataEnabled) return <AdminPricingScreen onNotice={onNotice} />
