@@ -8,7 +8,7 @@ import { useRealtimeInvalidation } from './useRealtimeInvalidation'
 
 export const vendorQueryKeys = { dashboard: ['vendor', 'dashboard'], orders: ['vendor', 'orders'], vehicles: ['vendor', 'vehicles'], drivers: ['vendor', 'drivers'], payouts: ['vendor', 'payouts'], services: ['vendor', 'services'] } as const
 const liveOptions = { enabled: !demoDataEnabled, staleTime: 30_000, retry: 2 }
-export function useVendorOfflineSync(enabled = true) { useEffect(() => { if (!enabled) return; const flush = async () => { const count = await flushMutationQueue((endpoint, init) => apiFetch(endpoint, init), (payload) => vendorApi.registerOfflineMutation(payload)); if (count) window.dispatchEvent(new Event('vendor-queue-flushed')) }; window.addEventListener('online', flush); void flush(); return () => window.removeEventListener('online', flush) }, [enabled]) }
+export function useVendorOfflineSync(enabled = true) { useEffect(() => { if (!enabled) return; const flush = async () => { const count = await flushMutationQueue((endpoint, init) => apiFetch(endpoint, init), (payload) => vendorApi.registerOfflineMutation(payload)); if (count) window.dispatchEvent(new Event('vendor-queue-flushed')) }; const handleServiceWorkerMessage = (event: MessageEvent) => { if (event.data?.type === 'urban-tanker-sync') void flush() }; window.addEventListener('online', flush); navigator.serviceWorker?.addEventListener('message', handleServiceWorkerMessage); void flush(); return () => { window.removeEventListener('online', flush); navigator.serviceWorker?.removeEventListener('message', handleServiceWorkerMessage) } }, [enabled]) }
 export function useVendorDashboard() { return useQuery({ queryKey: vendorQueryKeys.dashboard, queryFn: vendorApi.dashboard, ...liveOptions }) }
 export function useVendorOrders() { const query = useQuery({ queryKey: vendorQueryKeys.orders, queryFn: vendorApi.orders, ...liveOptions }); useRealtimeInvalidation(vendorQueryKeys.orders); return query }
 export function useVendorVehicles() { const query = useQuery({ queryKey: vendorQueryKeys.vehicles, queryFn: vendorApi.vehicles, ...liveOptions }); useRealtimeInvalidation(vendorQueryKeys.vehicles); return query }
@@ -40,9 +40,9 @@ export function useVendorOrderMutation() {
     return () => window.removeEventListener('online', flush)
   }, [queryClient])
   const mutation = useMutation({ mutationFn: (payload: VendorOrderMutation) => vendorApi.mutateOrder(payload), onMutate: async (payload) => { await queryClient.cancelQueries({ queryKey: vendorQueryKeys.orders }); const previous = queryClient.getQueryData(vendorQueryKeys.orders); queryClient.setQueryData(vendorQueryKeys.orders, (orders: VendorOrder[] | undefined) => orders?.map((order) => order.id === payload.orderId ? { ...order, ...payload } : order)); return { previous } }, onError: (_error, _payload, context) => { queryClient.setQueryData(vendorQueryKeys.orders, context?.previous) }, onSettled: () => queryClient.invalidateQueries({ queryKey: vendorQueryKeys.orders }) })
-  function mutate(payload: VendorOrderMutation) {
+  function mutate(payload: VendorOrderMutation, options?: Parameters<typeof mutation.mutate>[1]) {
     if (!navigator.onLine) { enqueueMutation({ endpoint: `/vendor/orders/${payload.orderId}`, init: { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) } }); setQueuedCount(queuedMutationCount()); return }
-    mutation.mutate(payload)
+    mutation.mutate(payload, options)
   }
   return { ...mutation, mutate, queuedCount }
 }

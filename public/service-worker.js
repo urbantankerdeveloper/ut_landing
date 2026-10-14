@@ -30,3 +30,10 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close()
   event.waitUntil(clients.openWindow(event.notification.data?.url ?? '/'))
 })
+
+self.addEventListener('sync', (event) => {
+  if (event.tag !== 'urban-tanker-outbox') return
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+    clients.forEach((client) => client.postMessage({ type: 'urban-tanker-sync' }))
+  }))
+})
