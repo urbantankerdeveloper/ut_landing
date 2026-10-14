@@ -13,6 +13,7 @@ import { VendorDocumentsPanel } from './VendorDocumentsPanel'
 import { VendorPayoutPanel } from './VendorPayoutPanel'
 import { CustomerOperationsPanel } from './CustomerOperationsPanel'
 import { CustomerSupportPanel } from './CustomerSupportPanel'
+import BookingScreen from './BookingScreen'
 import { CustomerUsagePanel } from './CustomerUsagePanel'
 import { VendorOfflineConflicts } from '../components/VendorOfflineConflicts'
 import { demoDataEnabled } from '../constants/demo'
@@ -27,6 +28,7 @@ const adminRows = demoDataEnabled ? [{ id: 'UT-2412', service: 'Water tanker · 
 
 export function WorkspaceContent({ role, item, onNavigate, onNotice }: Props) {
   if (item === 'overview') return <Overview role={role} onNavigate={onNavigate} onNotice={onNotice} />
+  if (role === 'customer' && item === 'booking') return <BookingScreen />
   if (role === 'admin' || role === 'dispatcher') return <AdminWorkspaceContent item={item} onNotice={onNotice} />
   if (role === 'customer' && item === 'support') return <CustomerSupportPanel onNotice={onNotice} />
   if (role === 'customer' && item === 'invoices') return <CustomerInvoicesScreen onNotice={onNotice} />
