@@ -14,15 +14,18 @@ export function useGeolocation() {
 export function useRazorpayPayment() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [completed, setCompleted] = useState(false)
   async function pay(amount: number, bookingId: string, customer: { name: string; email?: string; phone?: string }) {
+    if (loading) throw new Error('A payment is already in progress.')
     setLoading(true); setError(null)
+    setCompleted(false)
     try {
       const order = await customerApi.createPaymentOrder({ amount, bookingId })
-      const Razorpay = await loadRazorpay()
-      await new Promise<void>((resolve, reject) => { const checkout = new Razorpay({ key: order.keyId ?? import.meta.env.VITE_RAZORPAY_KEY_ID, amount: order.amount, currency: order.currency, name: 'Urban Tanker', order_id: order.id, prefill: customer, handler: async (result: { razorpay_payment_id: string; razorpay_signature: string }) => { try { await customerApi.verifyPayment({ orderId: order.id, paymentId: result.razorpay_payment_id, signature: result.razorpay_signature }); resolve() } catch (verificationError) { reject(verificationError) } }, modal: { ondismiss: () => reject(new Error('Payment cancelled')) } }); checkout.open() })
+      const Razorpay = await loadRazorpayWidget()
+      await new Promise<void>((resolve, reject) => { let settled = false; const finish = (callback: () => void) => { if (settled) return; settled = true; callback() }; const checkout = new Razorpay({ key: order.keyId ?? import.meta.env.VITE_RAZORPAY_KEY_ID, amount: order.amount, currency: order.currency, name: 'Urban Tanker', order_id: order.id, prefill: customer, handler: async (result: { razorpay_payment_id: string; razorpay_signature: string }) => { try { await customerApi.verifyPayment({ orderId: order.id, paymentId: result.razorpay_payment_id, signature: result.razorpay_signature }); finish(() => { setCompleted(true); resolve() }) } catch (verificationError) { finish(() => reject(verificationError)) } }, modal: { ondismiss: () => finish(() => reject(new Error('Payment cancelled'))) } }); checkout.open() })
     } catch (paymentError) { const message = paymentError instanceof Error ? paymentError.message : 'Payment could not be completed.'; setError(message); throw paymentError } finally { setLoading(false) }
   }
-  return { pay, loading, error }
+  return { pay, loading, error, completed }
 }
 
 export function useCouponValidation() { return useMutation({ mutationFn: (payload: { code: string; serviceCode?: string; amount: number }) => apiFetch<{ valid: boolean; coupon: unknown }>('/customer/coupons/validate', { method: 'POST', body: JSON.stringify(payload) }) }) }
@@ -35,7 +38,7 @@ export function useFileUpload() {
   return { upload, progress, error, cancel: () => controller?.abort(), reset: () => { setProgress(0); setError(null) } }
 }
 
-async function loadRazorpay() {
+export async function loadRazorpayWidget() {
   if (window.Razorpay) return window.Razorpay
   await new Promise<void>((resolve, reject) => { const script = document.createElement('script'); script.src = 'https://checkout.razorpay.com/v1/checkout.js'; script.onload = () => resolve(); script.onerror = () => reject(new Error('Payment widget could not load.')); document.head.appendChild(script) })
   if (!window.Razorpay) throw new Error('Payment widget is unavailable.')
