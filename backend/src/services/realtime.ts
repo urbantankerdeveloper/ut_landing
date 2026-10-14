@@ -12,3 +12,4 @@ export function emitRealtime(event: string, payload: unknown = {}) {
 export function emitRealtimeToUser(userId: string, event: string, payload: unknown = {}) {
   realtimeServer?.to(`customer:${userId}`).emit(event, payload)
 }
+export function realtimeHealth() { return { configured: Boolean(realtimeServer), connected: realtimeServer?.engine.clientsCount ?? 0 } }
