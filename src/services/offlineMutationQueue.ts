@@ -3,6 +3,9 @@ const STORAGE_KEY = 'urban-tanker-vendor-offline-mutations'
 
 function readQueue(): QueuedMutation[] { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') as QueuedMutation[] } catch { return [] } }
 function writeQueue(queue: QueuedMutation[]) { localStorage.setItem(STORAGE_KEY, JSON.stringify(queue)) }
+export function queuedMutations() { return readQueue() }
+export function retryQueuedMutation(id: string) { const queue = readQueue().map((item) => item.id === id ? { ...item, conflictStatus: 'queued' as const } : item); writeQueue(queue) }
+export function discardQueuedMutation(id: string) { writeQueue(readQueue().filter((item) => item.id !== id)) }
 export function enqueueMutation(mutation: Omit<QueuedMutation, 'id' | 'createdAt' | 'clientVersion' | 'conflictStatus'>) { const queue = readQueue(); const previous = queue.filter((item) => item.endpoint === mutation.endpoint).length; queue.push({ ...mutation, id: crypto.randomUUID(), createdAt: new Date().toISOString(), clientVersion: previous + 1, conflictStatus: 'queued' }); writeQueue(queue); return queue.length }
 export function queuedMutationCount() { return readQueue().length }
 export async function flushMutationQueue(fetcher: (endpoint: string, init: RequestInit) => Promise<unknown>) { if (!navigator.onLine) return 0; const queue = readQueue(); let flushed = 0; const remaining: QueuedMutation[] = []; for (const mutation of queue) { try { const init = { ...mutation.init, headers: { ...(mutation.init.headers ?? {}), 'x-offline-mutation-id': mutation.id, 'x-client-version': String(mutation.clientVersion) } }; await fetcher(mutation.endpoint, init); flushed += 1 } catch { remaining.push({ ...mutation, conflictStatus: 'conflict' }) } } writeQueue(remaining); return flushed }

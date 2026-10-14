@@ -14,6 +14,7 @@ import { VendorPayoutPanel } from './VendorPayoutPanel'
 import { CustomerOperationsPanel } from './CustomerOperationsPanel'
 import { CustomerSupportPanel } from './CustomerSupportPanel'
 import { CustomerUsagePanel } from './CustomerUsagePanel'
+import { VendorOfflineConflicts } from '../components/VendorOfflineConflicts'
 import { demoDataEnabled } from '../constants/demo'
 
 type Props = { role: WorkspaceRole; item: string; onNavigate: (screen: 'booking' | 'home') => void; onNotice: (message: string) => void }
@@ -31,7 +32,7 @@ export function WorkspaceContent({ role, item, onNavigate, onNotice }: Props) {
   if (role === 'customer' && item === 'membership') return <CardPanel eyebrow="MEMBERSHIP" title="Benefits for every delivery." cards={['Priority support', 'Member pricing', 'Delivery history'].map((name) => [name, 'Available with your Urban Tanker account', ClipboardList])} action="View benefits" onAction={() => onNotice('Membership benefits opened.')} />
   if (role === 'customer' && item === 'contracts') return <CardPanel eyebrow="YEARLY CONTRACTS" title="Plan a whole year around your property." cards={['Residential plan', 'Commercial plan', 'Apartment plan'].map((name) => [name, 'Build a combined annual estimate', FileText])} action="Build yearly plan" onAction={() => onNavigate('booking')} />
   if (role === 'vendor' && (item === 'vehicles' || item === 'drivers')) return <VendorFleetPanel mode={item} onNotice={onNotice} />
-  if (role === 'vendor' && item === 'orders') return <VendorOrderPanel onNotice={onNotice} />
+  if (role === 'vendor' && item === 'orders') return <><VendorOfflineConflicts /><VendorOrderPanel onNotice={onNotice} /></>
   if (role === 'vendor' && item === 'services') return <VendorServicesPanel onNotice={onNotice} />
   if (role === 'vendor' && item === 'documents') return <VendorDocumentsPanel onNotice={onNotice} />
   if (role === 'vendor' && item === 'earnings') return <VendorPayoutPanel onNotice={onNotice} />
