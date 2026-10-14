@@ -17,8 +17,8 @@ const roleData: Record<WorkspaceRole, RoleData> = {
 }
 
 export default function WorkspaceScreen() {
-  useVendorOfflineSync()
   const { activeRole, navigate } = useNavigationStore()
+  useVendorOfflineSync(activeRole === 'vendor')
   const user = useAuthStore((state) => state.user)
   const signOut = useAuthStore((state) => state.signOut)
   const data = roleData[activeRole]

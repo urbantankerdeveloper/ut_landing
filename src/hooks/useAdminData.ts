@@ -15,10 +15,10 @@ export function useAdminServices() { return useQuery({ queryKey: adminQueryKeys.
 export function useAdminSubscriptions() { return useQuery({ queryKey: ['admin', 'subscriptions'], queryFn: adminApi.subscriptions, ...liveOptions }) }
 export function useAdminContracts() { return useQuery({ queryKey: ['admin', 'contracts'], queryFn: adminApi.contracts, ...liveOptions }) }
 export function useAdminEnquiries() { return useQuery({ queryKey: ['admin', 'enquiries'], queryFn: adminApi.enquiries, ...liveOptions }) }
-export function useAdminPayments() { return useQuery({ queryKey: adminQueryKeys.payments, queryFn: adminApi.payments, ...liveOptions }) }
-export function useAdminPayouts() { return useQuery({ queryKey: adminQueryKeys.payouts, queryFn: adminApi.payouts, ...liveOptions }) }
-export function useAdminComplaints() { return useQuery({ queryKey: adminQueryKeys.complaints, queryFn: adminApi.complaints, ...liveOptions }) }
-export function useAdminAlerts() { return useQuery({ queryKey: adminQueryKeys.alerts, queryFn: adminApi.alerts, ...liveOptions }) }
+export function useAdminPayments() { const query = useQuery({ queryKey: adminQueryKeys.payments, queryFn: adminApi.payments, ...liveOptions }); useRealtimeInvalidation(adminQueryKeys.payments); return query }
+export function useAdminPayouts() { const query = useQuery({ queryKey: adminQueryKeys.payouts, queryFn: adminApi.payouts, ...liveOptions }); useRealtimeInvalidation(adminQueryKeys.payouts); return query }
+export function useAdminComplaints() { const query = useQuery({ queryKey: adminQueryKeys.complaints, queryFn: adminApi.complaints, ...liveOptions }); useRealtimeInvalidation(adminQueryKeys.complaints); return query }
+export function useAdminAlerts() { const query = useQuery({ queryKey: adminQueryKeys.alerts, queryFn: adminApi.alerts, ...liveOptions }); useRealtimeInvalidation(adminQueryKeys.alerts); return query }
 export function useAdminCoupons() { return useQuery({ queryKey: adminQueryKeys.coupons, queryFn: adminApi.coupons, ...liveOptions }) }
 export function useAdminAuditLogs() { return useQuery({ queryKey: adminQueryKeys.auditLogs, queryFn: adminApi.auditLogs, ...liveOptions }) }
 export function useAdminFeatureFlags() { return useQuery({ queryKey: adminQueryKeys.flags, queryFn: adminApi.featureFlags, ...liveOptions }) }
