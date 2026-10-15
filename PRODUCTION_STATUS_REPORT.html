@@ -104,7 +104,7 @@
             <li>Production deployment and domain validation.</li>
             <li>SMS, email, WhatsApp, and push delivery verification.</li>
             <li>Full browser-level realtime verification.</li>
-            <li>Stale-session hydration hardening and broader automated coverage.</li>
+            <li>Stale-session hydration hardening and broader component/accessibility coverage.</li>
           </ul>
         </div>
       </div>
@@ -121,7 +121,9 @@
           <tr><td>Admin</td><td>System health, orders, vendors, customers, notifications, audit logs.</td><td>All tested admin endpoints returned <code>200</code>.</td></tr>
           <tr><td>Authorization</td><td>Unauthenticated and wrong-role access protection.</td><td>Missing/invalid tokens returned <code>401</code>; customer-to-admin returned <code>403</code>.</td></tr>
           <tr><td>Database</td><td>Live Supabase access, policies, migrations, booking lifecycle.</td><td>Migration 014 reconciled live <code>bookings.driver_id</code>; database checks passed.</td></tr>
-          <tr><td>API quality</td><td>Build, lint, lifecycle/schema/payment tests.</td><td>Backend build/lint passed; 8 backend tests passed; frontend 7 tests passed.</td></tr>
+          <tr><td>API quality</td><td>Build, lint, lifecycle/schema/payment tests.</td><td>Backend build/lint passed; 19 backend tests passed; frontend 8 tests passed.</td></tr>
+          <tr><td>Analytics</td><td>Canonical events, funnel metrics, date-range summaries, CSV export, anonymization, and scheduled retention cleanup.</td><td>Analytics migration applied live; ingestion and admin summary returned <code>204</code>/<code>200</code>; dashboard and export are wired.</td></tr>
+          <tr><td>Browser smoke</td><td>Public landing-page and unauthenticated admin API checks.</td><td>Playwright smoke suite passed: <code>2/2</code>.</td></tr>
           <tr><td>Offline/PWA</td><td>Service worker, outbox, background sync, retry/discard paths.</td><td>Repository implementation is marked complete in the backlog.</td></tr>
         </tbody>
       </table>
@@ -139,8 +141,8 @@
           <tr><td>Medium</td><td>Notifications</td><td>Email/SMS/WhatsApp provider delivery is not validated. VAPID push is currently not configured.</td><td>Out-of-band notifications may not reach users.</td></tr>
           <tr><td>Medium</td><td>Session restoration</td><td>Persisted workspace state can appear after the access token is absent from session storage.</td><td>Users may see a workspace while protected requests return <code>401</code>.</td></tr>
           <tr><td>Medium</td><td>OTP and proof</td><td>Repository paths exist, but SMS delivery and production storage lifecycle are not validated.</td><td>Delivery completion evidence remains unproven.</td></tr>
-          <tr><td>Low</td><td>Quality coverage</td><td>Focused frontend/backend and analytics tests pass; broader component, accessibility, MSW, and Playwright suites are deferred.</td><td>Regression coverage is narrower than a full release suite.</td></tr>
-          <tr><td>Medium</td><td>Analytics</td><td>Privacy-safe browser events persist to Supabase and an admin summary endpoint/UI is available.</td><td>Retention policy, dashboards beyond event counts, and production-volume validation remain.</td></tr>
+          <tr><td>Low</td><td>Quality coverage</td><td>Focused frontend/backend tests, lint/build, and two Playwright smoke tests pass; broader component, accessibility, and MSW suites remain.</td><td>Regression coverage is narrower than a full release suite.</td></tr>
+          <tr><td>Medium</td><td>Analytics operations</td><td>Taxonomy, funnels, date-range export, anonymization, and scheduled cleanup are implemented.</td><td>Production-volume validation, configurable alert thresholds, and export privacy review remain.</td></tr>
         </tbody>
       </table>
     </section>
@@ -154,8 +156,8 @@
         <li><strong>Provider validation:</strong> configure and verify email, SMS OTP, WhatsApp, storage proof uploads, and VAPID push if push notifications are in scope.</li>
         <li><strong>Session hardening:</strong> prevent protected workspaces from rendering until authentication hydration and token validity are resolved.</li>
         <li><strong>Admin mutation testing:</strong> validate booking status changes, vendor approval, service/pricing changes, and audit records with controlled retained test data.</li>
-        <li><strong>Quality gates:</strong> add focused route authorization tests, component tests, accessibility checks, and a repeatable Playwright smoke suite.</li>
-        <li><strong>Analytics operations:</strong> define event taxonomy, retention/anonymization rules, alerting, and KPI dashboards before collecting production-scale traffic.</li>
+        <li><strong>Quality gates:</strong> expand focused route authorization coverage to all protected groups, then add component and accessibility tests; the Playwright smoke suite is now repeatable and passing.</li>
+        <li><strong>Analytics operations:</strong> validate event volume and funnel identity semantics in staging, redact or secure session identifiers in exports, and configure persisted alert thresholds.</li>
         <li><strong>Final release review:</strong> verify backups, RLS policies, secrets, monitoring, incident runbook, support contacts, and rollback procedure.</li>
       </ol>
     </section>

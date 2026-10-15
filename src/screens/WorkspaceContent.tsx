@@ -21,7 +21,7 @@ import { useAdminOrders } from '../hooks/useAdminData'
 import { useCustomerBookings } from '../hooks/useCustomerData'
 import { useVendorOrders } from '../hooks/useVendorData'
 
-type Props = { role: WorkspaceRole; item: string; onNavigate: (screen: 'booking' | 'home') => void; onNotice: (message: string) => void }
+type Props = { role: WorkspaceRole; item: string; onNavigate: (screen: 'booking' | 'offers' | 'home') => void; onNotice: (message: string) => void }
 const bookingRows = demoDataEnabled ? [{ id: 'UT-2408', service: 'Water tanker · 9 KL', place: 'ECR, Chennai', status: 'In progress', amount: '₹1,850' }, { id: 'UT-2394', service: 'Tank & sump cleaning', place: 'Adyar, Chennai', status: 'Delivered', amount: '₹2,400' }, { id: 'UT-2388', service: 'Sewage tanker', place: 'Velachery, Chennai', status: 'Scheduled', amount: '₹3,100' }] : []
 const vendorRows = demoDataEnabled ? [{ id: 'UT-2412', service: 'Water tanker · 12 KL', place: 'OMR, Chennai', status: 'Available', amount: '₹2,250' }, { id: 'UT-2411', service: 'Sewage tanker · 9 KL', place: 'Guindy, Chennai', status: 'Review', amount: '₹2,900' }, { id: 'UT-2409', service: 'Water tanker · 6 KL', place: 'Sholinganallur, Chennai', status: 'Accepted', amount: '₹1,500' }] : []
 const adminRows = demoDataEnabled ? [{ id: 'UT-2412', service: 'Water tanker · 12 KL', place: 'OMR, Chennai', status: 'Awaiting vendor', amount: '₹2,250' }, { id: 'UT-2411', service: 'Sewage tanker · 9 KL', place: 'Guindy, Chennai', status: 'In progress', amount: '₹2,900' }, { id: 'UT-2409', service: 'Tank cleaning', place: 'Adyar, Chennai', status: 'Delivered', amount: '₹2,100' }] : []
@@ -64,7 +64,7 @@ function CustomerLiveOverview({ onNavigate }: { onNavigate: Props['onNavigate'] 
   const active = bookings.filter((booking) => !['delivered', 'cancelled'].includes(booking.status))
   const next = active.find((booking) => booking.scheduledAt) ?? active[0]
   const status = next?.status === 'en_route' ? 'En route' : next?.status === 'vendor_assigned' ? 'Vendor assigned' : next?.status === 'accepted' ? 'Accepted' : 'Request received'
-  return <LiveOverviewLayout eyebrow="YOUR DELIVERY PULSE" title="Your next delivery" summary={next ? `${active.length} active request${active.length === 1 ? '' : 's'}` : 'No active requests'} detail={next ? `${status} · ${next.location}` : 'Book a tanker service when you are ready.'} role="customer" onRefresh={() => query.refetch()} primaryLabel="Start a new booking" onPrimary={() => onNavigate('booking')} secondaryLabel="View bookings" onSecondary={() => onNavigate('home')} />
+  return <LiveOverviewLayout eyebrow="YOUR DELIVERY PULSE" title="Your next delivery" summary={next ? `${active.length} active request${active.length === 1 ? '' : 's'}` : 'No active requests'} detail={next ? `${status} · ${next.location}` : 'Book a tanker service when you are ready.'} role="customer" onRefresh={() => query.refetch()} primaryLabel="Start a new booking" onPrimary={() => onNavigate('booking')} secondaryLabel="Browse coupons & offers" onSecondary={() => onNavigate('offers')} />
 }
 function VendorLiveOverview({ onNotice }: { onNotice: Props['onNotice'] }) {
   const query = useVendorOrders()

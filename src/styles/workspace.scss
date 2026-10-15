@@ -11,3 +11,20 @@
 .admin-summary-grid strong { display: block; margin-top: 6px; font-size: 1.6rem; color: #162c4d; }
 .admin-analytics-actions { display: flex; justify-content: flex-end; margin: 12px 0; }
 .analytics-warning { border-color: #e2aa35 !important; background: #fffaf0 !important; }
+.booking-location-map { width: 100%; max-width: 100%; min-width: 0; overflow: hidden; border: 1px solid #d8e6e1; border-radius: 12px; background: #edf5f2; }
+.leaflet-map { min-height: 260px; width: 100%; max-width: 100%; }
+.booking-map-field { display: grid; gap: 8px; margin: 18px 0; }
+.field-label { font-size: 13px; font-weight: 650; }
+.field-label small { color: #6b7d79; font-weight: 400; }
+.location-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.location-picker-modal { display: grid; gap: 16px; width: 100%; max-width: 100%; min-width: 0; }
+.location-picker-modal .modal-required-note { display: flex; align-items: center; gap: 6px; }
+.location-selected-name { display: flex; align-items: center; gap: 7px; padding: 10px 12px; margin: 0; color: #0d5f59; background: #e7f6f1; border-radius: 8px; font-size: 13px; font-weight: 650; }
+.location-lookup-error { padding: 10px 12px; margin: 0; color: #8a3d2b; background: #fff0eb; border-radius: 8px; font-size: 12px; }
+.tracking-live-map { position: relative; }
+.tracking-live-map .leaflet-map { min-height: 320px; }
+.tracking-map-legend { position: absolute; bottom: 12px; left: 12px; z-index: 500; display: flex; gap: 12px; padding: 7px 10px; border-radius: 8px; background: rgb(255 255 255 / 92%); box-shadow: 0 2px 8px rgb(4 38 34 / 15%); font-size: 11px; }
+.tracking-map-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.tracking-map-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
+.fleet-dot { background: #f28b30; }
+.customer-dot { background: #13a69a; }

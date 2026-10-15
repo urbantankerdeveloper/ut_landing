@@ -19,6 +19,10 @@ export function emitRealtimeToVendor(vendorId: string, event: string, payload: u
   realtimeServer?.to(`vendor:${vendorId}`).emit(event, payload)
   void persistAdminEvent(event, payload)
 }
+export function emitRealtimeToBooking(bookingId: string, event: string, payload: unknown = {}) {
+  realtimeServer?.to(`booking:${bookingId}`).emit(event, payload)
+  void persistAdminEvent(event, payload)
+}
 export function emitRealtimeToAdmins(event: string, payload: unknown = {}) {
   realtimeServer?.to('admins').emit(event, payload)
 }

@@ -4,7 +4,7 @@ import { supabase } from '../supabase.js'
 const router = Router(); router.use(requireAuth, requireRole('vendor'))
 type BookingRecord = { id: string; reference: string; service_code: string; address_text: string; latitude?: number | null; longitude?: number | null; quoted_amount_paise?: number | null; status: string; vehicle_id?: string | null; driver_id?: string | null; created_at: string; scheduled_for?: string | null }
 type RelatedRecord = { id: string; name?: string; registration_number?: string }
-const statusMap: Record<string, 'Available' | 'Accepted' | 'En route' | 'Arrived' | 'Delivered' | 'Rejected'> = { pending_vendor: 'Available', vendor_assigned: 'Accepted', accepted: 'Accepted', en_route: 'En route', arrived: 'Arrived', delivered: 'Delivered', cancelled: 'Rejected' }
+const statusMap: Record<string, 'Available' | 'Assigned' | 'Accepted' | 'En route' | 'Arrived' | 'Delivered' | 'Rejected'> = { pending_vendor: 'Available', vendor_assigned: 'Assigned', accepted: 'Accepted', en_route: 'En route', arrived: 'Arrived', delivered: 'Delivered', cancelled: 'Rejected' }
 function formatAmount(amountPaise?: number | null) { return `₹${(Number(amountPaise ?? 0) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}` }
 function normalizeOrder(order: BookingRecord, services: Map<string, string>, vehicles: Map<string, string>, drivers: Map<string, string>) {
   return {
@@ -12,6 +12,8 @@ function normalizeOrder(order: BookingRecord, services: Map<string, string>, veh
     reference: order.reference,
     service: services.get(order.service_code) ?? order.service_code,
     location: order.address_text,
+    latitude: order.latitude,
+    longitude: order.longitude,
     distance: undefined,
     amount: formatAmount(order.quoted_amount_paise),
     status: statusMap[order.status] ?? 'Available',

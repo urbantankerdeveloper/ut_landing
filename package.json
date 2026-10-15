@@ -18,10 +18,12 @@
   "dependencies": {
     "@tanstack/react-query": "^5.90.16",
     "jspdf": "^4.2.1",
+    "leaflet": "^1.9.4",
     "lucide-react": "^0.545.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-error-boundary": "^6.1.6",
+    "react-leaflet": "^5.0.0",
     "sass": "^1.86.0",
     "socket.io-client": "^4.8.4",
     "zustand": "^5.0.8"
@@ -29,6 +31,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.56.1",
+    "@types/leaflet": "^1.9.22",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
