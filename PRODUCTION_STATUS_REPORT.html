@@ -73,19 +73,19 @@
   <header>
     <p class="eyebrow">URBAN TANKER / MVP PRODUCTION READINESS</p>
     <h1>Production Status Report</h1>
-    <p class="muted">Generated: 14 October 2026, 23:39 IST. This report reflects repository checks and controlled live-database testing completed with retained test records.</p>
+    <p class="muted">Generated: 15 October 2026, 15:10 IST. This report reflects repository checks, production-hardening changes, and controlled live-database testing completed with retained test records.</p>
     <div class="summary">
       <div class="metric"><span class="muted">Core MVP flow</span><strong>Passed</strong><span class="muted">Customer to vendor</span></div>
       <div class="metric"><span class="muted">Admin flow</span><strong>Passed</strong><span class="muted">Auth, APIs, UI, live booking</span></div>
-      <div class="metric"><span class="muted">Automated tests</span><strong>15</strong><span class="muted">7 frontend + 8 backend</span></div>
-      <div class="metric"><span class="muted">Release state</span><strong>Not yet</strong><span class="muted">External gates remain</span></div>
+      <div class="metric"><span class="muted">Automated tests</span><strong>48</strong><span class="muted">8 frontend + 40 backend + 6 Playwright</span></div>
+      <div class="metric"><span class="muted">Release state</span><strong>Candidate</strong><span class="muted">External gates remain</span></div>
     </div>
   </header>
 
   <main>
     <section>
       <h2>Executive status</h2>
-      <p class="release"><strong>Recommendation: continue hardening before production release.</strong> The primary customer booking, vendor acceptance, and admin visibility flow is working against the live database. Provider delivery, payment, deployment, and broader production validation are still pending.</p>
+      <p class="release"><strong>Recommendation: deploy to controlled staging, not public production.</strong> The repository is production-candidate ready: core customer, guest, vendor, admin, database, authentication, and deployment-hardening work is implemented and validated. Provider delivery, payment, live deployment, and complete staging validation are still pending.</p>
       <div class="grid">
         <div class="card">
           <h3><span class="status pass">WORKING</span>Validated live flow</h3>
@@ -104,7 +104,7 @@
             <li>Production deployment and domain validation.</li>
             <li>SMS, email, WhatsApp, and push delivery verification.</li>
             <li>Full browser-level realtime verification.</li>
-            <li>Stale-session hydration hardening and broader component/accessibility coverage.</li>
+            <li>Final security, monitoring, backup, rollback, and live readiness validation.</li>
           </ul>
         </div>
       </div>
@@ -120,10 +120,10 @@
           <tr><td>Vendor</td><td>Order inbox and booking acceptance.</td><td><code>GET /api/vendor/orders</code> returned <code>200</code>; accept transition returned <code>200</code>.</td></tr>
           <tr><td>Admin</td><td>System health, orders, vendors, customers, notifications, audit logs.</td><td>All tested admin endpoints returned <code>200</code>.</td></tr>
           <tr><td>Authorization</td><td>Unauthenticated and wrong-role access protection.</td><td>Missing/invalid tokens returned <code>401</code>; customer-to-admin returned <code>403</code>.</td></tr>
-          <tr><td>Database</td><td>Live Supabase access, policies, migrations, booking lifecycle.</td><td>Migration 014 reconciled live <code>bookings.driver_id</code>; database checks passed.</td></tr>
-          <tr><td>API quality</td><td>Build, lint, lifecycle/schema/payment tests.</td><td>Backend build/lint passed; 19 backend tests passed; frontend 8 tests passed.</td></tr>
+          <tr><td>Database</td><td>Live Supabase access, canonical installer, RLS, seeded data, and booking lifecycle.</td><td>Canonical installer and database checks passed; all 32 public application tables have RLS enabled.</td></tr>
+          <tr><td>API quality</td><td>Build, lint, lifecycle/schema/payment tests, readiness and security checks.</td><td>Backend build/lint passed; backend 40 tests passed; HTTPS production-origin validation and <code>/health/ready</code> are implemented.</td></tr>
           <tr><td>Analytics</td><td>Canonical events, funnel metrics, date-range summaries, CSV export, anonymization, and scheduled retention cleanup.</td><td>Analytics migration applied live; ingestion and admin summary returned <code>204</code>/<code>200</code>; dashboard and export are wired.</td></tr>
-          <tr><td>Browser smoke</td><td>Public landing-page and unauthenticated admin API checks.</td><td>Playwright smoke suite passed: <code>2/2</code>.</td></tr>
+          <tr><td>Browser E2E</td><td>Guest/customer booking and vendor login/order workflows.</td><td>Full Playwright suite passed: <code>6/6</code>.</td></tr>
           <tr><td>Offline/PWA</td><td>Service worker, outbox, background sync, retry/discard paths.</td><td>Repository implementation is marked complete in the backlog.</td></tr>
         </tbody>
       </table>
@@ -136,12 +136,12 @@
         <thead><tr><th>Priority</th><th>Area</th><th>Current state</th><th>Impact</th></tr></thead>
         <tbody>
           <tr><td>High</td><td>Payment</td><td>Razorpay configuration exists, but live checkout, webhook, refund, and reconciliation were not verified.</td><td>Payments cannot be treated as production-ready.</td></tr>
-          <tr><td>High</td><td>Deployment</td><td>No production deployment, domain, TLS, CSP, observability, or rollback validation has been completed.</td><td>Release infrastructure remains unapproved.</td></tr>
+          <tr><td>High</td><td>Deployment</td><td>Production startup, HTTPS-origin validation, readiness checks, cache controls, and deployment documentation are implemented; live domain/TLS/CSP/observability/rollback validation is not complete.</td><td>Release infrastructure remains unapproved.</td></tr>
           <tr><td>High</td><td>Realtime</td><td>Room authorization is implemented, but complete browser-level customer/vendor event delivery is not fully verified.</td><td>Live status updates need final confirmation.</td></tr>
           <tr><td>Medium</td><td>Notifications</td><td>Email/SMS/WhatsApp provider delivery is not validated. VAPID push is currently not configured.</td><td>Out-of-band notifications may not reach users.</td></tr>
-          <tr><td>Medium</td><td>Session restoration</td><td>Persisted workspace state can appear after the access token is absent from session storage.</td><td>Users may see a workspace while protected requests return <code>401</code>.</td></tr>
+          <tr><td>Medium</td><td>Session restoration</td><td>Refresh-cookie authentication and booking-flow preservation are implemented; real staging expiry/recovery behavior is not yet verified.</td><td>Session behavior still needs deployment validation.</td></tr>
           <tr><td>Medium</td><td>OTP and proof</td><td>Repository paths exist, but SMS delivery and production storage lifecycle are not validated.</td><td>Delivery completion evidence remains unproven.</td></tr>
-          <tr><td>Low</td><td>Quality coverage</td><td>Focused frontend/backend tests, lint/build, and two Playwright smoke tests pass; broader component, accessibility, and MSW suites remain.</td><td>Regression coverage is narrower than a full release suite.</td></tr>
+          <tr><td>Low</td><td>Quality coverage</td><td>Frontend 8/8, backend 40/40, lint/build, and Playwright 6/6 pass; broader component, accessibility, and MSW suites remain.</td><td>Regression coverage is narrower than a full release suite.</td></tr>
           <tr><td>Medium</td><td>Analytics operations</td><td>Taxonomy, funnels, date-range export, anonymization, and scheduled cleanup are implemented.</td><td>Production-volume validation, configurable alert thresholds, and export privacy review remain.</td></tr>
         </tbody>
       </table>
@@ -150,11 +150,11 @@
     <section>
       <h2>Pending work by execution order</h2>
       <ol>
-        <li><strong>Production deployment:</strong> deploy frontend/backend, configure TLS, domain, environment secrets, CSP, logging, health checks, rollback, and rate-limit monitoring.</li>
+        <li><strong>Controlled deployment:</strong> deploy frontend/backend to staging, configure TLS, final environment secrets, CSP, logging, <code>/health</code>, <code>/health/ready</code>, rollback, and rate-limit monitoring.</li>
         <li><strong>Payment validation:</strong> run a controlled Razorpay test payment, verify signature and webhook persistence, then test refund/reconciliation.</li>
         <li><strong>Realtime validation:</strong> keep customer and vendor browsers connected, create a booking, accept it, and confirm the UI receives the event without refresh.</li>
         <li><strong>Provider validation:</strong> configure and verify email, SMS OTP, WhatsApp, storage proof uploads, and VAPID push if push notifications are in scope.</li>
-        <li><strong>Session hardening:</strong> prevent protected workspaces from rendering until authentication hydration and token validity are resolved.</li>
+        <li><strong>Session validation:</strong> verify refresh-cookie expiry/recovery and protected-route behavior against the deployed staging origin.</li>
         <li><strong>Admin mutation testing:</strong> validate booking status changes, vendor approval, service/pricing changes, and audit records with controlled retained test data.</li>
         <li><strong>Quality gates:</strong> expand focused route authorization coverage to all protected groups, then add component and accessibility tests; the Playwright smoke suite is now repeatable and passing.</li>
         <li><strong>Analytics operations:</strong> validate event volume and funnel identity semantics in staging, redact or secure session identifiers in exports, and configure persisted alert thresholds.</li>
@@ -171,8 +171,10 @@
           <tr><td>Vendor acceptance</td><td><span class="status pass">PASS</span></td><td>Booking transitioned from <code>pending_vendor</code> to <code>accepted</code>.</td></tr>
           <tr><td>Admin API access</td><td><span class="status pass">PASS</span></td><td>Health, orders, vendors, customers, notifications, and audit logs returned 200.</td></tr>
           <tr><td>Authorization negatives</td><td><span class="status pass">PASS</span></td><td>401 for missing/invalid auth and 403 for customer access to admin routes.</td></tr>
-          <tr><td>Backend checks</td><td><span class="status pass">PASS</span></td><td>Build, lint, database check, and 8 tests passed.</td></tr>
-          <tr><td>Frontend checks</td><td><span class="status pass">PASS</span></td><td>Build, lint, and 7 tests passed.</td></tr>
+          <tr><td>Backend checks</td><td><span class="status pass">PASS</span></td><td>Build, lint, database check, and 40 tests passed.</td></tr>
+          <tr><td>Frontend checks</td><td><span class="status pass">PASS</span></td><td>Build, lint, and 8 tests passed.</td></tr>
+          <tr><td>Playwright E2E</td><td><span class="status pass">PASS</span></td><td>Guest/customer booking and vendor workflow coverage passed: 6 tests.</td></tr>
+          <tr><td>Production hardening</td><td><span class="status pass">PASS</span></td><td>HTTPS production-origin guard, database readiness endpoint, SPA cache policy, cookie clearing, and deployment guide updates are complete.</td></tr>
           <tr><td>Push configuration</td><td><span class="status warn">PENDING</span></td><td>Admin health reported VAPID as not configured.</td></tr>
         </tbody>
       </table>
@@ -182,7 +184,7 @@
       <h2>Current release decision</h2>
       <div class="card release">
         <h3>Not production-approved yet</h3>
-        <p>The core MVP workflow is operational and the live customer/vendor/admin path has been demonstrated. Release approval should wait until payment, deployment, provider delivery, realtime browser validation, session hardening, and final security/operations checks are complete.</p>
+        <p>The core MVP workflow is operational and the repository is ready for controlled staging deployment. Public production approval should wait until payment, provider delivery, live realtime/location behavior, deployed session recovery, storage, monitoring, backups, rollback, and final security/operations checks are complete.</p>
       </div>
       <p class="muted">Live test records are intentionally retained. No credentials or secret keys are included in this report.</p>
     </section>
