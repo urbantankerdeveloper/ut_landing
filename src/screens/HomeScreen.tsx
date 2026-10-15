@@ -15,21 +15,23 @@ export default function HomeScreen() {
     let active = true
     let resolving = false
     let lastGeocodedPoint: LatLngLiteral | null = null
+    let requestVersion = 0
     const unavailableLabel = 'Location unavailable · Choose an area when booking'
-    async function updateLocation(position: GeolocationPosition) {
+    async function updateLocation(position: GeolocationPosition, force = false) {
       if (!active || resolving) return
       const point: LatLngLiteral = { lat: position.coords.latitude, lng: position.coords.longitude }
       const movedEnough = !lastGeocodedPoint || Math.abs(point.lat - lastGeocodedPoint.lat) > 0.0005 || Math.abs(point.lng - lastGeocodedPoint.lng) > 0.0005
-      if (!movedEnough) return
+      if (!force && !movedEnough) return
       resolving = true
+      const currentRequest = ++requestVersion
       try {
         const approximateName = await reverseGeocodeApproximate(point)
-        if (!active) return
+        if (!active || currentRequest !== requestVersion) return
         lastGeocodedPoint = point
         setLocationLabel(approximateName)
         setLocationState('ready')
       } catch (error) {
-        if (!active) return
+        if (!active || currentRequest !== requestVersion) return
         setLocationLabel(unavailableLabel)
         setLocationState('unavailable')
         console.warn(JSON.stringify({ event: 'home.location_reverse_geocode_failed', error: error instanceof Error ? error.message : 'Unknown error' }))
@@ -39,15 +41,14 @@ export default function HomeScreen() {
     }
     function handleLocationError() {
         if (!active) return
+        requestVersion += 1
         setLocationLabel(unavailableLabel)
         setLocationState('unavailable')
     }
     const watchId = navigator.geolocation.watchPosition((position) => { void updateLocation(position) }, handleLocationError, { enableHighAccuracy: false, timeout: 10_000, maximumAge: 60_000 })
     function refreshLocation() {
-      if (!active) return
-      setLocationLabel('Finding your area…')
-      setLocationState('loading')
-      navigator.geolocation.getCurrentPosition((position) => { void updateLocation(position) }, handleLocationError, { enableHighAccuracy: false, timeout: 10_000, maximumAge: 0 })
+        if (!active) return
+        navigator.geolocation.getCurrentPosition((position) => { void updateLocation(position, true) }, handleLocationError, { enableHighAccuracy: false, timeout: 10_000, maximumAge: 0 })
     }
     function refreshWhenVisible() {
       if (document.visibilityState === 'visible') refreshLocation()

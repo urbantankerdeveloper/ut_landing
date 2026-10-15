@@ -12,7 +12,9 @@ export type CustomerProfile = { name: string; email: string; phone: string }
 export type TrackingSnapshot = { orderId: string; status: string; latitude?: number; longitude?: number; customerLatitude?: number; customerLongitude?: number; eta?: string; vehicle?: string; driver?: string; otpRequired?: boolean; recorded_at?: string; recordedAt?: string; trackingAvailable?: boolean }
 export type PaymentOrder = { id: string; amount: number; currency: string; keyId?: string }
 export type PaymentVerification = { verified: boolean; orderId: string }
-export type CreateBookingPayload = { serviceId: string; capacity: string; location: string; deliveryDate: string; notes?: string; couponCode?: string; latitude?: number; longitude?: number }
+export type CreateBookingPayload = { serviceId: string; capacity: string; location: string; deliveryDate: string; notes?: string; couponCode?: string; phone?: string; latitude?: number; longitude?: number }
+export type GuestOtpChallenge = { challengeId: string; expiresInSeconds: number }
+export type GuestSession = { accessToken: string; refreshToken: string; user: { username: string; name: string; role: 'customer' } }
 export type CreateSupportRequestPayload = { subject: string; message: string; orderId?: string; priority?: string }
 export type WalletTransaction = { id: string; amount: number; type: string; status: string; createdAt?: string }
 export type CustomerContract = { id: string; property_type: string; service_plan: Record<string, unknown>; address: string; estimate: number; status: string; created_at: string }
@@ -23,6 +25,8 @@ function normalizeBooking(item: Record<string, unknown>): CustomerBooking { retu
 function normalizeSubscription(item: Record<string, unknown>): CustomerSubscription { return { id: String(item.id), name: String(item.name ?? item.plan_id ?? 'Subscription'), status: item.status as CustomerSubscription['status'], nextDelivery: item.nextDelivery as string | undefined ?? item.next_delivery as string | undefined, amount: Number(item.amount ?? 0) } }
 
 export const customerApi = {
+  requestGuestOtp: (phone: string) => apiFetch<GuestOtpChallenge>('/auth/guest/request-otp', { method: 'POST', body: JSON.stringify({ phone }) }),
+  verifyGuestOtp: (payload: { challengeId: string; phone: string; otp: string; name?: string }) => apiFetch<GuestSession>('/auth/guest/verify-otp', { method: 'POST', body: JSON.stringify(payload) }),
   bookings: async () => (await apiFetch<Record<string, unknown>[]>('/customer/orders')).map(normalizeBooking),
   services: () => apiFetch<CustomerService[]>('/customer/services'),
   createBooking: (payload: CreateBookingPayload) => apiFetch<{ id: string; quotedAmountPaise?: number }>('/customer/orders/quote', { method: 'POST', body: JSON.stringify(payload) }),

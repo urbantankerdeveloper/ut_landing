@@ -48,6 +48,77 @@
     color: #a14f44;
 }
 
+.coupon-carousel-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 5px;
+    color: colors.$muted;
+    font-size: 10px;
+    font-weight: 800;
+}
+
+.coupon-scroll-button {
+    display: inline-grid;
+    width: 26px;
+    height: 26px;
+    place-items: center;
+    padding: 0;
+    color: colors.$aqua-dark;
+    background: #fff;
+    border: 1px solid #d2e1dc;
+    border-radius: 50%;
+}
+
+.booking-coupon-list {
+    display: flex;
+    gap: 9px;
+    padding: 2px 1px 5px;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+}
+
+.booking-coupon-card {
+    display: grid;
+    flex: 0 0 190px;
+    gap: 4px;
+    min-height: 92px;
+    padding: 11px;
+    color: colors.$ink;
+    text-align: left;
+    background: #f4fbf9;
+    border: 1px solid #d2e7e0;
+    border-radius: 10px;
+    scroll-snap-align: start;
+}
+
+.booking-coupon-card:hover,
+.booking-coupon-card.is-selected {
+    background: colors.$aqua-light;
+    border-color: colors.$aqua;
+}
+
+.booking-coupon-card strong { color: colors.$aqua-dark; font-size: 12px; }
+.booking-coupon-card span { font-size: 11px; }
+.booking-coupon-card small { color: colors.$muted; font-size: 9px; }
+
+.guest-verification {
+    display: grid;
+    gap: 7px;
+    padding: 15px 0;
+    border-top: 1px solid #e2eae6;
+}
+
+.guest-verification p { margin: 0; color: colors.$muted; font-size: 11px; }
+.guest-verification .eyebrow { color: colors.$aqua-dark; font-size: 10px; }
+.guest-otp-row { display: flex; gap: 8px; }
+.guest-otp-row input { flex: 1; min-width: 0; min-height: 40px; padding: 9px 10px; border: 1px solid #d2e1dc; border-radius: 8px; }
+.guest-otp-row .button { flex: none; padding: 8px 10px; }
+.verification-success { color: #297567 !important; }
+.verification-message { color: colors.$aqua-dark !important; }
+
 .booking-price-summary {
     display: grid;
     gap: 8px;
