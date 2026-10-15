@@ -4,10 +4,12 @@ import { z } from 'zod'
 import { authSupabase, supabase } from '../supabase.js'
 import { credentialsSchema } from '../lib/schemas.js'
 import { sendSms } from '../services/providers.js'
+import { config } from '../config.js'
 const router = Router()
 function parseCookies(header: string | undefined) { return Object.fromEntries((header ?? '').split(';').map((part) => part.trim().split('=').map(decodeURIComponent)).filter(([key, value]) => key && value)) }
-function setRefreshCookie(response: Response, token: string) { const secure = process.env.NODE_ENV === 'production' ? '; Secure' : ''; response.setHeader('Set-Cookie', `refresh_token=${encodeURIComponent(token)}; HttpOnly; Path=/api/auth; SameSite=Lax; Max-Age=2592000${secure}`) }
-function clearRefreshCookie(response: Response) { response.setHeader('Set-Cookie', 'refresh_token=; HttpOnly; Path=/api/auth; SameSite=Lax; Max-Age=0') }
+const refreshCookieSecurity = config.NODE_ENV === 'production' ? '; Secure' : ''
+function setRefreshCookie(response: Response, token: string) { response.setHeader('Set-Cookie', `refresh_token=${encodeURIComponent(token)}; HttpOnly; Path=/api/auth; SameSite=Lax; Max-Age=2592000${refreshCookieSecurity}`) }
+function clearRefreshCookie(response: Response) { response.setHeader('Set-Cookie', `refresh_token=; HttpOnly; Path=/api/auth; SameSite=Lax; Max-Age=0${refreshCookieSecurity}`) }
 const phoneSchema = z.string().regex(/^\d{10}$/)
 router.post('/guest/request-otp', async (request, response) => {
   const parsed = z.object({ phone: phoneSchema }).safeParse(request.body)

@@ -9,6 +9,7 @@ loadEnv({ path: resolve(backendDirectory, '.env') })
 
 const optionalSecret = z.preprocess((value) => value === '' ? undefined : value, z.string().min(1).optional())
 const schema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(8080),
   FRONTEND_ORIGIN: z.string().default('http://localhost:5173'),
   SUPABASE_URL: z.string().url(),
@@ -34,4 +35,7 @@ const schema = z.object({
 const parsed = schema.parse(process.env)
 const serviceRoleKey = parsed.SUPABASE_SERVICE_ROLE_KEY ?? parsed.SUPABASE_SECRET_KEY
 if (!serviceRoleKey) throw new Error('SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SECRET_KEY is required')
+if (parsed.NODE_ENV === 'production' && !parsed.FRONTEND_ORIGIN.startsWith('https://')) {
+  throw new Error('FRONTEND_ORIGIN must use HTTPS in production')
+}
 export const config = { ...parsed, SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey }
