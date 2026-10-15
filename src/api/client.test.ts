@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, apiFetch } from './client'
+import { useAuthStore } from '../stores/authStore'
 
 describe('apiFetch', () => {
   beforeEach(() => {
@@ -8,7 +9,9 @@ describe('apiFetch', () => {
     vi.stubGlobal('sessionStorage', {
       getItem: vi.fn(),
       setItem: vi.fn(),
+      removeItem: vi.fn(),
     })
+    useAuthStore.setState({ user: null, accessToken: null })
   })
 
   it('refreshes an expired session and retries the original request', async () => {
@@ -20,7 +23,7 @@ describe('apiFetch', () => {
 
     await expect(apiFetch<{ ok: boolean }>('/customer/profile')).resolves.toEqual({ ok: true })
     expect(fetchMock).toHaveBeenCalledTimes(3)
-    expect(sessionStorage.setItem).toHaveBeenCalledWith('urban-tanker-access-token', 'refreshed-token')
+    expect(useAuthStore.getState().accessToken).toBe('refreshed-token')
   })
 
   it('exposes the response status through ApiError', async () => {
@@ -29,8 +32,8 @@ describe('apiFetch', () => {
     await expect(apiFetch('/customer/profile')).rejects.toMatchObject(new ApiError('Request failed: 422', 422))
   })
 
-  it('adds the stored access token and preserves request options', async () => {
-    vi.mocked(sessionStorage.getItem).mockReturnValue('access-token')
+  it('adds the in-memory access token and preserves request options', async () => {
+    useAuthStore.getState().setAccessToken('access-token')
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },

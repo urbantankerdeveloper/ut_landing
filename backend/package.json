@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "db:check": "tsx src/scripts/db-check.ts",
-    "db:migrate": "tsx src/scripts/migrate.ts",
+    "db:migrate": "tsx src/scripts/reset-database.ts",
+    "db:reset": "tsx src/scripts/reset-database.ts",
     "dev": "npm run db:check && tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "start": "npm run db:check && node dist/server.js",

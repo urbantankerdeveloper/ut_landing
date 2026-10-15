@@ -61,7 +61,7 @@ export default function LoginScreen() {
           return
         }
         if (!response.user?.role) throw new Error('Your account was created but has no valid workspace role.')
-        signIn({ username: response.user.username ?? response.user.email ?? normalizedUsername, role: response.user.role, name: response.user.name ?? name.trim() }, response.accessToken ?? response.token, response.refreshToken)
+        signIn({ username: response.user.username ?? response.user.email ?? normalizedUsername, role: response.user.role, name: response.user.name ?? name.trim() }, response.accessToken ?? response.token)
         openWorkspace(response.user.role)
         return
       }
@@ -80,7 +80,7 @@ export default function LoginScreen() {
       }
       const response = await authApi.login(normalizedUsername, password)
       if (!response.user.role) throw new Error('Your account has no valid workspace role.')
-      signIn({ username: response.user.username ?? response.user.email ?? normalizedUsername, role: response.user.role, name: response.user.name ?? normalizedUsername }, response.accessToken ?? response.token, response.refreshToken)
+      signIn({ username: response.user.username ?? response.user.email ?? normalizedUsername, role: response.user.role, name: response.user.name ?? normalizedUsername }, response.accessToken ?? response.token)
       trackEvent('auth.login', { role: response.user.role, sessionId: sessionStorage.getItem('urban-tanker-analytics-session') ?? '' })
       openWorkspace(response.user.role)
     } catch (submissionError) {

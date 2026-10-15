@@ -1,4 +1,5 @@
 import { io, type Socket } from 'socket.io-client'
+import { useAuthStore } from '../stores/authStore'
 
 export type RealtimeMessage = { type: string; payload: unknown }
 export class VendorRealtimeClient {
@@ -10,7 +11,7 @@ export class VendorRealtimeClient {
   connect() {
     if (this.socket || !navigator.onLine) return
     const socket = io(this.url, {
-      auth: (callback) => callback({ token: sessionStorage.getItem('urban-tanker-access-token') }),
+      auth: (callback) => callback({ token: useAuthStore.getState().accessToken }),
       transports: ['polling', 'websocket'],
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -20,7 +21,7 @@ export class VendorRealtimeClient {
     socket.onAny((type, payload) => this.onMessage({ type, payload }))
     socket.on('connect', () => this.bookingIds.forEach((bookingId) => socket.emit('booking:join', bookingId)))
     socket.on('connect_error', () => {
-      if (!sessionStorage.getItem('urban-tanker-access-token')) this.disconnect()
+      if (!useAuthStore.getState().accessToken) this.disconnect()
     })
   }
   joinBooking(bookingId: string) { this.bookingIds.add(bookingId); this.socket?.emit('booking:join', bookingId) }
