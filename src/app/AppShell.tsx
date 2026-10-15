@@ -13,7 +13,7 @@ export function AppShell() {
 	const openWorkspace = useNavigationStore((state) => state.openWorkspace)
 	const user = useAuthStore((state) => state.user)
 	useEffect(() => {
-		if (user && !activeScreen.endsWith('-workspace')) openWorkspace(user.role as WorkspaceRole)
+		if (user && (activeScreen === 'home' || activeScreen === 'login')) openWorkspace(user.role as WorkspaceRole)
 	}, [activeScreen, openWorkspace, user])
 	const isWorkspace = activeScreen.endsWith('-workspace')
 	const isAuthScreen = activeScreen === 'login'

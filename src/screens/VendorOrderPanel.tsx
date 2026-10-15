@@ -28,7 +28,7 @@ export default function VendorOrderPanel({ onNotice }: Props) {
   const activeTrackingOrderId = orders.find((order) => order.status === 'En route')?.id ?? null
   useVendorLocation(activeTrackingOrderId)
   const filtered = useMemo(() => orders.filter((order) => (order.distance === undefined || order.distance <= Number(radius)) && order.status !== 'Rejected'), [orders, radius])
-  const vehicleRecords = demoDataEnabled ? demoVehicles : (vehiclesQuery.data ?? []).filter((vehicle) => vehicle.is_active && vehicle.verification === 'approved').map((vehicle) => ({ id: vehicle.id, label: `${vehicle.registration_number} · ${vehicle.capacity_litres ?? 0} KL` }))
+  const vehicleRecords = demoDataEnabled ? demoVehicles : (vehiclesQuery.data ?? []).filter((vehicle) => vehicle.is_active && vehicle.verification === 'approved').map((vehicle) => ({ id: vehicle.id, label: `${vehicle.registration_number} · ${Math.round((vehicle.capacity_litres ?? 0) / 1000)} KL` }))
   const driverRecords = demoDataEnabled ? demoDrivers : (driversQuery.data ?? []).filter((driver) => driver.is_active && driver.verification === 'approved').map((driver) => ({ id: driver.id, label: driver.name }))
   const vehicles = vehicleRecords.map((vehicle) => vehicle.label)
   const drivers = driverRecords.map((driver) => driver.label)
