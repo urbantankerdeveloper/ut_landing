@@ -259,12 +259,27 @@
 .social-links a {
     display: grid;
     place-items: center;
-    width: 36px;
-    height: 36px;
+    width: 42px;
+        height: 42px;
     color: colors.$ink;
     background: #fff;
     border: 1px solid #cfe2e1;
     border-radius: 50%;
+    transition: color .2s, background .2s, border-color .2s, transform .2s;
+    }
+    
+    .social-links a svg {
+        width: 18px;
+        height: 18px;
+    }
+    
+    .social-links a:hover,
+    .social-links a:focus-visible {
+        color: colors.$ink;
+        background: #fff;
+        border-color: #cfe2e1;
+        transform: translateY(-2px);
+        text-decoration: none;
 }
 
 .qr-block {
