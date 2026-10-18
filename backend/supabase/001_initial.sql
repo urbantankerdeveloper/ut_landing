@@ -648,6 +648,7 @@ create table if not exists public.partner_applications (
   updated_at timestamptz not null default now()
 );
 create index if not exists partner_applications_status_created_idx on public.partner_applications(status, created_at desc);
+grant all privileges on public.partner_applications to service_role;
 drop trigger if exists partner_applications_updated_at on public.partner_applications;
 create trigger partner_applications_updated_at before update on public.partner_applications for each row execute function public.set_updated_at();
 

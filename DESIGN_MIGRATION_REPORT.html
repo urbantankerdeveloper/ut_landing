@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Urban Tanker Design Migration Report</title>
+<style>
+:root{--ink:#10343a;--muted:#60777a;--line:#dce9e8;--paper:#f5fbfc;--white:#fff;--aqua:#007c91;--mint:#c7eadb;--yellow:#f8ca63;--coral:#d96250;--shadow:0 18px 45px rgba(15,61,68,.12)}
+*{box-sizing:border-box}body{margin:0;color:var(--ink);background:var(--paper);font:15px/1.6 system-ui,-apple-system,Segoe UI,sans-serif}header{padding:64px max(24px,calc((100% - 1180px)/2));color:#fff;background:linear-gradient(135deg,#10343a,#007c91)}header p{margin:0 0 10px;color:#c7eadb;text-transform:uppercase;letter-spacing:.16em;font-size:11px}h1,h2,h3{line-height:1.15}h1{max-width:850px;margin:0;font-size:clamp(36px,6vw,72px);letter-spacing:-3px}header small{display:block;margin-top:20px;color:#d6eeee}main{max-width:1180px;padding:40px 24px 80px;margin:auto}section{padding:28px 0;border-bottom:1px solid var(--line)}h2{margin:0 0 18px;font-size:30px;letter-spacing:-1px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.card{padding:20px;background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 8px 22px rgba(20,71,74,.06)}.card strong{display:block;color:var(--aqua);font-size:13px}.card p{margin:7px 0 0;color:var(--muted);font-size:13px}table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:13px}th,td{padding:12px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}th{color:#fff;background:var(--ink);font-size:11px;text-transform:uppercase;letter-spacing:.08em}tr:last-child td{border-bottom:0}.tag{display:inline-block;padding:3px 8px;color:#216754;background:#dff2e9;border-radius:999px;font-size:11px;font-weight:700}.blocked{color:#9a5d18;background:#fff0c9}.flow{display:flex;flex-wrap:wrap;gap:10px;align-items:center}.flow span{padding:10px 14px;background:#fff;border:1px solid var(--line);border-radius:10px;font-weight:700}.flow b{color:var(--aqua)}code{padding:2px 5px;background:#e7f5f5;border-radius:4px;color:#005c6c}ul{padding-left:20px}.checks{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.check{padding:12px 14px;background:#fff;border-left:4px solid var(--aqua);border-radius:8px}.check.warn{border-left-color:var(--yellow)}footer{max-width:1180px;padding:0 24px 40px;margin:auto;color:var(--muted);font-size:12px}@media(max-width:760px){.grid,.checks{grid-template-columns:1fr}table{display:block;overflow:auto;white-space:normal}.flow{align-items:stretch;flex-direction:column}.flow span{width:100%}header{padding:42px 20px}main{padding:25px 20px 60px}}
+</style>
+</head>
+<body>
+<header><p>Urban Tanker · 2026-10-18</p><h1>Frontend, backend, route and design migration</h1><small>Implementation report for the React/Vite application and the supplied public_html design references.</small></header>
+<main>
+<section><h2>Architecture</h2><div class="grid"><article class="card"><strong>Frontend</strong><p>React 19 + TypeScript + Vite. Zustand owns SPA screen state. SCSS is composed through <code>src/styles/app.scss</code>.</p></article><article class="card"><strong>Backend</strong><p>Express + TypeScript + Supabase service-role API. Role authorization is enforced by middleware and server routes.</p></article><article class="card"><strong>Reference site</strong><p>Original <code>public_html</code> files remain intact and are served independently on port 4174.</p></article></div></section>
+<section><h2>SPA and navigation</h2><div class="flow"><span>Browser path or deep link</span><b>→</b><span>React SPA shell</span><b>→</b><span>Zustand screen state</span><b>→</b><span>Role workspace when authenticated</span></div><p>Existing browser paths and client-side navigation are preserved. React navigation does not mutate the address bar. The separate reference server retains its original .html URLs.</p></section>
+<section><h2>Route and role matrix</h2><table><thead><tr><th>Area</th><th>Routes / screens</th><th>Reference mapping</th><th>Status</th></tr></thead><tbody>
+<tr><td>Public</td><td>Home, Services, Subscriptions, Booking, About</td><td>index, services, subscriptions, booking, about</td><td><span class="tag">Implemented</span></td></tr>
+<tr><td>Public additions</td><td>Tracking, Coupons, Terms, Policy</td><td>tracking, coupons, terms, policy references</td><td><span class="tag">Implemented</span></td></tr>
+<tr><td>Partner</td><td>React partner application screen</td><td>partner.html hero, stats, form, service choices, fleet, activation sidebar</td><td><span class="tag">Implemented</span></td></tr>
+<tr><td>Customer</td><td>Overview, booking, bookings, tracking, addresses, profile, subscriptions, usage, wallet, invoices, membership, offers, notifications, support, contracts</td><td>account*.html protected reference family</td><td><span class="tag">Implemented</span></td></tr>
+<tr><td>Vendor</td><td>Overview, orders, services, vehicles, drivers, documents, attendance, earnings, complaints, notifications</td><td>vendor*.html protected reference family</td><td><span class="tag">Implemented</span></td></tr>
+<tr><td>Admin</td><td>Dashboard, live, bookings, reports, analytics, vendors, fleet, drivers, customers, onboarding, services, finance, complaints, alerts, coupons, system health</td><td>admin*.html protected reference family</td><td><span class="tag">Implemented</span></td></tr>
+<tr><td>Dispatcher</td><td>Dashboard, live, bookings, reports, alerts</td><td>No dedicated public HTML reference</td><td><span class="tag blocked">Code-reviewed</span></td></tr>
+</tbody></table></section>
+<section><h2>Application flows by role</h2><p>The diagrams show the shared SPA shell, permission boundary, and role-specific actions after authentication.</p><div class="diagram"><pre class="mermaid">flowchart LR
+	Guest[Guest / public visitor] --> Shell[React SPA shell]
+	Shell --> Public[Home, services, booking, tracking, partner, legal]
+	Public --> Login[Login or signup]
+	Login --> Role{Authenticated role}
+	Role --> Customer[Customer workspace]
+	Role --> Vendor[Vendor workspace]
+	Role --> Dispatcher[Dispatcher workspace]
+	Role --> Admin[Admin workspace]
+	Customer --> CustomerActions[Book, track, account, invoices, support]
+	Vendor --> VendorActions[Orders, fleet, services, delivery updates]
+	Dispatcher --> DispatchActions[Live queue, bookings, reports, alerts]
+	Admin --> AdminActions[Platform, vendors, customers, finance, configuration]
+	CustomerActions --> Lifecycle[Booking lifecycle]
+	VendorActions --> Lifecycle
+	DispatchActions --> Lifecycle
+	AdminActions --> Lifecycle</pre></div><div class="diagram"><pre class="mermaid">flowchart TD
+	Request[Customer creates booking] --> Validate[Server validates service, location, capacity, payment]
+	Validate --> Queue[pending_vendor]
+	Queue --> Assign[Approved vendor, vehicle, and driver assigned]
+	Assign --> Accepted[Vendor accepts]
+	Accepted --> EnRoute[Live location updates]
+	EnRoute --> Arrived[Arrival and delivery OTP]
+	Arrived --> Delivered[Delivered]
+	Queue --> Cancelled[Permitted cancellation]
+	Accepted --> Cancelled
+	Delivered --> Records[Invoice, notifications, audit history]</pre></div></section>
+<section><h2>Admin workflow</h2><p>Admins govern the platform, approve operational records, and resolve financial or system exceptions. These actions are protected by the server-side admin role guard.</p><div class="diagram"><pre class="mermaid">flowchart TD
+	AdminLogin[Admin signs in] --> Dashboard[Admin dashboard]
+	Dashboard --> Pulse[Review operations pulse]
+	Pulse --> Live[Live operations]
+	Pulse --> Bookings[Booking management]
+	Pulse --> Reports[Reports and analytics]
+	Live --> Exceptions[Identify delivery exceptions]
+	Bookings --> Detail[Open booking detail]
+	Detail --> Assignment[Review vendor, vehicle, and driver assignment]
+	Assignment --> Resolve[Update or escalate operational issue]
+	Dashboard --> Records[Manage platform records]
+	Records --> Vendors[Approve vendors and onboarding]
+	Records --> Fleet[Review fleet and drivers]
+	Records --> Customers[Review customer records]
+	Dashboard --> Finance[Finance and payouts]
+	Dashboard --> Config[Services, pricing, coupons, system health]
+	Exceptions --> Audit[Audit log and notifications]
+	Resolve --> Audit
+	Finance --> Audit
+	classDef admin fill:#10343a,stroke:#007c91,color:#fff
+	classDef action fill:#e7f5f5,stroke:#007c91,color:#10343a
+	class AdminLogin,Dashboard,Pulse,Live,Bookings,Reports,Exceptions,Detail,Assignment,Resolve,Records,Vendors,Fleet,Customers,Finance,Config,Audit action
+	class AdminLogin,Config admin</pre></div></section>
+<section><h2>Dispatcher workflow</h2><p>Dispatchers coordinate active deliveries and alerts without access to admin configuration, finance, customer management, or partner approval controls.</p><div class="diagram"><pre class="mermaid">flowchart TD
+	DispatcherLogin[Dispatcher signs in] --> DispatchDashboard[Dispatch dashboard]
+	DispatchDashboard --> Queue[Open bookings queue]
+	DispatchDashboard --> LiveBoard[Live operations board]
+	DispatchDashboard --> Alerts[Operational alerts]
+	Queue --> Inspect[Inspect booking and service requirements]
+	Inspect --> Availability[Check approved vendor and fleet availability]
+	Availability --> Assign[Assign vendor, vehicle, and driver]
+	Assign --> Monitor[Monitor accepted, en route, arrived states]
+	LiveBoard --> Monitor
+	Monitor --> Escalate{Exception?}
+	Escalate -->|No| Complete[Delivery continues to completion]
+	Escalate -->|Yes| Alerts
+	Alerts --> Escalate
+	DispatchDashboard --> DispatchReports[Dispatch reports]
+	Complete --> DispatchReports
+	classDef dispatch fill:#dff2e9,stroke:#277b61,color:#10343a
+	classDef restricted fill:#fff0c9,stroke:#c48a22,color:#10343a
+	class DispatcherLogin,DispatchDashboard,Queue,LiveBoard,Alerts,Inspect,Availability,Assign,Monitor,Complete,DispatchReports dispatch
+	class Escalate restricted</pre></div></section>
+<section><h2>Socket.IO connection flow</h2><p>Realtime connections authenticate with the access token before the server loads the user profile and assigns permitted rooms. REST APIs remain the source of truth for mutations.</p><div class="diagram"><pre class="mermaid">flowchart LR
+	Client[Customer, vendor, admin, or dispatcher browser] --> Connect[Socket.IO connect with auth token]
+	Connect --> Guard[io.use validates token with Supabase]
+	Guard --> Profile[Server loads profile role]
+	Profile --> CustomerRoom[Customer room: customer:userId]
+	Profile --> VendorLookup[Find vendor profile by owner_profile_id]
+	Profile --> AdminRoom{Role is admin?}
+	VendorLookup --> VendorRoom[Vendor room: vendor:vendorId]
+	AdminRoom -->|Yes| Admins[Admin room: admins]
+	AdminRoom -->|No| Connected[Authenticated connection]
+	CustomerRoom --> Connected
+	VendorRoom --> Connected
+	Admins --> Connected
+	Connected --> BookingJoin[Client requests booking:join]
+	BookingJoin --> BookingAuth[Server checks customer, vendor, or admin ownership]
+	BookingAuth --> BookingRoom[Booking room: booking:bookingId]
+	BookingRoom --> Events[Realtime booking, location, payment, and notification events]
+	classDef client fill:#e7f5f5,stroke:#007c91,color:#10343a
+	classDef guard fill:#dff2e9,stroke:#277b61,color:#10343a
+	classDef room fill:#10343a,stroke:#10343a,color:#fff
+	class Client,Connect,Connected,BookingJoin,BookingAuth client
+	class Guard,Profile,VendorLookup,AdminRoom guard
+	class CustomerRoom,VendorRoom,Admins,BookingRoom,Events room</pre></div><div class="diagram"><pre class="mermaid">flowchart TD
+	Customer[Customer] -->|Owns booking| CustomerEvents[Can join own booking room]
+	Vendor[Vendor] -->|Owns assigned booking| VendorEvents[Can join assigned booking room]
+	Admin[Admin] -->|Platform oversight| AdminEvents[Can join any authorized booking room]
+	Dispatcher[Dispatcher] --> DispatcherConnect[Token-authenticated socket connection]
+	DispatcherConnect --> DispatcherNote[Current backend has no dedicated dispatcher room]
+	DispatcherNote --> DispatcherRest[Dispatch actions use protected REST/workspace flows]
+	CustomerEvents --> Realtime[Authorized realtime events]
+	VendorEvents --> Realtime
+	AdminEvents --> Realtime
+	classDef role fill:#e7f5f5,stroke:#007c91,color:#10343a
+	classDef note fill:#fff0c9,stroke:#c48a22,color:#10343a
+	class Customer,Vendor,Admin,CustomerEvents,VendorEvents,AdminEvents,Realtime role
+	class Dispatcher,DispatcherConnect,DispatcherNote,DispatcherRest note</pre></div></section>
+<section><h2>Backend database data flow</h2><p>All role operations pass through Express routes. Authentication, role checks, validation, database writes, audit records, and realtime events remain separate stages.</p><div class="diagram"><pre class="mermaid">flowchart LR
+	Client[React client] --> Http[HTTP request]
+	Http --> Middleware[Helmet, CORS, rate limit, JSON parser]
+	Middleware --> Route[Express route]
+	Route --> Auth{Protected route?}
+	Auth -->|Yes| Token[Validate Supabase access token]
+	Token --> RoleGuard[Load profile and enforce role]
+	Auth -->|No| PublicValidate[Public Zod validation]
+	RoleGuard --> Validate[Request and business validation]
+	PublicValidate --> Validate
+	Validate --> Service[Supabase service-role client]
+	Service --> Database[(PostgreSQL public schema)]
+	Database --> RLS[RLS policies for direct authenticated access]
+	Database --> Audit[Audit logs and updated_at triggers]
+	Database --> Response[JSON response]
+	Database --> Realtime[Socket.IO event emission]
+	Response --> Client
+	Realtime --> Client
+	classDef edge fill:#e7f5f5,stroke:#007c91,color:#10343a
+	classDef secure fill:#dff2e9,stroke:#277b61,color:#10343a
+	classDef data fill:#10343a,stroke:#10343a,color:#fff
+	class Client,Http,Middleware,Route,Response,Realtime edge
+	class Auth,Token,RoleGuard,PublicValidate,Validate,Service secure
+	class Database,RLS,Audit data</pre></div><div class="diagram"><pre class="mermaid">flowchart TD
+	CustomerAPI[Customer API] --> CustomerTables[profiles, bookings, service_catalog, payments, invoices, notifications]
+	VendorAPI[Vendor API] --> VendorTables[vendors, bookings, vehicles, drivers, vendor_service_availability, documents]
+	DispatcherAPI[Dispatcher API] --> DispatchTables[bookings, booking_events, alerts, reports]
+	AdminAPI[Admin API] --> AdminTables[profiles, vendors, customers, coupons, payments, payouts, audit_logs]
+	PartnerAPI[Partner application API] --> PartnerTable[partner_applications]
+	CustomerTables --> Policies[Role-scoped RLS and server authorization]
+	VendorTables --> Policies
+	DispatchTables --> Policies
+	AdminTables --> Policies
+	PartnerTable --> Policies
+	Policies --> Response[Validated API response]
+	classDef api fill:#e7f5f5,stroke:#007c91,color:#10343a
+	classDef tables fill:#fff,stroke:#007c91,color:#10343a
+	classDef security fill:#dff2e9,stroke:#277b61,color:#10343a
+	class CustomerAPI,VendorAPI,DispatcherAPI,AdminAPI,PartnerAPI api
+	class CustomerTables,VendorTables,DispatchTables,AdminTables,PartnerTable tables
+	class Policies,Response security</pre></div><div class="diagram"><pre class="mermaid">flowchart TD
+	BookingRequest[Create booking] --> Transition[transition_booking database function]
+	Transition --> Booking[Update bookings status and assignment]
+	Transition --> Events[Insert booking_events]
+	Booking --> Audit[Audit status change]
+	Booking --> Notification[Create recipient notification]
+	Booking --> Socket[Emit authorized Socket.IO event]
+	VendorLocation[Vendor location update] --> LocationTable[vendor_location_updates]
+	LocationTable --> Socket
+	Socket --> CustomerRoom[Customer booking room]
+	Socket --> VendorRoom[Vendor booking room]
+	Socket --> AdminRoom[Admin monitoring room]
+	classDef operation fill:#e7f5f5,stroke:#007c91,color:#10343a
+	classDef persistence fill:#10343a,stroke:#10343a,color:#fff
+	class BookingRequest,Transition,Audit,Notification,Socket,VendorLocation operation
+	class Booking,Events,LocationTable,CustomerRoom,VendorRoom,AdminRoom persistence</pre></div></section>
+<section><h2>Visual system</h2><div class="grid"><article class="card"><strong>Color</strong><p>Aqua primary actions, deep teal ink, mint status surfaces, pale paper background, yellow focus accents, and coral exception states.</p></article><article class="card"><strong>Typography</strong><p>Manrope for interface text, DM Mono for labels and eyebrows, expressive display scale for hero sections.</p></article><article class="card"><strong>Surfaces</strong><p>Low-radius cards, fine teal borders, restrained shadows, dark featured panels, responsive grids, and visible focus states.</p></article><article class="card"><strong>Motion</strong><p>Existing reveal, hover lift, loading skeleton, tracking pulse, and reduced-motion support are preserved.</p></article><article class="card"><strong>Responsive UI</strong><p>Desktop multi-column layouts collapse to one column at mobile widths; workspace navigation becomes a drawer.</p></article><article class="card"><strong>Accessibility</strong><p>Skip links, semantic headings, labelled controls, keyboard buttons, focus outlines, status messages, and validation states.</p></article></div></section>
+<section><h2>Backend and data changes</h2><ul><li>Added <code>partner_applications</code> to the canonical <code>backend/supabase/001_initial.sql</code> only.</li><li>Added <code>POST /api/partner/applications</code> with server-side Zod validation and global rate limiting.</li><li>Added admin-only application list and status-review endpoints.</li><li>Added RLS, status checks, indexes, references, and updated-at trigger.</li><li>Partner document names are recorded; binary uploads remain governed by the existing authenticated storage flow.</li></ul></section>
+<section><h2>Verification</h2><div class="checks"><div class="check">Frontend lint passed</div><div class="check">Frontend build passed</div><div class="check">Frontend tests passed: 8 tests</div><div class="check">Backend lint passed</div><div class="check">Backend build passed</div><div class="check warn">Backend tests require valid Supabase environment configuration</div></div></section>
+<section><h2>Local commands</h2><p><code>npm run dev</code> starts the React application at <code>http://localhost:5173/</code>.</p><p><code>npm run reference</code> starts the intact HTML reference site at <code>http://localhost:4174/</code>.</p><p><code>npm run reference:list</code> lists every HTML reference page.</p></section>
+</main><footer>Urban Tanker migration report. No production database or live reference account was accessed or modified.</footer>
+<script type="module">import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs'; mermaid.initialize({ startOnLoad: true, theme: 'base', themeVariables: { primaryColor: '#e7f5f5', primaryTextColor: '#10343a', primaryBorderColor: '#007c91', lineColor: '#007c91', secondaryColor: '#dff2e9', tertiaryColor: '#fff' } });</script></body></html>
