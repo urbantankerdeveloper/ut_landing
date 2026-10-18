@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { customerApi, type CreateBookingPayload, type CreateSupportRequestPayload, type CustomerProfile } from '../api/customer'
-import { demoDataEnabled } from '../constants/demo'
+import { customerDemoDataEnabled } from '../constants/demo'
 import { useRealtimeInvalidation } from './useRealtimeInvalidation'
 import { loadRazorpayWidget } from './useFrontendFeatures'
 
-const customerQueryOptions = { enabled: !demoDataEnabled, staleTime: 60_000 }
+const customerQueryOptions = { enabled: !customerDemoDataEnabled, staleTime: 60_000 }
 export const customerQueryKeys = { bookings: ['customer', 'bookings'], addresses: ['customer', 'addresses'], subscriptions: ['customer', 'subscriptions'], invoices: ['customer', 'invoices'], support: ['customer', 'support'], profile: ['customer', 'profile'], wallet: ['customer', 'wallet'], contracts: ['customer', 'contracts'], offers: ['customer', 'offers'], membershipPlans: ['customer', 'membership-plans'], membership: ['customer', 'membership'], notifications: ['customer', 'notifications'], tracking: (orderId: string) => ['customer', 'tracking', orderId] } as const
 
 export function useCustomerBookings() { const query = useQuery({ queryKey: customerQueryKeys.bookings, queryFn: customerApi.bookings, ...customerQueryOptions }); useRealtimeInvalidation(customerQueryKeys.bookings); return query }
@@ -15,7 +15,7 @@ export function useCreateCustomerAddress() { const queryClient = useQueryClient(
 export function useDeleteCustomerAddress() { const queryClient = useQueryClient(); return useMutation({ mutationFn: (id: string) => customerApi.deleteAddress(id), onSuccess: () => queryClient.invalidateQueries({ queryKey: customerQueryKeys.addresses }) }) }
 export function useCustomerSubscriptions() { const query = useQuery({ queryKey: customerQueryKeys.subscriptions, queryFn: customerApi.subscriptions, ...customerQueryOptions }); useRealtimeInvalidation(customerQueryKeys.subscriptions); return query }
 export function useCustomerInvoices() { const query = useQuery({ queryKey: customerQueryKeys.invoices, queryFn: customerApi.invoices, ...customerQueryOptions }); useRealtimeInvalidation(customerQueryKeys.invoices); return query }
-export function useCustomerTracking(orderId: string | null) { return useQuery({ queryKey: orderId ? customerQueryKeys.tracking(orderId) : ['customer', 'tracking', 'empty'], queryFn: () => customerApi.tracking(orderId as string), enabled: Boolean(orderId) && !demoDataEnabled, staleTime: 10_000, refetchInterval: 15_000 }) }
+export function useCustomerTracking(orderId: string | null) { return useQuery({ queryKey: orderId ? customerQueryKeys.tracking(orderId) : ['customer', 'tracking', 'empty'], queryFn: () => customerApi.tracking(orderId as string), enabled: Boolean(orderId) && !customerDemoDataEnabled, staleTime: 10_000, refetchInterval: 15_000 }) }
 export function useCustomerDeliveryOtp() { return useMutation({ mutationFn: (orderId: string) => customerApi.requestDeliveryOtp(orderId) }) }
 export function useCustomerSupportRequests() { return useQuery({ queryKey: customerQueryKeys.support, queryFn: customerApi.support, ...customerQueryOptions }) }
 export function useCustomerProfile() { const query = useQuery({ queryKey: customerQueryKeys.profile, queryFn: customerApi.profile, ...customerQueryOptions }); useRealtimeInvalidation(customerQueryKeys.profile); return query }

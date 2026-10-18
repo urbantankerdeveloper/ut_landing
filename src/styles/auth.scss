@@ -19,6 +19,12 @@
         grid-template-rows: minmax(220px, 32svh) auto;
     }
 
+    .auth-loading-screen { display:grid; place-items:center; min-height:100svh; color:colors.$muted; background:colors.$white; }
+    .auth-loading-screen p { margin:14px 0 0; font-size:12px; font-weight:800; }
+    .auth-loading-spinner { width:32px; height:32px; border:3px solid colors.$line; border-top-color:colors.$aqua; border-radius:50%; animation:auth-loading-spin .8s linear infinite; }
+    @keyframes auth-loading-spin { to { transform:rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .auth-loading-spinner { animation:none; } }
+
     .auth-story {
         min-height: 0;
         padding: 20px;

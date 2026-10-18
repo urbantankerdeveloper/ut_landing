@@ -16,14 +16,14 @@ import { CustomerSupportPanel } from './CustomerSupportPanel'
 import BookingScreen from './BookingScreen'
 import { CustomerUsagePanel } from './CustomerUsagePanel'
 import { VendorOfflineConflicts } from '../components/VendorOfflineConflicts'
-import { demoDataEnabled } from '../constants/demo'
+import { demoDataEnabled, customerDemoDataEnabled } from '../constants/demo'
 import { useAdminOrders } from '../hooks/useAdminData'
 import { useCustomerBookings } from '../hooks/useCustomerData'
 import { useVendorOrders } from '../hooks/useVendorData'
 import { CustomerBookingsTable } from './CustomerBookingsTable'
 
 type Props = { role: WorkspaceRole; item: string; onNavigate: (screen: 'booking' | 'bookings' | 'offers' | 'home') => void; onNotice: (message: string) => void }
-const bookingRows = demoDataEnabled ? [{ id: 'UT-2408', service: 'Water tanker · 9 KL', place: 'ECR, Chennai', status: 'In progress', amount: '₹1,850' }, { id: 'UT-2394', service: 'Tank & sump cleaning', place: 'Adyar, Chennai', status: 'Delivered', amount: '₹2,400' }, { id: 'UT-2388', service: 'Sewage tanker', place: 'Velachery, Chennai', status: 'Scheduled', amount: '₹3,100' }] : []
+const bookingRows = customerDemoDataEnabled ? [{ id: 'UT-2408', service: 'Water tanker · 9 KL', place: 'ECR, Chennai', status: 'In progress', amount: '₹1,850' }, { id: 'UT-2394', service: 'Tank & sump cleaning', place: 'Adyar, Chennai', status: 'Delivered', amount: '₹2,400' }, { id: 'UT-2388', service: 'Sewage tanker', place: 'Velachery, Chennai', status: 'Scheduled', amount: '₹3,100' }] : []
 const vendorRows = demoDataEnabled ? [{ id: 'UT-2412', service: 'Water tanker · 12 KL', place: 'OMR, Chennai', status: 'Available', amount: '₹2,250' }, { id: 'UT-2411', service: 'Sewage tanker · 9 KL', place: 'Guindy, Chennai', status: 'Review', amount: '₹2,900' }, { id: 'UT-2409', service: 'Water tanker · 6 KL', place: 'Sholinganallur, Chennai', status: 'Accepted', amount: '₹1,500' }] : []
 const adminRows = demoDataEnabled ? [{ id: 'UT-2412', service: 'Water tanker · 12 KL', place: 'OMR, Chennai', status: 'Awaiting vendor', amount: '₹2,250' }, { id: 'UT-2411', service: 'Sewage tanker · 9 KL', place: 'Guindy, Chennai', status: 'In progress', amount: '₹2,900' }, { id: 'UT-2409', service: 'Tank cleaning', place: 'Adyar, Chennai', status: 'Delivered', amount: '₹2,100' }] : []
 

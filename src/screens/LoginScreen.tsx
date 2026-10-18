@@ -10,7 +10,6 @@ type AuthMode = 'login' | 'signup' | 'reset'
 type SignupRole = 'customer' | 'vendor' | 'admin'
 type DemoAccount = { role: WorkspaceRole; name: string; usernames: string[]; password: string }
 const demoAccounts: DemoAccount[] = demoDataEnabled ? [
-  { role: 'customer', name: 'Demo Customer', usernames: ['customer', 'customer@urbantanker.com'], password: 'customer123' },
   { role: 'vendor', name: 'Demo Vendor', usernames: ['vendor', 'vendor@bluedrop.demo'], password: 'vendor123' },
   { role: 'admin', name: 'Demo Admin', usernames: ['admin', 'admin@urbantanker.com'], password: 'Maneesh@123' },
 ] : []

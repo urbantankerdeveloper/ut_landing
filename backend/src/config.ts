@@ -8,6 +8,7 @@ loadEnv({ path: resolve(backendDirectory, '.env.local') })
 loadEnv({ path: resolve(backendDirectory, '.env') })
 
 const optionalSecret = z.preprocess((value) => value === '' ? undefined : value, z.string().min(1).optional())
+const optionalEmail = z.preprocess((value) => value === '' ? undefined : value, z.string().email().optional())
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(8080),
@@ -23,9 +24,9 @@ const schema = z.object({
   SMTP_HOST: z.string().default('smtp.gmail.com'),
   SMTP_PORT: z.coerce.number().int().positive().default(465),
   SMTP_SECURE: z.preprocess((value) => value === undefined ? undefined : value === 'true', z.boolean().default(true)),
-  SMTP_USER: z.string().email().optional(),
+  SMTP_USER: optionalEmail,
   SMTP_PASSWORD: optionalSecret,
-  MAIL_FROM: z.preprocess((value) => value === '' ? undefined : value, z.string().email().optional()),
+  MAIL_FROM: optionalEmail,
   TWILIO_ACCOUNT_SID: optionalSecret,
   TWILIO_AUTH_TOKEN: optionalSecret,
   TWILIO_FROM_NUMBER: optionalSecret,

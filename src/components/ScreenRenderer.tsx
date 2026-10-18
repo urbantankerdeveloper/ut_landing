@@ -9,9 +9,13 @@ export function ScreenRenderer() {
 	const activeScreen = useNavigationStore((state) => state.activeScreen)
 	if (activeScreen === 'home' || activeScreen === 'login' || activeScreen.endsWith('-workspace')) {
 		const Screen = allScreens[activeScreen]
-		return <Suspense fallback={null}><Screen /></Suspense>
+		return <Suspense fallback={activeScreen === 'login' ? <LoginLoadingScreen /> : null}><Screen /></Suspense>
 	}
 	return <ScreenLoadingGate key={activeScreen} activeScreen={activeScreen} />
+}
+
+function LoginLoadingScreen() {
+	return <section className="auth-loading-screen" role="status" aria-live="polite" aria-label="Loading login screen"><div className="auth-loading-spinner" /><p>Loading your account</p></section>
 }
 
 function ScreenLoadingGate({ activeScreen }: { activeScreen: keyof typeof allScreens }) {
