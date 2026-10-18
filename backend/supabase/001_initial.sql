@@ -622,6 +622,35 @@ alter table public.bookings
   check (payment_method in ('wallet', 'gateway', 'cod'));
 
 
+create table if not exists public.partner_applications (
+  id uuid primary key default gen_random_uuid(),
+  reference text unique not null,
+  business_name text not null,
+  partner_type text not null,
+  phone_e164 text not null,
+  whatsapp_e164 text,
+  email text not null,
+  service_zone text not null,
+  business_address text not null,
+  service_codes text[] not null default '{}',
+  vehicle_count integer not null check (vehicle_count between 1 and 250),
+  primary_registration text not null,
+  vehicle_capacity text not null,
+  years_in_operation integer check (years_in_operation between 0 and 75),
+  availability text not null,
+  notes text,
+  document_names text[] not null default '{}',
+  status text not null default 'submitted' check (status in ('submitted', 'under_review', 'approved', 'rejected')),
+  review_note text,
+  reviewed_by uuid references public.profiles(id),
+  reviewed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists partner_applications_status_created_idx on public.partner_applications(status, created_at desc);
+drop trigger if exists partner_applications_updated_at on public.partner_applications;
+create trigger partner_applications_updated_at before update on public.partner_applications for each row execute function public.set_updated_at();
+
 -- Enforce RLS on every application table. Tables without an explicit policy remain deny-by-default.
 insert into public.configs (key, value)
 values

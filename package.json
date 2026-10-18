@@ -13,7 +13,9 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "reference": "node scripts/serve-reference.mjs",
+    "reference:list": "node scripts/serve-reference.mjs --list"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",

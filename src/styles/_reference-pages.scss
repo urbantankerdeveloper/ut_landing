@@ -1,0 +1,42 @@
+@use '../theme/colors';
+
+.public-reference-screen { max-width: 1184px; padding: 66px 28px 84px; margin: 0 auto; }
+.home-screen .home-subscription-teaser { display: none; }
+.public-reference-screen .section-intro { margin-bottom: 34px; }
+.public-reference-screen .section-intro h1 { max-width: 780px; }
+.public-reference-screen .section-intro em { color: colors.$aqua; font-style: normal; }
+.public-reference-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-bottom: 24px; }
+.reference-copy-card { padding: 24px; background: #fff; border: 1px solid colors.$line; border-radius: 16px; box-shadow: 0 8px 22px rgba(20, 71, 74, .06); }
+.reference-copy-card h2 { margin: 14px 0 8px; font-size: 20px; }
+.reference-copy-card p { color: colors.$muted; font-size: 13px; }
+.reference-card-icon { display: grid; place-items: center; width: 42px; height: 42px; color: colors.$aqua; background: colors.$aqua-light; border-radius: 12px; }
+.public-reference-screen .customer-operation-panel { max-width: 980px; padding: 24px; margin: 0; background: #fff; border: 1px solid colors.$line; border-radius: 16px; }
+.home-screen .service-showcase-card { display: flex; min-height: 380px; flex-direction: column; padding: 32px; border-radius: 24px; }
+.home-screen .service-showcase-card:first-child { grid-column: span 2; height: 286px; min-height: 0; }
+.home-screen .service-showcase-card:nth-child(2) { height: 286px; min-height: 0; }
+.home-screen .service-showcase-card:first-child, .home-screen .service-showcase-card:nth-child(2) { padding: 24px 32px; }
+.home-screen .service-showcase-card:first-child h3, .home-screen .service-showcase-card:nth-child(2) h3 { margin: 10px 0 8px; }
+.home-screen .service-showcase-card:first-child > p, .home-screen .service-showcase-card:nth-child(2) > p { min-height: 0; margin-bottom: 12px; }
+.home-screen .service-showcase-card:first-child .service-facts, .home-screen .service-showcase-card:nth-child(2) .service-facts { margin-bottom: 12px; }
+.home-screen .service-showcase-card:first-child .service-disclosure, .home-screen .service-showcase-card:nth-child(2) .service-disclosure { padding-top: 12px; }
+.home-screen .service-showcase-card .service-card-top { display: flex; width: 100%; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.home-screen .service-showcase-card .service-icon { display: grid; width: 44px; height: 44px; flex: 0 0 44px; place-items: center; color: colors.$aqua; background: transparent; border: 1px solid currentColor; border-radius: 50%; }
+.home-screen .service-showcase-card h3 { margin: 28px 0 10px; font-size: 28px; }
+.home-screen .service-showcase-card > p { min-height: 48px; margin-bottom: 18px; }
+.home-screen .service-showcase-card .service-facts { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+.home-screen .service-showcase-card .service-facts span { padding: 8px 11px; color: colors.$muted; background: rgba(255,255,255,.52); border: 1px solid colors.$line; border-radius: 8px; font-size: 11px; }
+.home-screen .service-showcase-card .service-disclosure { width: 100%; margin-top: auto; padding-top: 18px; border-top: 1px solid colors.$line; }
+.home-screen .service-showcase-card .service-disclosure summary { display: flex; width: 100%; align-items: center; justify-content: space-between; color: colors.$aqua-dark; cursor: pointer; font-weight: 800; list-style: none; }
+.home-screen .service-showcase-card .service-disclosure summary::-webkit-details-marker { display: none; }
+.home-screen .service-showcase-card .service-disclosure summary span { display: grid; width: 34px; height: 34px; flex: 0 0 34px; place-items: center; margin-left: auto; border: 1px solid currentColor; border-radius: 50%; font-size: 21px; font-weight: 400; }
+.home-screen .service-showcase-card .service-disclosure[open] summary span { transform: rotate(45deg); }
+.home-screen .service-showcase-card .service-disclosure p { margin: 16px 0 12px; color: colors.$muted; font-size: 12px; }
+.home-screen .service-showcase-card .service-disclosure .text-button { padding: 0; }
+.home-screen .service-showcase-card:first-child { color: #fff; background: #104a50; border-color: #104a50; }
+.home-screen .service-showcase-card:first-child .service-category, .home-screen .service-showcase-card:first-child .service-icon, .home-screen .service-showcase-card:first-child > p { color: #c6e9e4; }
+.home-screen .service-showcase-card:first-child .service-icon { color: #b8ebe4; }
+.home-screen .service-showcase-card:first-child .service-facts span { color: #d4efeb; background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.18); }
+.home-screen .service-showcase-card:first-child .service-disclosure { border-color: rgba(255,255,255,.2); }
+.home-screen .service-showcase-card:first-child .service-disclosure summary, .home-screen .service-showcase-card:first-child .service-disclosure p { color: #b8ebe4; }
+@media (max-width: 980px) { .home-screen .service-showcase-card:first-child { grid-column: span 1; } }
+@media (max-width: 760px) { .public-reference-screen { padding: 42px 20px 60px; }.public-reference-grid { grid-template-columns: 1fr; }.public-reference-screen .section-intro h1 { font-size: 42px; }.home-screen .service-showcase-card:first-child, .home-screen .service-showcase-card:nth-child(2) { height: auto; min-height: 380px; } }

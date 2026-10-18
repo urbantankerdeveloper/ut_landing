@@ -11,6 +11,25 @@ Currently, two official plugins are available:
 
 The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
 
+## Local Design Comparison
+
+Run the React application and the supplied HTML references in separate terminals:
+
+```powershell
+npm run dev
+npm run reference
+```
+
+The React app is available at `http://localhost:5173/` and the reference site is available at `http://localhost:4174/`. The reference server serves the original `public_html` tree, so pages retain their relative links and assets; for example, open `http://localhost:4174/account.html` or `http://localhost:4174/admin.html` directly.
+
+List every supplied HTML page URL with:
+
+```powershell
+npm run reference:list
+```
+
+The reference server intentionally fails when port `4174` is occupied instead of switching ports silently.
+
 ## Expanding the ESLint configuration
 
 If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:

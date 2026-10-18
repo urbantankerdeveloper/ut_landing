@@ -1,0 +1,56 @@
+@use '../theme/colors';
+
+.partner-screen { min-height: 100vh; background: #f3fafb; color: colors.$ink; }
+.partner-hero { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: end; max-width: 1240px; padding: 78px 28px 68px; margin: 0 auto; background: radial-gradient(circle at 88% 20%, #d4f4f5, transparent 42%); }
+.partner-hero h1 { max-width: 720px; margin: 0 0 22px; font-size: clamp(50px, 6vw, 84px); line-height: .98; letter-spacing: -4px; }
+.partner-hero h1 em { color: #08a8c1; font-style: normal; }
+.partner-hero > div:first-child > p:last-child { max-width: 680px; color: colors.$muted; font-size: 17px; }
+.partner-hero-stats { display: grid; grid-template-columns: repeat(3, 1fr); overflow: hidden; background: #fff; border: 1px solid colors.$line; border-radius: 24px; box-shadow: 0 15px 35px rgba(15, 61, 68, .08); }
+.partner-hero-stats span { display: grid; gap: 5px; place-items: center; padding: 27px 12px; text-align: center; border-right: 1px solid colors.$line; }
+.partner-hero-stats span:last-child { border-right: 0; }
+.partner-hero-stats b { color: #04a1bd; font-size: 16px; }
+.partner-hero-stats small { color: colors.$muted; font-size: 10px; }
+.partner-application-shell { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, .7fr); gap: 28px; max-width: 1240px; padding: 0 28px 80px; margin: 0 auto; }
+.partner-application { overflow: hidden; background: #fff; border-radius: 26px; box-shadow: 0 18px 45px rgba(15, 61, 68, .09); }
+.partner-form-intro { display: flex; align-items: end; justify-content: space-between; gap: 22px; padding: 34px 36px; color: #fff; background: #073149; }
+.partner-form-intro h2 { margin: 0 0 8px; color: #fff; font-size: 30px; }
+.partner-form-intro p:not(.eyebrow) { margin: 0; color: #b9e4ec; font-size: 12px; }
+.partner-form-intro > span { padding: 10px 14px; color: #d0f1f4; border: 1px solid rgba(208,241,244,.35); border-radius: 20px; font-size: 10px; white-space: nowrap; }
+.partner-form-section { padding: 38px 36px; border-bottom: 1px solid colors.$line; }
+.partner-step { display: flex; gap: 16px; align-items: center; margin-bottom: 26px; }
+.partner-step i { display: grid; width: 48px; height: 48px; flex: 0 0 48px; place-items: center; color: #07a8c2; background: #e9f8fa; border-radius: 15px; font-style: normal; font-weight: 800; }
+.partner-step h3 { margin: 0 0 4px; font-size: 20px; }
+.partner-step p { margin: 0; color: colors.$muted; font-size: 12px; }
+.partner-field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px 18px; }
+.partner-field { display: grid; gap: 8px; margin-bottom: 18px; color: colors.$ink; font-size: 12px; font-weight: 800; }
+.partner-field input, .partner-field select, .partner-field textarea { padding: 14px; background: #fff; border: 1px solid #c9dfe3; border-radius: 13px; }
+.partner-field input:focus, .partner-field select:focus, .partner-field textarea:focus { border-color: #08a8c1; box-shadow: 0 0 0 3px rgba(8,168,193,.13); }
+.partner-field small { color: colors.$muted; font-size: 10px; font-weight: 500; }
+.partner-services { padding: 0; margin: 0; border: 0; }
+.service-choice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.service-choice { display: flex; gap: 10px; align-items: center; min-height: 56px; padding: 14px 16px; color: colors.$ink; border: 1px solid colors.$line; border-radius: 14px; cursor: pointer; font-size: 12px; font-weight: 800; }
+.service-choice:hover, .service-choice.is-selected { color: #007d95; background: #ecfafb; border-color: #08afd0; }
+.service-choice input { position: absolute; opacity: 0; pointer-events: none; }
+.service-choice span { display: inline-flex; gap: 7px; align-items: center; }
+.service-choice-dot { width: 10px; height: 10px; border: 1px solid #007d95; border-radius: 50%; }
+.partner-declaration { display: flex; gap: 10px; align-items: start; padding: 28px 36px 0; color: colors.$muted; font-size: 11px; line-height: 1.5; }
+.partner-declaration input { margin-top: 2px; accent-color: #008ca5; }
+.partner-submit { margin: 22px 36px 34px; }
+.partner-login-action { margin: 0 36px 34px; }
+.partner-message, .partner-error { margin: 18px 36px 0; font-size: 12px; }
+.partner-message { color: #23785d; }
+.partner-error { color: #b54c42; }
+.partner-side-card { align-self: start; padding: 36px; color: #fff; background: linear-gradient(145deg, #073149, #08758b); border-radius: 26px; box-shadow: 0 18px 45px rgba(15,61,68,.14); }
+.partner-side-card h2 { max-width: 300px; margin: 0 0 32px; color: #fff; font-size: 34px; line-height: 1.05; }
+.partner-side-card ol { display: grid; gap: 24px; padding: 0; margin: 0; list-style: none; }
+.partner-side-card li { display: flex; gap: 14px; align-items: start; }
+.partner-side-card li > span { display: grid; width: 36px; height: 36px; flex: 0 0 36px; place-items: center; background: rgba(194,240,243,.18); border-radius: 12px; font-weight: 800; }
+.partner-side-card li div { display: grid; gap: 4px; }
+.partner-side-card li b { font-size: 14px; }
+.partner-side-card li small { color: #bfe5e7; font-size: 10px; line-height: 1.45; }
+.partner-help { padding: 22px; margin-top: 32px; background: rgba(194,240,243,.16); border-radius: 16px; }
+.partner-help b { font-size: 17px; }
+.partner-help p { color: #c6e8e9; font-size: 11px; }
+.partner-help .button { color: #073149; background: #fff; border-color: #fff; }
+@media (max-width: 900px) { .partner-hero { grid-template-columns: 1fr; padding-top: 52px; }.partner-application-shell { grid-template-columns: 1fr; }.partner-side-card { order: -1; } }
+@media (max-width: 620px) { .partner-hero, .partner-application-shell { padding-right: 18px; padding-left: 18px; }.partner-hero h1 { font-size: 48px; letter-spacing: -2.5px; }.partner-hero-stats { border-radius: 16px; }.partner-hero-stats span { padding: 18px 6px; }.partner-form-intro, .partner-form-section { padding: 26px 20px; }.partner-form-intro { align-items: start; flex-direction: column; }.partner-field-grid, .service-choice-grid { grid-template-columns: 1fr; }.partner-declaration { padding-right: 20px; padding-left: 20px; }.partner-submit, .partner-login-action { width: calc(100% - 40px); margin-right: 20px; margin-left: 20px; }.partner-message, .partner-error { margin-right: 20px; margin-left: 20px; }.partner-side-card { padding: 28px 22px; } }
