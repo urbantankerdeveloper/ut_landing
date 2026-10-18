@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { Header } from '../components/Header'
 import { Footer } from '../components/Footer'
 import { ScreenRenderer } from '../components/ScreenRenderer'
+import { ScreenSkeleton } from '../components/ScreenSkeleton'
 import { useNavigationStore } from '../stores/navigationStore'
 import { useFormGuards } from '../hooks/useFormGuards'
 import { useAuthStore } from '../stores/authStore'
@@ -12,6 +13,7 @@ export function AppShell() {
 	const activeScreen = useNavigationStore((state) => state.activeScreen)
 	const openWorkspace = useNavigationStore((state) => state.openWorkspace)
 	const user = useAuthStore((state) => state.user)
+	const hasHydrated = useAuthStore((state) => state.hasHydrated)
 	useEffect(() => {
 		if (user && (activeScreen === 'home' || activeScreen === 'login' || activeScreen === 'account')) openWorkspace(user.role as WorkspaceRole)
 	}, [activeScreen, openWorkspace, user])
@@ -41,5 +43,6 @@ export function AppShell() {
 		document.title = titles[activeScreen] ?? 'Urban Tanker'
 		mainRef.current?.focus()
 	}, [activeScreen])
+	if (!hasHydrated) return <div className="app-shell app-shell-hydrating"><main id="main-content"><ScreenSkeleton workspace={false} /></main></div>
 	return <div className={`app-shell ${isWorkspace ? 'app-shell-workspace' : ''} ${isAuthScreen ? 'app-shell-auth' : ''}`}><a className="skip-link" href="#main-content">Skip to main content</a>{!isWorkspace && !isAuthScreen && <Header />}<main ref={mainRef} id="main-content" tabIndex={-1} aria-labelledby="page-announcement"><span id="page-announcement" className="visually-hidden" aria-live="polite">{activeScreen.replaceAll('-', ' ')}</span><ScreenRenderer /></main>{!isWorkspace && !isAuthScreen && <Footer />}</div>
 }
