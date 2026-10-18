@@ -1,14 +1,17 @@
+import nodemailer from 'nodemailer'
 import { config } from '../config.js'
 
 export async function sendEmail(to: string, subject: string, html: string) {
-  const key = config.RESEND_API_KEY
-  if (!key) return { queued: false, reason: 'RESEND_API_KEY not configured' }
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: config.MAIL_FROM ?? 'Urban Tanker <no-reply@urbantanker.com>', to, subject, html }),
+  if (!config.SMTP_USER || !config.SMTP_PASSWORD || !config.MAIL_FROM) {
+    return { queued: false, reason: 'SMTP_USER, SMTP_PASSWORD, and MAIL_FROM are not configured' }
+  }
+  const transporter = nodemailer.createTransport({
+    host: config.SMTP_HOST,
+    port: config.SMTP_PORT,
+    secure: config.SMTP_SECURE,
+    auth: { user: config.SMTP_USER, pass: config.SMTP_PASSWORD },
   })
-  if (!response.ok) throw new Error(`Email provider failed: ${response.status}`)
+  await transporter.sendMail({ from: config.MAIL_FROM, to, subject, html })
   return { queued: true }
 }
 

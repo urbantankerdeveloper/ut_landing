@@ -22,6 +22,7 @@
     "express-rate-limit": "^8.1.0",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
+    "nodemailer": "^10.1.6",
     "pg": "^8.13.1",
     "socket.io": "^4.8.1",
     "zod": "^4.1.8"
@@ -32,6 +33,7 @@
     "@types/express": "^5.0.3",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.13.3",
+    "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.11.10",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
