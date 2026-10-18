@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { ArrowRight, Check, ImagePlus, Plus, Truck, UserRound, X } from 'lucide-react'
 import { demoDataEnabled } from '../constants/demo'
 
@@ -35,11 +35,17 @@ export function ServiceRequestPanel() {
 
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   const dialogRef = useRef<HTMLElement>(null)
+  const titleId = useId()
+  const onCloseRef = useRef(onClose)
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
   useEffect(() => {
     const previousFocus = document.activeElement as HTMLElement | null
-    dialogRef.current?.focus()
+    const firstFocusable = dialogRef.current?.querySelector<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])')
+    ;(firstFocusable ?? dialogRef.current)?.focus()
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') { event.preventDefault(); onClose(); return }
+      if (event.key === 'Escape') { event.preventDefault(); onCloseRef.current(); return }
       if (event.key !== 'Tab' || !dialogRef.current) return
       const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'))
       if (!focusable.length) return
@@ -50,6 +56,6 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => { document.removeEventListener('keydown', handleKeyDown); previousFocus?.focus() }
-  }, [onClose])
-  return <div className="modal-backdrop-new" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section ref={dialogRef} className="modal-new" role="dialog" tabIndex={-1} aria-modal="true" aria-labelledby="modal-title"><button className="modal-close-new" type="button" onClick={onClose} aria-label="Close dialog"><X size={17} /></button><p className="eyebrow">URBAN TANKER</p><h2 id="modal-title">{title}</h2>{children}</section></div>
+  }, [])
+  return <div className="modal-backdrop-new" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section ref={dialogRef} className="modal-new" role="dialog" tabIndex={-1} aria-modal="true" aria-labelledby={titleId}><button className="modal-close-new" type="button" onClick={onClose} aria-label="Close dialog"><X size={17} aria-hidden="true" /></button><p className="eyebrow">URBAN TANKER</p><h2 id={titleId}>{title}</h2>{children}</section></div>
 }
