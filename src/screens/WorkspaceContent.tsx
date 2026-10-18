@@ -20,6 +20,7 @@ import { demoDataEnabled } from '../constants/demo'
 import { useAdminOrders } from '../hooks/useAdminData'
 import { useCustomerBookings } from '../hooks/useCustomerData'
 import { useVendorOrders } from '../hooks/useVendorData'
+import { CustomerBookingsTable } from './CustomerBookingsTable'
 
 type Props = { role: WorkspaceRole; item: string; onNavigate: (screen: 'booking' | 'bookings' | 'offers' | 'home') => void; onNotice: (message: string) => void }
 const bookingRows = demoDataEnabled ? [{ id: 'UT-2408', service: 'Water tanker · 9 KL', place: 'ECR, Chennai', status: 'In progress', amount: '₹1,850' }, { id: 'UT-2394', service: 'Tank & sump cleaning', place: 'Adyar, Chennai', status: 'Delivered', amount: '₹2,400' }, { id: 'UT-2388', service: 'Sewage tanker', place: 'Velachery, Chennai', status: 'Scheduled', amount: '₹3,100' }] : []
@@ -30,7 +31,7 @@ export function WorkspaceContent({ role, item, onNavigate, onNotice }: Props) {
   const customerNavigate: Props['onNavigate'] = (screen) => role === 'customer' && screen === 'booking' ? onNavigate('bookings') : onNavigate(screen)
   if (item === 'overview') return <>{<Overview role={role} onNavigate={customerNavigate} onNotice={onNotice} />}{role === 'customer' && <CustomerHomeHighlights onNavigate={customerNavigate} onNotice={onNotice} />}</>
   if (role === 'customer' && item === 'booking') return <BookingScreen />
-  if (role === 'customer' && item === 'bookings') return <section className="customer-bookings-combined"><BookingScreen /><CustomerOperationsPanel mode="bookings" onNavigate={onNavigate} onNotice={onNotice} /></section>
+  if (role === 'customer' && item === 'bookings') return <section className="customer-bookings-combined"><BookingScreen /><CustomerBookingsTable onNavigate={onNavigate} onOpen={(id) => onNotice(`Booking ${id} opened.`)} /></section>
   if (role === 'admin' || role === 'dispatcher') return <AdminWorkspaceContent item={item} onNotice={onNotice} />
   if (role === 'customer' && item === 'support') return <CustomerSupportPanel onNotice={onNotice} />
   if (role === 'customer' && item === 'invoices') return <CustomerInvoicesScreen onNotice={onNotice} />
