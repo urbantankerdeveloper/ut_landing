@@ -1,9 +1,12 @@
 import { Router } from 'express'
 import { z } from 'zod'
+import rateLimit from 'express-rate-limit'
 import { supabase } from '../supabase.js'
 
 const router = Router()
+const partnerApplicationLimit = rateLimit({ windowMs: 60 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many partner applications from this address. Try again later.' } })
 const phone = z.string().regex(/^\d{10}$/, 'Enter a valid 10-digit phone number.')
+const allowedServices = z.enum(['Water tanker', 'Sewage suction', 'Drinking water supply', 'Tank and sump cleaning', 'Borewell services', 'RMC mix / ready-mix concrete', 'Empty tanker and bulk-liquid transport', 'Emergency water and sewage'])
 const applicationSchema = z.object({
   businessName: z.string().trim().min(2).max(120),
   partnerType: z.string().trim().min(2).max(60),
@@ -12,7 +15,7 @@ const applicationSchema = z.object({
   email: z.string().trim().email().max(160),
   zone: z.string().trim().min(2).max(120),
   address: z.string().trim().min(5).max(500),
-  serviceCodes: z.array(z.string().trim().min(2).max(100)).min(1).max(20),
+  serviceCodes: z.array(allowedServices).min(1).max(8),
   vehicleCount: z.number().int().min(1).max(250),
   registration: z.string().trim().min(3).max(40),
   capacity: z.string().trim().min(2).max(40),
@@ -24,7 +27,7 @@ const applicationSchema = z.object({
 
 function reference() { return `PA-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}` }
 
-router.post('/applications', async (request, response) => {
+router.post('/applications', partnerApplicationLimit, async (request, response) => {
   const parsed = applicationSchema.safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Complete the required partner application fields.', details: parsed.error.flatten() })
   const input = parsed.data

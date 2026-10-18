@@ -21,14 +21,16 @@ import { useAdminOrders } from '../hooks/useAdminData'
 import { useCustomerBookings } from '../hooks/useCustomerData'
 import { useVendorOrders } from '../hooks/useVendorData'
 
-type Props = { role: WorkspaceRole; item: string; onNavigate: (screen: 'booking' | 'offers' | 'home') => void; onNotice: (message: string) => void }
+type Props = { role: WorkspaceRole; item: string; onNavigate: (screen: 'booking' | 'bookings' | 'offers' | 'home') => void; onNotice: (message: string) => void }
 const bookingRows = demoDataEnabled ? [{ id: 'UT-2408', service: 'Water tanker · 9 KL', place: 'ECR, Chennai', status: 'In progress', amount: '₹1,850' }, { id: 'UT-2394', service: 'Tank & sump cleaning', place: 'Adyar, Chennai', status: 'Delivered', amount: '₹2,400' }, { id: 'UT-2388', service: 'Sewage tanker', place: 'Velachery, Chennai', status: 'Scheduled', amount: '₹3,100' }] : []
 const vendorRows = demoDataEnabled ? [{ id: 'UT-2412', service: 'Water tanker · 12 KL', place: 'OMR, Chennai', status: 'Available', amount: '₹2,250' }, { id: 'UT-2411', service: 'Sewage tanker · 9 KL', place: 'Guindy, Chennai', status: 'Review', amount: '₹2,900' }, { id: 'UT-2409', service: 'Water tanker · 6 KL', place: 'Sholinganallur, Chennai', status: 'Accepted', amount: '₹1,500' }] : []
 const adminRows = demoDataEnabled ? [{ id: 'UT-2412', service: 'Water tanker · 12 KL', place: 'OMR, Chennai', status: 'Awaiting vendor', amount: '₹2,250' }, { id: 'UT-2411', service: 'Sewage tanker · 9 KL', place: 'Guindy, Chennai', status: 'In progress', amount: '₹2,900' }, { id: 'UT-2409', service: 'Tank cleaning', place: 'Adyar, Chennai', status: 'Delivered', amount: '₹2,100' }] : []
 
 export function WorkspaceContent({ role, item, onNavigate, onNotice }: Props) {
-  if (item === 'overview') return <Overview role={role} onNavigate={onNavigate} onNotice={onNotice} />
+  const customerNavigate: Props['onNavigate'] = (screen) => role === 'customer' && screen === 'booking' ? onNavigate('bookings') : onNavigate(screen)
+  if (item === 'overview') return <>{<Overview role={role} onNavigate={customerNavigate} onNotice={onNotice} />}{role === 'customer' && <CustomerHomeHighlights onNavigate={customerNavigate} onNotice={onNotice} />}</>
   if (role === 'customer' && item === 'booking') return <BookingScreen />
+  if (role === 'customer' && item === 'bookings') return <section className="customer-bookings-combined"><BookingScreen /><CustomerOperationsPanel mode="bookings" onNavigate={onNavigate} onNotice={onNotice} /></section>
   if (role === 'admin' || role === 'dispatcher') return <AdminWorkspaceContent item={item} onNotice={onNotice} />
   if (role === 'customer' && item === 'support') return <CustomerSupportPanel onNotice={onNotice} />
   if (role === 'customer' && item === 'invoices') return <CustomerInvoicesScreen onNotice={onNotice} />
@@ -49,12 +51,14 @@ export function WorkspaceContent({ role, item, onNavigate, onNotice }: Props) {
   return <AdminView item={item} onNavigate={onNavigate} onNotice={onNotice} />
 }
 
+function CustomerHomeHighlights({ onNavigate, onNotice }: { onNavigate: Props['onNavigate']; onNotice: Props['onNotice'] }) { return <section className="customer-home-highlights" aria-label="Account highlights"><CustomerOperationsPanel mode="subscriptions" onNavigate={onNavigate} onNotice={onNotice} /><CustomerUsagePanel /><CustomerOperationsPanel mode="membership" onNavigate={onNavigate} onNotice={onNotice} /><CustomerOperationsPanel mode="offers" onNavigate={onNavigate} onNotice={onNotice} /></section> }
+
 function Overview({ role, onNavigate, onNotice }: { role: WorkspaceRole; onNavigate: Props['onNavigate']; onNotice: Props['onNotice'] }) {
   if (!demoDataEnabled && role === 'customer') return <CustomerLiveOverview onNavigate={onNavigate} />
   if (!demoDataEnabled && role === 'vendor') return <VendorLiveOverview onNotice={onNotice} />
   if (!demoDataEnabled && (role === 'admin' || role === 'dispatcher')) return <AdminLiveOverview role={role} onNotice={onNotice} />
   const copy = role === 'admin' ? ['OPERATIONS PULSE', 'The network at a glance', '26 deliveries are currently moving', 'Four orders need an operations review before the next dispatch window.'] : role === 'vendor' ? ['DELIVERY QUEUE', 'Jobs that need your attention', '2 deliveries are en route', 'Keep location updates active and confirm the delivery OTP on arrival.'] : ['YOUR DELIVERY PULSE', 'Your next delivery', 'Your tanker is being prepared', 'Your assigned partner will share live movement updates before arrival.']
-  return <><div className="workspace-columns-new"><section className="workspace-surface-new"><div className="surface-heading-new"><div><p className="eyebrow">{copy[0]}</p><h2>{copy[1]}</h2></div><button className="button button-quiet" onClick={() => onNotice('Refreshing live workspace data...')}>Refresh</button></div><div className="pulse-card"><div className="pulse-card-icon"><PackageCheck size={22} /></div><div><strong>{copy[2]}</strong><p>{copy[3]}</p></div><CheckCircle2 size={19} /></div><Workflow role={role} /></section><aside className="workspace-surface-new workspace-side-surface"><p className="eyebrow">QUICK ACTIONS</p><h2>Keep moving.</h2><Action icon={<ClipboardList />} label={role === 'customer' ? 'Start a new booking' : role === 'vendor' ? 'Review available orders' : 'Open operations queue'} onClick={() => role === 'customer' ? onNavigate('booking') : onNotice('The next operational view is ready for this workspace.')} /><Action icon={<Bell />} label="View notifications" onClick={() => onNotice('You are all caught up.')} /></aside></div></>
+  return <><div className="workspace-columns-new"><section className="workspace-surface-new"><div className="surface-heading-new"><div><p className="eyebrow">{copy[0]}</p><h2>{copy[1]}</h2></div><button className="button button-quiet" onClick={() => onNotice('Refreshing live workspace data...')}>Refresh</button></div><div className="pulse-card"><div className="pulse-card-icon"><PackageCheck size={22} /></div><div><strong>{copy[2]}</strong><p>{copy[3]}</p></div><CheckCircle2 size={19} /></div><Workflow role={role} /></section><aside className="workspace-surface-new workspace-side-surface"><p className="eyebrow">QUICK ACTIONS</p><h2>Keep moving.</h2><Action icon={<ClipboardList />} label={role === 'customer' ? 'Open My Bookings' : role === 'vendor' ? 'Review available orders' : 'Open operations queue'} onClick={() => role === 'customer' ? onNavigate('bookings') : onNotice('The next operational view is ready for this workspace.')} /><Action icon={<Bell />} label="View notifications" onClick={() => onNotice('You are all caught up.')} /></aside></div></>
 }
 function CustomerLiveOverview({ onNavigate }: { onNavigate: Props['onNavigate'] }) {
   const query = useCustomerBookings()

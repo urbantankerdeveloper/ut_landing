@@ -49,6 +49,9 @@ io.use(async (socket, next) => {
   next()
 })
 io.on('connection', async (socket) => {
+  let joinWindowStartedAt = Date.now()
+  let joinCount = 0
+  const joinedBookingRooms = new Set<string>()
   socket.join(`customer:${socket.data.userId}`)
   const { data: profile } = await supabase.from('profiles').select('role').eq('id', socket.data.userId).maybeSingle()
   if (profile?.role === 'admin') socket.join('admins')
@@ -58,12 +61,15 @@ io.on('connection', async (socket) => {
   socket.on('vendor:join', (vendorId: unknown) => { if (vendor?.id === vendorId) socket.join(`vendor:${vendorId}`) })
   socket.on('booking:join', async (bookingId: unknown) => {
     if (typeof bookingId !== 'string' || !/^[0-9a-f-]{36}$/i.test(bookingId)) return
+    if (Date.now() - joinWindowStartedAt >= 60_000) { joinWindowStartedAt = Date.now(); joinCount = 0 }
+    if (joinCount >= 30 || (joinedBookingRooms.size >= 20 && !joinedBookingRooms.has(bookingId))) return
+    joinCount += 1
     const { data: booking } = await supabase.from('bookings').select('customer_id,vendor_id').eq('id', bookingId).maybeSingle()
     if (!booking) return
     const isCustomer = booking.customer_id === socket.data.userId
     const isAdmin = profile?.role === 'admin'
     const isVendor = Boolean(vendor?.id && booking.vendor_id === vendor.id)
-    if (isCustomer || isAdmin || isVendor) socket.join(`booking:${bookingId}`)
+    if (isCustomer || isAdmin || isVendor) { joinedBookingRooms.add(bookingId); socket.join(`booking:${bookingId}`) }
   })
 })
 setRealtimeServer(io)

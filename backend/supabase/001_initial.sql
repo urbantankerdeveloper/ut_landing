@@ -342,12 +342,7 @@ alter default privileges in schema public grant all privileges on sequences to s
 alter default privileges in schema public grant all privileges on functions to service_role;
 
 grant select on public.service_catalog to anon, authenticated;
-grant select, insert on public.bookings to authenticated;
-grant select, update on public.notifications to authenticated;
 grant select on public.vendors to authenticated;
-grant select, insert, update on public.vehicles to authenticated;
-grant select, insert, update on public.drivers to authenticated;
-grant select, insert, update on public.vendor_service_availability to authenticated;
 
 alter table public.service_catalog enable row level security;
 alter table public.bookings enable row level security;

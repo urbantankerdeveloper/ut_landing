@@ -8,7 +8,7 @@ export type VendorDriver = { id: string; name: string; mobile_e164: string; lice
 export type VendorComplaint = { id: string; subject: string; booking_id?: string; status: string; message: string; created_at: string }
 export type VendorNotification = { id: string; title: string; detail?: string; event_type?: string; read_at?: string; created_at: string }
 export type VendorDocument = { id: string; owner_type: string; owner_id: string; document_type: string; object_key: string; expires_on?: string; verification: string; created_at: string }
-export type VendorOrderMutation = { orderId: string; action: 'accept' | 'reject' | 'status' | 'assign'; status?: VendorOrderStatus; vehicleId?: string; driverId?: string }
+export type VendorOrderMutation = { orderId: string; action: 'accept' | 'reject' | 'status' | 'assign'; status?: VendorOrderStatus; reason?: string; vehicleId?: string; driverId?: string }
 export type VendorOfflineMutation = { id: string; endpoint?: string; conflict_status: 'queued' | 'processing' | 'conflict' | 'applied' | 'discarded'; client_version: number; last_error?: string; created_at: string }
 
 export const vendorApi = {

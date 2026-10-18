@@ -27,6 +27,7 @@ export const analyticsEventNames = {
   bookingStarted: 'booking.started',
   bookingCreated: 'booking.created',
   vendorAccepted: 'booking.vendor_accepted',
+  rejected: 'booking.rejected',
   delivered: 'booking.delivered',
 } as const
 

@@ -3,10 +3,12 @@ import { requireAuth, requireRole } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 import { analyticsEventSchema, summarizeAnalyticsEvents } from '../lib/analytics.js'
 import { config } from '../config.js'
+import rateLimit from 'express-rate-limit'
 
 const router = Router()
+const analyticsEventLimit = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many analytics events. Try again later.' } })
 
-router.post('/events', async (request, response) => {
+router.post('/events', analyticsEventLimit, async (request, response) => {
   const parsed = analyticsEventSchema.safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Invalid analytics event' })
   const { error } = await supabase.from('analytics_events').insert({

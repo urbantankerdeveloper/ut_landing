@@ -1,0 +1,8 @@
+@use '../theme/colors';
+
+.customer-home-highlights { display: grid; grid-template-columns: 1fr; gap: 32px; padding: 20px 0; }
+.customer-home-highlights > .workspace-view-panel { min-width: 0; margin: 0; padding: 32px; }
+.customer-bookings-combined { display: grid; gap: 32px; width: 100%; }
+.customer-bookings-combined > .booking-screen { width: 100%; max-width: none; min-height: 0; padding: 0; margin: 0; }
+@media (max-width: 1080px) { .customer-home-highlights { padding-right: 22px; padding-left: 22px; } }
+@media (max-width: 760px) { .customer-home-highlights { gap: 20px; padding: 20px 0; }.customer-home-highlights > .workspace-view-panel { padding: 20px; }.customer-bookings-combined { gap: 20px; } }
