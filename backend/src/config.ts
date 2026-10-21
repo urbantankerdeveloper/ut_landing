@@ -34,6 +34,8 @@ const schema = z.object({
   RAZORPAY_KEY_SECRET: optionalSecret,
   VAPID_PUBLIC_KEY: optionalSecret,
   VAPID_PRIVATE_KEY: optionalSecret,
+  ONESIGNAL_APP_ID: optionalSecret,
+  ONESIGNAL_REST_API_KEY: optionalSecret,
   ANALYTICS_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
   ANALYTICS_ANONYMIZE_AFTER_DAYS: z.coerce.number().int().positive().default(7),
 })
