@@ -102,3 +102,7 @@ export const dispatcherStatusSchema = z.object({
 export const dispatcherCancellationSchema = z.object({
   reason: z.string().trim().min(2).max(500),
 })
+
+export const dispatcherAlertStatusSchema = z.object({
+  status: z.enum(['open', 'resolved', 'dismissed']),
+})

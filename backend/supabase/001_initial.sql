@@ -33,6 +33,7 @@ create table if not exists public.subscriptions (id uuid primary key default gen
 create table if not exists public.coupons (id uuid primary key default gen_random_uuid(), code text unique not null, title text not null, discount_type text not null, discount_value numeric not null default 0, valid_until timestamptz, is_active boolean not null default false, created_at timestamptz not null default now());
 create table if not exists public.complaints (id uuid primary key default gen_random_uuid(), customer_id uuid references public.profiles(id), vendor_id uuid references public.vendors(id), booking_id uuid references public.bookings(id), subject text not null, message text not null, status text not null default 'open', created_at timestamptz not null default now());
 create table if not exists public.notifications (id uuid primary key default gen_random_uuid(), recipient_id uuid references public.profiles(id), event_type text not null, title text not null, payload jsonb not null default '{}', read_at timestamptz, created_at timestamptz not null default now());
+create table if not exists public.dispatcher_alerts (id uuid primary key default gen_random_uuid(), booking_id uuid not null references public.bookings(id) on delete cascade, alert_type text not null, status text not null default 'open' check (status in ('open','resolved','dismissed')), title text not null, detail text not null, created_at timestamptz not null default now(), updated_at timestamptz not null default now(), resolved_at timestamptz, resolved_by uuid references public.profiles(id), unique(booking_id, alert_type));
 create table if not exists public.device_tokens (id uuid primary key default gen_random_uuid(), user_id uuid not null references public.profiles(id) on delete cascade, token text not null unique, platform text not null check (platform in ('android','ios')), app_version text, is_active boolean not null default true, last_seen_at timestamptz not null default now(), created_at timestamptz not null default now());
 create index if not exists device_tokens_user_active_idx on public.device_tokens(user_id, is_active);
 create table if not exists public.audit_logs (id uuid primary key default gen_random_uuid(), actor_id uuid references public.profiles(id), action text not null, entity_type text not null, entity_id uuid, metadata jsonb not null default '{}', created_at timestamptz not null default now());
@@ -59,6 +60,7 @@ create table if not exists public.documents (id uuid primary key default gen_ran
 create table if not exists public.configs (key text primary key, value jsonb not null default '{}', updated_at timestamptz not null default now());
 create index if not exists vendor_location_booking_recorded_idx on public.vendor_location_updates(booking_id, recorded_at desc);
 create index if not exists notifications_recipient_created_idx on public.notifications(recipient_id, created_at desc);
+create index if not exists dispatcher_alerts_status_updated_idx on public.dispatcher_alerts(status, updated_at desc);
 
 
 

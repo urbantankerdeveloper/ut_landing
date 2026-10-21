@@ -5,6 +5,7 @@ import {
   adminCustomerCreateSchema,
   dispatcherAssignmentSchema,
   dispatcherCancellationSchema,
+  dispatcherAlertStatusSchema,
   dispatcherStatusSchema,
   adminNotificationSchema,
   adminOrderQuerySchema,
@@ -109,5 +110,11 @@ describe('Admin API contracts', () => {
       reason: 'Customer requested cancellation',
     }).success).toBe(true)
     expect(dispatcherCancellationSchema.safeParse({ reason: 'x' }).success).toBe(false)
+  })
+
+  it('validates persistent dispatcher alert states', () => {
+    expect(dispatcherAlertStatusSchema.safeParse({ status: 'resolved' }).success).toBe(true)
+    expect(dispatcherAlertStatusSchema.safeParse({ status: 'dismissed' }).success).toBe(true)
+    expect(dispatcherAlertStatusSchema.safeParse({ status: 'archived' }).success).toBe(false)
   })
 })
