@@ -29,8 +29,9 @@ import { requestObservability } from './middleware/observability.js'
 import { checkDatabaseConnection } from './database.js'
 const app = express(); const httpServer = createServer(app)
 const frontendDist = resolve(dirname(fileURLToPath(import.meta.url)), '../../dist')
+const allowedOrigins = [config.FRONTEND_ORIGIN, 'https://urban-tanker-backend.onrender.com']
 app.set('trust proxy', 1)
-app.use(helmet()); app.use(cors({ origin: config.FRONTEND_ORIGIN, credentials: true })); app.use(compression()); app.use(express.json({ limit: '2mb', verify: (request, _response, buffer) => { (request as typeof request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer) } })); app.use(rateLimit({ windowMs: 60_000, limit: 120 }))
+app.use(helmet()); app.use(cors({ origin: allowedOrigins, credentials: true })); app.use(compression()); app.use(express.json({ limit: '2mb', verify: (request, _response, buffer) => { (request as typeof request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer) } })); app.use(rateLimit({ windowMs: 60_000, limit: 120 }))
 app.use(requestObservability)
 app.get('/health', (_request, response) => response.json({ ok: true, service: 'urban-tanker-api' }))
 app.get('/health/ready', async (_request, response) => {
@@ -40,7 +41,7 @@ app.get('/health/ready', async (_request, response) => {
 app.use('/api/auth', authRoutes); app.use('/api/devices', deviceRoutes); app.use('/api/customer', customerRoutes); app.use('/api/customer', customerExtendedRoutes); app.use('/api/vendor', vendorRoutes); app.use('/api/vendor', vendorExtendedRoutes); app.use('/api/admin', adminRoutes); app.use('/api/admin', adminExtendedRoutes); app.use('/api/payment', paymentRoutes); app.use('/api/uploads', uploadRoutes); app.use('/api/support', supportRoutes); app.use('/api/analytics', analyticsRoutes); app.use('/api/partner', partnerRoutes); app.use(errorHandler)
 app.use(express.static(frontendDist, { index: 'index.html', maxAge: '1y', immutable: true, setHeaders: (response, filePath) => { if (filePath.endsWith('index.html')) response.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate') } }))
 app.use((request, response, next) => { if (request.method !== 'GET' || request.path.startsWith('/api') || request.path.startsWith('/health') || request.path.startsWith('/socket.io')) return next(); response.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate'); response.sendFile(resolve(frontendDist, 'index.html')) })
-const io = new Server(httpServer, { cors: { origin: config.FRONTEND_ORIGIN, credentials: true } })
+const io = new Server(httpServer, { cors: { origin: allowedOrigins, credentials: true } })
 io.use(async (socket, next) => {
   const token = socket.handshake.auth?.token
   if (typeof token !== 'string' || !token) return next(new Error('Authentication required'))

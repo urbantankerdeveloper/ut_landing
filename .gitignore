@@ -89,6 +89,7 @@ web_modules/
 .env
 .env.*
 !.env.example
+!.env.production
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
@@ -169,4 +170,4 @@ vite.config.ts.timestamp-*
 .turbo
 *.md
 IMPLEMENTATION_BACKLOG.md
-
+!HOSTINGER_DEPLOYMENT.md
