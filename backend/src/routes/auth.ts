@@ -11,8 +11,9 @@ const otpRequestLimit = rateLimit({ windowMs: 10 * 60 * 1000, limit: 5, standard
 const loginLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many login attempts. Try again later.' } })
 function parseCookies(header: string | undefined) { return Object.fromEntries((header ?? '').split(';').map((part) => part.trim().split('=').map(decodeURIComponent)).filter(([key, value]) => key && value)) }
 const refreshCookieSecurity = config.NODE_ENV === 'production' ? '; Secure' : ''
-function setRefreshCookie(response: Response, token: string) { response.setHeader('Set-Cookie', `refresh_token=${encodeURIComponent(token)}; HttpOnly; Path=/api/auth; SameSite=Lax; Max-Age=2592000${refreshCookieSecurity}`) }
-function clearRefreshCookie(response: Response) { response.setHeader('Set-Cookie', `refresh_token=; HttpOnly; Path=/api/auth; SameSite=Lax; Max-Age=0${refreshCookieSecurity}`) }
+const refreshCookieSameSite = config.NODE_ENV === 'production' ? 'None' : 'Lax'
+function setRefreshCookie(response: Response, token: string) { response.setHeader('Set-Cookie', `refresh_token=${encodeURIComponent(token)}; HttpOnly; Path=/api/auth; SameSite=${refreshCookieSameSite}; Max-Age=2592000${refreshCookieSecurity}`) }
+function clearRefreshCookie(response: Response) { response.setHeader('Set-Cookie', `refresh_token=; HttpOnly; Path=/api/auth; SameSite=${refreshCookieSameSite}; Max-Age=0${refreshCookieSecurity}`) }
 const phoneSchema = z.string().regex(/^\d{10}$/)
 router.post('/guest/request-otp', otpRequestLimit, async (request, response) => {
   const parsed = z.object({ phone: phoneSchema }).safeParse(request.body)
