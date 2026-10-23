@@ -29,7 +29,11 @@ import { requestObservability } from './middleware/observability.js'
 import { checkDatabaseConnection } from './database.js'
 const app = express(); const httpServer = createServer(app)
 const frontendDist = resolve(dirname(fileURLToPath(import.meta.url)), '../../dist')
-const allowedOrigins = [config.FRONTEND_ORIGIN, 'https://urban-tanker-backend.onrender.com']
+const allowedOrigins = [
+  config.FRONTEND_ORIGIN,
+  'https://urbantanker.in',
+  'https://urban-tanker-backend.onrender.com',
+]
 app.set('trust proxy', 1)
 app.use(helmet()); app.use(cors({ origin: allowedOrigins, credentials: true })); app.use(compression()); app.use(express.json({ limit: '2mb', verify: (request, _response, buffer) => { (request as typeof request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer) } })); app.use(rateLimit({ windowMs: 60_000, limit: 120 }))
 app.use(requestObservability)
