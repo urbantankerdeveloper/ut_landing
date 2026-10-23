@@ -20,7 +20,8 @@ export function LiveTrackingMap({ bookingId, snapshot }: Props) {
   const [trail, setTrail] = useState<LocationPoint[]>(initial ? [initial] : [])
   const customerPoint = snapshot.customerLatitude !== undefined && snapshot.customerLongitude !== undefined ? { latitude: snapshot.customerLatitude, longitude: snapshot.customerLongitude } : null
   useEffect(() => {
-    const client = new VendorRealtimeClient(import.meta.env.VITE_REALTIME_URL ?? 'http://localhost:8080', (message) => {
+    const realtimeUrl = import.meta.env.VITE_REALTIME_URL ?? (import.meta.env.PROD ? window.location.origin : 'http://localhost:8080')
+    const client = new VendorRealtimeClient(realtimeUrl, (message) => {
       if (message.type !== 'booking.location.updated' || !message.payload || typeof message.payload !== 'object') return
       const payload = message.payload as { bookingId?: string; latitude?: number; longitude?: number }
       if (payload.bookingId !== bookingId || typeof payload.latitude !== 'number' || typeof payload.longitude !== 'number') return
