@@ -2,15 +2,22 @@ import { Router } from 'express'
 import { requireAuth, requireRole } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 const router = Router(); router.use(requireAuth, requireRole('vendor'))
-type BookingRecord = { id: string; reference: string; service_code: string; address_text: string; latitude?: number | null; longitude?: number | null; quoted_amount_paise?: number | null; status: string; vehicle_id?: string | null; driver_id?: string | null; created_at: string; scheduled_for?: string | null }
+type BookingServiceDetail = { serviceId: string; capacity?: string; details?: string }
+type BookingRecord = { id: string; reference: string; service_code: string; service_details?: BookingServiceDetail[] | null; address_text: string; latitude?: number | null; longitude?: number | null; quoted_amount_paise?: number | null; status: string; vehicle_id?: string | null; driver_id?: string | null; created_at: string; scheduled_for?: string | null }
 type RelatedRecord = { id: string; name?: string; registration_number?: string }
 const statusMap: Record<string, 'Available' | 'Assigned' | 'Accepted' | 'En route' | 'Arrived' | 'Delivered' | 'Rejected'> = { pending_vendor: 'Available', vendor_assigned: 'Assigned', accepted: 'Accepted', en_route: 'En route', arrived: 'Arrived', delivered: 'Delivered', cancelled: 'Rejected' }
 function formatAmount(amountPaise?: number | null) { return `₹${(Number(amountPaise ?? 0) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}` }
 function normalizeOrder(order: BookingRecord, services: Map<string, string>, vehicles: Map<string, string>, drivers: Map<string, string>) {
+  const serviceDetails = order.service_details?.map((item) => ({
+    service: services.get(item.serviceId) ?? item.serviceId,
+    capacity: item.capacity,
+    details: item.details,
+  })) ?? []
   return {
     id: order.id,
     reference: order.reference,
-    service: services.get(order.service_code) ?? order.service_code,
+    service: serviceDetails.map((item) => item.service).join(', ') || services.get(order.service_code) || order.service_code,
+    serviceDetails,
     location: order.address_text,
     latitude: order.latitude,
     longitude: order.longitude,
@@ -24,10 +31,10 @@ function normalizeOrder(order: BookingRecord, services: Map<string, string>, veh
   }
 }
 async function loadVendorOrders(vendorId: string) {
-  const { data, error } = await supabase.from('bookings').select('id,reference,service_code,address_text,latitude,longitude,quoted_amount_paise,status,vehicle_id,driver_id,created_at,scheduled_for').eq('vendor_id', vendorId).order('created_at', { ascending: false })
+  const { data, error } = await supabase.from('bookings').select('id,reference,service_code,service_details,address_text,latitude,longitude,quoted_amount_paise,status,vehicle_id,driver_id,created_at,scheduled_for').eq('vendor_id', vendorId).order('created_at', { ascending: false })
   if (error) return { data: null, error }
   const orders = (data ?? []) as BookingRecord[]
-  const serviceCodes = [...new Set(orders.map((order) => order.service_code))]
+  const serviceCodes = [...new Set(orders.flatMap((order) => [order.service_code, ...(order.service_details ?? []).map((item) => item.serviceId)]))]
   const vehicleIds = [...new Set(orders.map((order) => order.vehicle_id).filter((id): id is string => Boolean(id)))]
   const driverIds = [...new Set(orders.map((order) => order.driver_id).filter((id): id is string => Boolean(id)))]
   const [servicesResult, vehiclesResult, driversResult] = await Promise.all([

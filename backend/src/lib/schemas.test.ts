@@ -10,6 +10,20 @@ describe('request schemas', () => {
     expect(bookingSchema.safeParse({ serviceId: 'water', location: 'ECR', deliveryDate: '2026-10-20', latitude: 12.9, longitude: 77.6 }).success).toBe(true)
     expect(bookingSchema.safeParse({ serviceId: 'water', location: 'ECR', deliveryDate: '2026-10-20', latitude: 12.9 }).success).toBe(false)
   })
+  it('accepts per-service details for one combined booking', () => {
+    expect(bookingSchema.safeParse({
+      serviceId: 'water',
+      services: [
+        { serviceId: 'water', capacity: '5000', details: 'Potable water' },
+        { serviceId: 'cleaning', capacity: '2 tanks', details: 'Clean the rooftop tank' },
+      ],
+      location: 'ECR',
+      deliveryDate: '2026-10-20',
+    }).success).toBe(true)
+  })
+  it('rejects a booking without a service', () => {
+    expect(bookingSchema.safeParse({ location: 'ECR', deliveryDate: '2026-10-20' }).success).toBe(false)
+  })
   it('bounds geographic coordinates', () => {
     const schema = z.object(coordinatesSchema)
     expect(schema.safeParse({ latitude: 12.9, longitude: 77.6 }).success).toBe(true)

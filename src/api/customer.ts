@@ -1,6 +1,6 @@
 import { apiFetch } from './client'
 
-export type CustomerBooking = { id: string; service: string; location: string; status: string; amount: number; scheduledAt: string }
+export type CustomerBooking = { id: string; service: string; services: BookingServiceDetails[]; location: string; status: string; amount: number; scheduledAt: string }
 export type SavedAddress = { id: string; label: string; address: string; city: string; pincode: string; latitude?: number; longitude?: number }
 export type CustomerSubscription = { id: string; name: string; status: 'active' | 'paused' | 'cancelled'; nextDelivery?: string; amount: number }
 export type MembershipPlan = { id: string; name: string; description: string; amount: number; billing_period: string; benefits: string[] }
@@ -13,7 +13,8 @@ export type TrackingSnapshot = { orderId: string; status: string; latitude?: num
 export type PaymentOrder = { id: string; amount: number; currency: string; keyId?: string }
 export type PaymentVerification = { verified: boolean; orderId: string }
 export type BookingPaymentMethod = 'wallet' | 'gateway' | 'cod'
-export type CreateBookingPayload = { serviceId: string; capacity: string; location: string; deliveryDate: string; notes?: string; couponCode?: string; phone?: string; latitude?: number; longitude?: number; paymentMethod?: BookingPaymentMethod }
+export type BookingServiceDetails = { serviceId: string; capacity?: string; details: string }
+export type CreateBookingPayload = { serviceId: string; services: BookingServiceDetails[]; capacity: string; location: string; deliveryDate: string; notes?: string; couponCode?: string; phone?: string; latitude?: number; longitude?: number; paymentMethod?: BookingPaymentMethod }
 export type GuestOtpChallenge = { challengeId: string; expiresInSeconds: number }
 export type GuestSession = { accessToken: string; user: { username: string; name: string; role: 'customer' } }
 export type CreateSupportRequestPayload = { subject: string; message: string; orderId?: string; priority?: string }
@@ -22,7 +23,19 @@ export type CustomerContract = { id: string; property_type: string; service_plan
 export type CustomerOffer = { id: string; code: string; title: string; discount_type: string; discount_value: number; valid_until?: string }
 export type CustomerService = { code: string; name: string; description?: string; base_price_paise: number; is_active: boolean }
 const bookingStatusMap: Record<string, string> = { pending_vendor: 'pending_vendor', vendor_assigned: 'vendor_assigned', accepted: 'accepted', en_route: 'en_route', arrived: 'arrived', delivered: 'delivered', cancelled: 'cancelled' }
-function normalizeBooking(item: Record<string, unknown>): CustomerBooking { return { id: String(item.id ?? item.reference), service: String(item.service ?? item.service_code ?? 'Service'), location: String(item.location ?? item.address_text ?? ''), status: bookingStatusMap[String(item.status)] ?? String(item.status ?? 'pending_vendor'), amount: Number(item.amount ?? item.quoted_amount_paise ?? 0) / (item.quoted_amount_paise !== undefined && item.amount === undefined ? 100 : 1), scheduledAt: String(item.scheduledAt ?? item.scheduled_for ?? '') } }
+function normalizeBooking(item: Record<string, unknown>): CustomerBooking {
+  const services = Array.isArray(item.service_details) ? item.service_details as BookingServiceDetails[] : []
+  const serviceNames = services.map((service) => service.serviceId).filter(Boolean)
+  return {
+    id: String(item.id ?? item.reference),
+    service: serviceNames.join(', ') || String(item.service ?? item.service_code ?? 'Service'),
+    services,
+    location: String(item.location ?? item.address_text ?? ''),
+    status: bookingStatusMap[String(item.status)] ?? String(item.status ?? 'pending_vendor'),
+    amount: Number(item.amount ?? item.quoted_amount_paise ?? 0) / (item.quoted_amount_paise !== undefined && item.amount === undefined ? 100 : 1),
+    scheduledAt: String(item.scheduledAt ?? item.scheduled_for ?? ''),
+  }
+}
 function normalizeSubscription(item: Record<string, unknown>): CustomerSubscription { return { id: String(item.id), name: String(item.name ?? item.plan_id ?? 'Subscription'), status: item.status as CustomerSubscription['status'], nextDelivery: item.nextDelivery as string | undefined ?? item.next_delivery as string | undefined, amount: Number(item.amount ?? 0) } }
 
 export const customerApi = {

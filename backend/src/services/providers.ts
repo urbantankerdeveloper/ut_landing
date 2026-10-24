@@ -1,8 +1,12 @@
 import nodemailer from 'nodemailer'
 import { config } from '../config.js'
 
+export function isEmailConfigured() {
+  return Boolean(config.SMTP_USER && config.SMTP_PASSWORD && config.MAIL_FROM)
+}
+
 export async function sendEmail(to: string, subject: string, html: string) {
-  if (!config.SMTP_USER || !config.SMTP_PASSWORD || !config.MAIL_FROM) {
+  if (!isEmailConfigured()) {
     return { queued: false, reason: 'SMTP_USER, SMTP_PASSWORD, and MAIL_FROM are not configured' }
   }
   const transporter = nodemailer.createTransport({

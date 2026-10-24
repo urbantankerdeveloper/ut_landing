@@ -32,6 +32,15 @@ describe('apiFetch', () => {
     await expect(apiFetch('/customer/profile')).rejects.toMatchObject(new ApiError('Request failed: 422', 422))
   })
 
+  it('surfaces the backend error message', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'Email confirmation is unavailable.' }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' },
+    })))
+
+    await expect(apiFetch('/auth/signup')).rejects.toMatchObject(new ApiError('Email confirmation is unavailable.', 503))
+  })
+
   it('adds the in-memory access token and preserves request options', async () => {
     useAuthStore.getState().setAccessToken('access-token')
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), {

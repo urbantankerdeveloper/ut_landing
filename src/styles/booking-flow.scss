@@ -1,6 +1,26 @@
 @use "../theme/colors";
 
 .booking-review-panel { display:grid; gap:0; }.review-item { padding:13px 0; border-top:1px solid #e2eae6; }.review-item p { margin:4px 0 0; color:colors.$muted; font-size:11px; }.payment-choice-list { display:grid; gap:10px; padding-top:14px; }.payment-choice-list label { display:flex; gap:10px; align-items:center; padding:13px; color:colors.$ink; background:#f8fbfa; border:1px solid #dce7e3; border-radius:10px; cursor:pointer; }.payment-choice-list label.selected { color:colors.$aqua-dark; background:colors.$aqua-light; border-color:colors.$aqua; }.payment-choice-list input { flex:none; min-height:auto; }.payment-choice-list label svg { color:colors.$aqua; }.payment-choice-list label span { display:flex; flex:1; flex-direction:column; gap:3px; }.payment-choice-list label small { color:colors.$muted; font-size:9px; }.payment-choice-list .button { margin-top:8px; }
+.service-detail-form {
+    display: grid;
+    gap: 12px;
+    margin: 14px 0;
+    padding: 16px;
+    border: 1px solid #dce7e3;
+    border-radius: 12px;
+    background: #fbfdfc;
+}
+
+.service-detail-form legend {
+    padding: 0 6px;
+    color: colors.$ink;
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.service-detail-form .field { margin: 0; }
+.service-detail-form input,
+.service-detail-form textarea { width: 100%; }
 .coupon-entry {
     display: grid;
     gap: 7px;

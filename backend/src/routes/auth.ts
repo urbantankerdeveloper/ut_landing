@@ -3,12 +3,16 @@ import crypto from 'node:crypto'
 import { z } from 'zod'
 import { authSupabase, supabase } from '../supabase.js'
 import { credentialsSchema } from '../lib/schemas.js'
-import { sendSms } from '../services/providers.js'
+import { isEmailConfigured, sendEmail, sendSms } from '../services/providers.js'
+import { passwordResetEmail, signupConfirmationEmail } from '../services/signupEmail.js'
 import { config } from '../config.js'
 import rateLimit from 'express-rate-limit'
 const router = Router()
 const otpRequestLimit = rateLimit({ windowMs: 10 * 60 * 1000, limit: 5, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many OTP requests. Try again later.' } })
 const loginLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many login attempts. Try again later.' } })
+const signupLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many registration attempts. Try again later.' } })
+const passwordResetLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many password reset requests. Try again later.' } })
+const passwordUpdateLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many password update attempts. Try again later.' } })
 function parseCookies(header: string | undefined) { return Object.fromEntries((header ?? '').split(';').map((part) => part.trim().split('=').map(decodeURIComponent)).filter(([key, value]) => key && value)) }
 const refreshCookieSecurity = config.NODE_ENV === 'production' ? '; Secure' : ''
 const refreshCookieSameSite = config.NODE_ENV === 'production' ? 'None' : 'Lax'
@@ -51,8 +55,135 @@ router.post('/guest/verify-otp', async (request, response) => {
   response.json({ accessToken: session.session.access_token, user: { username: `guest_${parsed.data.phone}`, name: parsed.data.name ?? 'Guest customer', role: 'customer' } })
 })
 router.post('/login', loginLimit, async (request, response) => { const parsed = credentialsSchema.safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid credentials', details: parsed.error.flatten() }); const credential = (parsed.data.email ?? parsed.data.username!).trim().toLowerCase(); let email = credential; let username = credential; if (!credential.includes('@')) { const { data: profile } = await supabase.from('profiles').select('id,username').ilike('username', credential).maybeSingle(); if (!profile) return response.status(401).json({ error: 'Invalid credentials' }); const { data: authUser } = await authSupabase.auth.admin.getUserById(profile.id); email = authUser.user?.email ?? ''; username = profile.username ?? credential } const { data, error } = await authSupabase.auth.signInWithPassword({ email, password: parsed.data.password }); if (error || !data.session || !data.user) return response.status(401).json({ error: 'Invalid credentials' }); const { data: profile } = await supabase.from('profiles').select('id,role,full_name,username').eq('id', data.user.id).single(); setRefreshCookie(response, data.session.refresh_token); const user = { id: data.user.id, email: data.user.email, username: profile?.username ?? username ?? data.user.email, name: profile?.full_name ?? data.user.email, role: profile?.role ?? 'customer' }; return response.json({ accessToken: data.session.access_token, ...(request.header('x-client-platform') === 'mobile' ? { refreshToken: data.session.refresh_token } : {}), user }) })
-router.post('/signup', async (request, response) => { const parsed = z.object({ email: z.string().email(), username: z.string().min(3).max(40).regex(/^[a-zA-Z0-9._-]+$/).optional(), password: z.string().min(8), name: z.string().min(2).max(60), phone: z.string().regex(/^\d{10}$/), role: z.enum(['customer','vendor','admin']).optional(), adminKey: z.string().optional() }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid registration', details: parsed.error.flatten() }); if (parsed.data.role && parsed.data.role !== 'customer') return response.status(403).json({ error: 'Public signup creates customer accounts only.' }); const username = parsed.data?.username?.toLowerCase() ?? parsed.data?.email?.split('@')[0]?.toLowerCase() ?? 'user'; const { data, error } = await authSupabase.auth.signUp({ email: parsed.data.email, password: parsed.data.password, options: { data: { full_name: parsed.data.name, phone: parsed.data.phone, role: 'customer', username } } }); if (error) return response.status(400).json({ error: error.message }); if (data?.user) { const { error: profileError } = await supabase.from('profiles').upsert({ id: data.user.id, full_name: parsed.data.name, phone_e164: parsed.data.phone, username, role: 'customer' }); if (profileError) return response.status(400).json({ error: profileError.message }) } response.status(201).json({ requiresEmailVerification: !data?.session, userId: data?.user?.id }) })
-router.post('/password-reset', async (request, response) => { const parsed = z.object({ email: z.string().email() }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Valid email is required' }); const { error } = await authSupabase.auth.resetPasswordForEmail(parsed.data.email, { redirectTo: `${config.FRONTEND_ORIGIN}/login` }); if (error) return response.status(400).json({ error: error.message }); response.status(202).json({ accepted: true }) })
+router.post('/signup', signupLimit, async (request, response) => {
+  const parsed = z.object({
+    email: z.string().email(),
+    username: z.string().min(3).max(40).regex(/^[a-zA-Z0-9._-]+$/).optional(),
+    password: z.string().min(8),
+    name: z.string().min(2).max(60),
+    phone: phoneSchema,
+    role: z.enum(['customer', 'vendor', 'admin']).optional(),
+    adminKey: z.string().optional(),
+  }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Invalid registration', details: parsed.error.flatten() })
+  if (parsed.data.role && parsed.data.role !== 'customer') return response.status(403).json({ error: 'Public signup creates customer accounts only.' })
+  if (!isEmailConfigured()) return response.status(503).json({ error: 'Email confirmation is unavailable. Configure Gmail SMTP_USER, SMTP_PASSWORD, and MAIL_FROM on the backend, then try again.' })
+
+  const username = parsed.data.username?.toLowerCase() ?? parsed.data.email.split('@')[0]?.toLowerCase() ?? 'user'
+  const { data, error } = await authSupabase.auth.admin.generateLink({
+    type: 'signup',
+    email: parsed.data.email,
+    password: parsed.data.password,
+    options: {
+      data: { full_name: parsed.data.name, phone: parsed.data.phone, role: 'customer', username },
+      redirectTo: `${config.FRONTEND_ORIGIN}/login`,
+    },
+  })
+  if (error) return response.status(400).json({ error: error.message })
+  const userId = data.user.id
+  const { error: profileError } = await supabase.from('profiles').upsert({
+    id: userId,
+    full_name: parsed.data.name,
+    phone_e164: parsed.data.phone,
+    username,
+    role: 'customer',
+  })
+  if (profileError) {
+    const { error: deleteError } = await authSupabase.auth.admin.deleteUser(userId)
+    if (deleteError) console.error(JSON.stringify({ event: 'signup.rollback_failed', userId, error: deleteError.message }))
+    return response.status(400).json({ error: profileError.message })
+  }
+
+  const cleanupUnconfirmedAccount = async () => {
+    const { error: deleteProfileError } = await supabase.from('profiles').delete().eq('id', userId)
+    const { error: deleteUserError } = await authSupabase.auth.admin.deleteUser(userId)
+    if (deleteProfileError || deleteUserError) {
+      const errors = [deleteProfileError?.message, deleteUserError?.message].filter(Boolean).join('; ')
+      console.error(JSON.stringify({ event: 'signup.rollback_failed', userId, error: errors }))
+      return false
+    }
+    return true
+  }
+
+  try {
+    const actionLink = data.properties.action_link
+    if (!actionLink) {
+      await cleanupUnconfirmedAccount()
+      return response.status(502).json({ error: 'We could not create an email confirmation link. Please try again.' })
+    }
+    const email = signupConfirmationEmail(parsed.data.name, actionLink)
+    const delivery = await sendEmail(parsed.data.email, email.subject, email.html)
+    if (!delivery.queued) {
+      const cleanedUp = await cleanupUnconfirmedAccount()
+      if (!cleanedUp) console.error(JSON.stringify({ event: 'signup.unconfirmed_account_retained', userId, reason: 'email_delivery_not_configured' }))
+      return response.status(503).json({ error: 'Email confirmation is unavailable. Configure SMTP_USER, SMTP_PASSWORD, and MAIL_FROM on the backend, then try again.' })
+    }
+  } catch (deliveryError) {
+    const cleanedUp = await cleanupUnconfirmedAccount()
+    console.error(JSON.stringify({
+      event: 'signup.confirmation_email_failed',
+      userId,
+      error: deliveryError instanceof Error ? deliveryError.message : 'Unknown email delivery error',
+      cleanedUp,
+    }))
+    return response.status(502).json({ error: 'The confirmation email could not be sent. Please try again in a few minutes.' })
+  }
+
+  response.status(201).json({ requiresEmailVerification: true, emailSent: true, userId })
+})
+router.post('/password-reset', passwordResetLimit, async (request, response) => {
+  const parsed = z.object({ email: z.string().email() }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Valid email is required' })
+  if (!isEmailConfigured()) return response.status(503).json({ error: 'Password reset email is unavailable. Configure Gmail SMTP_USER, SMTP_PASSWORD, and MAIL_FROM on the backend, then try again.' })
+
+  const { data, error } = await authSupabase.auth.admin.generateLink({
+    type: 'recovery',
+    email: parsed.data.email,
+    options: { redirectTo: `${config.FRONTEND_ORIGIN}/login` },
+  })
+  if (error || !data?.properties.action_link) {
+    if (error && /user not found|not found/i.test(error.message)) {
+      return response.status(202).json({ accepted: true })
+    }
+    if (error) {
+      console.error(JSON.stringify({ event: 'auth.password_reset_link_failed', error: error.message }))
+      return response.status(502).json({ error: 'Password reset instructions could not be prepared. Please try again shortly.' })
+    }
+    return response.status(502).json({ error: 'Password reset instructions could not be prepared. Please try again shortly.' })
+  }
+
+  try {
+    const email = passwordResetEmail(data.properties.action_link)
+    const delivery = await sendEmail(parsed.data.email, email.subject, email.html)
+    if (!delivery.queued) throw new Error(delivery.reason)
+  } catch (deliveryError) {
+    console.error(JSON.stringify({
+      event: 'auth.password_reset_email_failed',
+      error: deliveryError instanceof Error ? deliveryError.message : 'Unknown email delivery error',
+    }))
+    return response.status(502).json({ error: 'The password reset email could not be sent. Please try again in a few minutes.' })
+  }
+  response.status(202).json({ accepted: true })
+})
+router.post('/password-update', passwordUpdateLimit, async (request, response) => {
+  const parsed = z.object({
+    accessToken: z.string().min(20).max(4096),
+    password: z.string().min(8).max(128),
+  }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'A valid recovery link and password are required.' })
+
+  const { data, error } = await authSupabase.auth.getUser(parsed.data.accessToken)
+  if (error || !data.user) return response.status(401).json({ error: 'The password reset link is invalid or expired.' })
+
+  const { error: updateError } = await authSupabase.auth.admin.updateUserById(data.user.id, {
+    password: parsed.data.password,
+  })
+  if (updateError) {
+    console.error(JSON.stringify({ event: 'auth.password_update_failed', userId: data.user.id, error: updateError.message }))
+    return response.status(500).json({ error: 'The password could not be updated. Please try again.' })
+  }
+  return response.json({ updated: true })
+})
 router.post('/refresh', async (request, response) => { const cookies = parseCookies(request.headers.cookie); const refreshToken = cookies.refresh_token ?? request.body?.refreshToken; if (!refreshToken) return response.status(401).json({ error: 'Refresh token required' }); const { data, error } = await authSupabase.auth.refreshSession({ refresh_token: refreshToken }); if (error || !data.session) return response.status(401).json({ error: 'Session expired' }); setRefreshCookie(response, data.session.refresh_token); return response.json({ accessToken: data.session.access_token }) })
 router.post('/mobile-refresh', async (request, response) => { const parsed = z.object({ refreshToken: z.string().min(20).max(4096) }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Refresh token required' }); const { data, error } = await authSupabase.auth.refreshSession({ refresh_token: parsed.data.refreshToken }); if (error || !data.session || !data.user) return response.status(401).json({ error: 'Session expired' }); const { data: profile } = await supabase.from('profiles').select('id,role,full_name,username').eq('id', data.user.id).single(); return response.json({ accessToken: data.session.access_token, refreshToken: data.session.refresh_token, user: { id: data.user.id, email: data.user.email, username: profile?.username ?? data.user.email, name: profile?.full_name ?? data.user.email, role: profile?.role ?? 'customer' } }) })
 router.post('/logout', (_request, response) => { clearRefreshCookie(response); return response.status(204).send() })

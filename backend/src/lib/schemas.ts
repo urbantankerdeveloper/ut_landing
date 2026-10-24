@@ -4,4 +4,23 @@ export const coordinatesSchema = {
   latitude: z.number().finite().min(-90).max(90),
   longitude: z.number().finite().min(-180).max(180),
 }
-export const bookingSchema = z.object({ serviceId: z.string().min(1), capacity: z.string().optional(), location: z.string().min(3), deliveryDate: z.string().min(10), notes: z.string().max(1000).optional(), couponCode: z.string().max(80).optional(), phone: z.string().regex(/^\d{10}$/).optional(), paymentMethod: z.enum(['wallet', 'gateway', 'cod']).default('wallet'), latitude: z.number().finite().min(-90).max(90).optional(), longitude: z.number().finite().min(-180).max(180).optional() }).refine((value) => (value.latitude === undefined) === (value.longitude === undefined), { message: 'Latitude and longitude must be provided together' })
+const bookingServiceSchema = z.object({
+  serviceId: z.string().min(1),
+  capacity: z.string().max(30).optional(),
+  details: z.string().max(1000).optional(),
+})
+export const bookingSchema = z.object({
+  serviceId: z.string().min(1).optional(),
+  services: z.array(bookingServiceSchema).min(1).max(20).optional(),
+  capacity: z.string().optional(),
+  location: z.string().min(3),
+  deliveryDate: z.string().min(10),
+  notes: z.string().max(1000).optional(),
+  couponCode: z.string().max(80).optional(),
+  phone: z.string().regex(/^\d{10}$/).optional(),
+  paymentMethod: z.enum(['wallet', 'gateway', 'cod']).default('wallet'),
+  latitude: z.number().finite().min(-90).max(90).optional(),
+  longitude: z.number().finite().min(-180).max(180).optional(),
+})
+  .refine((value) => Boolean(value.services?.length || value.serviceId?.trim()), { message: 'At least one service is required' })
+  .refine((value) => (value.latitude === undefined) === (value.longitude === undefined), { message: 'Latitude and longitude must be provided together' })

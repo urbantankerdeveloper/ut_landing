@@ -34,7 +34,16 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}, retry = 
         }
       } catch { /* Let the original authorization error surface. */ }
     }
-    if (!response.ok) throw new ApiError(`Request failed: ${response.status}`, response.status)
+    if (!response.ok) {
+      let message = `Request failed: ${response.status}`
+      try {
+        const body = await response.json() as { error?: unknown }
+        if (typeof body.error === 'string' && body.error.trim()) message = body.error
+      } catch {
+        // Keep the HTTP status message when the server did not return JSON.
+      }
+      throw new ApiError(message, response.status)
+    }
     if (response.status === 204) return undefined as T
     return response.json() as Promise<T>
   } finally { window.clearTimeout(timeout) }

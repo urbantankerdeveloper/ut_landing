@@ -29,9 +29,103 @@ router.post('/coupons/validate', async (request, response) => { const parsed = z
 router.use(requireAuth)
 router.get('/usage', async (request, response) => { const { data, error } = await supabase.from('bookings').select('quoted_amount_paise,status').eq('customer_id', request.authUser!.id); if (error) return response.status(500).json({ error: error.message }); const delivered = (data ?? []).filter((item) => item.status === 'delivered'); const totalSpend = delivered.reduce((sum, item) => sum + Number(item.quoted_amount_paise ?? 0) / 100, 0); response.json({ deliveries: delivered.length, totalSpend, averageAmount: delivered.length ? Math.round(totalSpend / delivered.length) : 0 }) })
 router.get('/orders', async (request, response) => { const { data, error } = await supabase.from('bookings').select('*').eq('customer_id', request.authUser!.id).order('created_at', { ascending: false }); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
-router.post('/orders', async (request, response) => { const parsed = bookingSchema.safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid booking', details: parsed.error.flatten() }); const reference = `UT-${Date.now().toString().slice(-8)}`; const vendor = await findAvailableVendor(); const { data, error } = await supabase.from('bookings').insert({ reference, customer_id: request.authUser!.id, customer_phone_e164: parsed.data.phone ?? null, vendor_id: vendor?.id ?? null, service_code: parsed.data.serviceId, capacity_litres: Number.parseInt(parsed.data.capacity ?? '0', 10) || null, address_text: parsed.data.location, latitude: parsed.data.latitude ?? null, longitude: parsed.data.longitude ?? null, scheduled_for: parsed.data.deliveryDate, access_notes: parsed.data.notes ?? null, quoted_amount_paise: 0 }).select('id,reference,vendor_id').single(); if (error) return response.status(500).json({ error: error.message }); if (vendor) { await supabase.from('notifications').insert({ recipient_id: vendor.owner_profile_id, event_type: 'vendor_order_created', title: 'New delivery request', payload: { bookingId: data.id, reference: data.reference } }); pushVendorOrder(vendor.owner_profile_id, data.id, data.reference); emitRealtimeToVendor(vendor.id, 'vendor.order.created', { vendorId: vendor.id, bookingId: data.id, reference: data.reference }) } emitRealtimeToUser(request.authUser!.id, 'booking.created', data); response.status(201).json(data) })
-router.post('/orders/quote', async (request, response) => { const parsed = bookingSchema.safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid booking', details: parsed.error.flatten() }); try { const quote = await quoteServices(parsed.data.serviceId.split(','), parsed.data.couponCode); const reference = `UT-${Date.now().toString().slice(-8)}`; const vendor = await findAvailableVendor(); const { data, error } = await supabase.from('bookings').insert({ reference, customer_id: request.authUser!.id, customer_phone_e164: parsed.data.phone ?? null, payment_method: parsed.data.paymentMethod, vendor_id: vendor?.id ?? null, service_code: parsed.data.serviceId, capacity_litres: Number.parseInt(parsed.data.capacity ?? '0', 10) || null, address_text: parsed.data.location, latitude: parsed.data.latitude ?? null, longitude: parsed.data.longitude ?? null, scheduled_for: parsed.data.deliveryDate, access_notes: parsed.data.notes ?? null, quoted_amount_paise: quote.totalPaise }).select('id,reference,vendor_id,quoted_amount_paise,payment_method').single(); if (error) return response.status(500).json({ error: error.message }); if (parsed.data.paymentMethod === 'cod') { const { error: paymentError } = await supabase.from('payments').insert({ booking_id: data.id, provider: 'cash_on_delivery', amount_paise: quote.totalPaise, currency: 'INR', status: 'pending' }); if (paymentError) return response.status(500).json({ error: paymentError.message }) } if (vendor) { const { error: notificationError } = await supabase.from('notifications').insert({ recipient_id: vendor.owner_profile_id, event_type: 'vendor_order_created', title: 'New delivery request', payload: { bookingId: data.id, reference: data.reference, paymentMethod: parsed.data.paymentMethod } }); if (notificationError) return response.status(500).json({ error: notificationError.message }); pushVendorOrder(vendor.owner_profile_id, data.id, data.reference); emitRealtimeToVendor(vendor.id, 'vendor.order.created', { vendorId: vendor.id, bookingId: data.id, reference: data.reference }) } emitRealtimeToUser(request.authUser!.id, 'booking.created', data); response.status(201).json({ ...data, quote }) } catch (error) { response.status(400).json({ error: error instanceof Error ? error.message : 'Booking quote failed' }) } })
-router.post('/orders/quote-preview', async (request, response) => { const parsed = bookingSchema.safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid booking', details: parsed.error.flatten() }); try { const quote = await quoteServices(parsed.data.serviceId.split(','), parsed.data.couponCode); response.json({ quote, paymentMethod: parsed.data.paymentMethod ?? 'cod' }) } catch (error) { response.status(400).json({ error: error instanceof Error ? error.message : 'Booking quote failed' }) } })
+function getBookingServices(data: z.infer<typeof bookingSchema>) {
+  const items = data.services ?? (data.serviceId ?? '').split(',').map((serviceId) => ({
+    serviceId,
+    capacity: data.capacity,
+    details: data.notes,
+  }))
+  return items.map((item) => ({
+    serviceId: item.serviceId.trim(),
+    capacity: item.capacity?.trim() ?? '',
+    details: item.details?.trim() ?? '',
+  })).filter((item) => item.serviceId)
+}
+function bookingInsert(data: z.infer<typeof bookingSchema>, services: ReturnType<typeof getBookingServices>, vendorId: string | null, quotedAmountPaise: number) {
+  const primaryService = services[0]
+  if (!primaryService) throw new Error('At least one service is required')
+  const capacityText = primaryService.capacity || (!data.services?.length ? data.capacity : '') || ''
+  const capacityMatch = capacityText.match(/^([\d,]+)\s*(?:litres?|l)?$/i)
+  const isTankerService = ['water_tanker', 'sewage_tanker'].includes(primaryService.serviceId)
+  return {
+    customer_phone_e164: data.phone ?? null,
+    payment_method: data.paymentMethod,
+    vendor_id: vendorId,
+    service_code: primaryService.serviceId,
+    capacity_litres: (isTankerService || !data.services?.length) && capacityMatch ? Number.parseInt(capacityMatch[1]?.replace(/,/g, '') ?? '', 10) || null : null,
+    service_details: services,
+    address_text: data.location,
+    latitude: data.latitude ?? null,
+    longitude: data.longitude ?? null,
+    scheduled_for: data.deliveryDate,
+    access_notes: data.notes ?? null,
+    quoted_amount_paise: quotedAmountPaise,
+  }
+}
+router.post('/orders', async (request, response) => {
+  const parsed = bookingSchema.safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Invalid booking', details: parsed.error.flatten() })
+  const services = getBookingServices(parsed.data)
+  if (!services.length) return response.status(400).json({ error: 'At least one service is required' })
+  const reference = `UT-${Date.now().toString().slice(-8)}`
+  const vendor = await findAvailableVendor()
+  const { data, error } = await supabase.from('bookings').insert({
+    reference,
+    customer_id: request.authUser!.id,
+    ...bookingInsert(parsed.data, services, vendor?.id ?? null, 0),
+  }).select('id,reference,vendor_id').single()
+  if (error) return response.status(500).json({ error: error.message })
+  if (vendor) {
+    await supabase.from('notifications').insert({ recipient_id: vendor.owner_profile_id, event_type: 'vendor_order_created', title: 'New delivery request', payload: { bookingId: data.id, reference: data.reference } })
+    pushVendorOrder(vendor.owner_profile_id, data.id, data.reference)
+    emitRealtimeToVendor(vendor.id, 'vendor.order.created', { vendorId: vendor.id, bookingId: data.id, reference: data.reference })
+  }
+  emitRealtimeToUser(request.authUser!.id, 'booking.created', data)
+  response.status(201).json(data)
+})
+router.post('/orders/quote', async (request, response) => {
+  const parsed = bookingSchema.safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Invalid booking', details: parsed.error.flatten() })
+  try {
+    const services = getBookingServices(parsed.data)
+    if (!services.length) return response.status(400).json({ error: 'At least one service is required' })
+    const quote = await quoteServices(services.map((item) => item.serviceId), parsed.data.couponCode)
+    const reference = `UT-${Date.now().toString().slice(-8)}`
+    const vendor = await findAvailableVendor()
+    const { data, error } = await supabase.from('bookings').insert({
+      reference,
+      customer_id: request.authUser!.id,
+      ...bookingInsert(parsed.data, services, vendor?.id ?? null, quote.totalPaise),
+    }).select('id,reference,vendor_id,quoted_amount_paise,payment_method').single()
+    if (error) return response.status(500).json({ error: error.message })
+    if (parsed.data.paymentMethod === 'cod') {
+      const { error: paymentError } = await supabase.from('payments').insert({ booking_id: data.id, provider: 'cash_on_delivery', amount_paise: quote.totalPaise, currency: 'INR', status: 'pending' })
+      if (paymentError) return response.status(500).json({ error: paymentError.message })
+    }
+    if (vendor) {
+      const { error: notificationError } = await supabase.from('notifications').insert({ recipient_id: vendor.owner_profile_id, event_type: 'vendor_order_created', title: 'New delivery request', payload: { bookingId: data.id, reference: data.reference, paymentMethod: parsed.data.paymentMethod } })
+      if (notificationError) return response.status(500).json({ error: notificationError.message })
+      pushVendorOrder(vendor.owner_profile_id, data.id, data.reference)
+      emitRealtimeToVendor(vendor.id, 'vendor.order.created', { vendorId: vendor.id, bookingId: data.id, reference: data.reference })
+    }
+    emitRealtimeToUser(request.authUser!.id, 'booking.created', data)
+    response.status(201).json({ ...data, quote })
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : 'Booking quote failed' })
+  }
+})
+router.post('/orders/quote-preview', async (request, response) => {
+  const parsed = bookingSchema.safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Invalid booking', details: parsed.error.flatten() })
+  try {
+    const services = getBookingServices(parsed.data)
+    if (!services.length) return response.status(400).json({ error: 'At least one service is required' })
+    const quote = await quoteServices(services.map((item) => item.serviceId), parsed.data.couponCode)
+    response.json({ quote, paymentMethod: parsed.data.paymentMethod ?? 'cod' })
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : 'Booking quote failed' })
+  }
+})
 router.get('/invoices', async (request, response) => { const { data, error } = await supabase.from('invoices').select('*').eq('customer_id', request.authUser!.id).order('created_at', { ascending: false }); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
 router.get('/invoices/:invoiceId/download', async (request, response) => { const { data, error } = await supabase.from('invoices').select('*').eq('id', request.params.invoiceId).eq('customer_id', request.authUser!.id).single(); if (error || !data) return response.status(404).json({ error: 'Invoice not found' }); response.json(data) })
 router.get('/addresses', async (request, response) => { const { data, error } = await supabase.from('saved_addresses').select('*').eq('user_id', request.authUser!.id).order('is_default', { ascending: false }).order('created_at', { ascending: false }); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })

@@ -45,4 +45,8 @@ if (!serviceRoleKey) throw new Error('SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SECR
 if (parsed.NODE_ENV === 'production' && !parsed.FRONTEND_ORIGIN.startsWith('https://')) {
   throw new Error('FRONTEND_ORIGIN must use HTTPS in production')
 }
-export const config = { ...parsed, SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey }
+export const config = {
+  ...parsed,
+  SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey,
+  MAIL_FROM: parsed.MAIL_FROM ?? parsed.SMTP_USER,
+}

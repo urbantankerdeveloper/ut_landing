@@ -30,6 +30,14 @@ npm run reference:list
 
 The reference server intentionally fails when port `4174` is occupied instead of switching ports silently.
 
+## Booking service details
+
+For an existing database, apply `backend/supabase/012_booking_service_details.sql` before deploying the API. It adds the JSONB column that stores each service's details under the same booking record. Fresh installs also receive the column from `backend/supabase/001_initial.sql`.
+
+## Customer email confirmation
+
+All application email (registration confirmation, password reset, and notifications) is sent by the backend through Gmail SMTP. Configure `SMTP_USER` with the Gmail address and `SMTP_PASSWORD` with its Google app password. The defaults are `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=465`, and `SMTP_SECURE=true`; set `MAIL_FROM` only if you use an address authorized by that Gmail account. Add `${FRONTEND_ORIGIN}/login` to the Supabase Auth redirect allow list.
+
 ## Expanding the ESLint configuration
 
 If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
