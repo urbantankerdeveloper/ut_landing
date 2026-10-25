@@ -34,9 +34,29 @@ const allowedOrigins = [
   config.FRONTEND_ORIGIN,
   'https://urbantanker.in',
   'https://urban-tanker-backend.onrender.com',
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:8080',
 ]
+const isAllowedOrigin = (origin: string | undefined) =>
+  !origin ||
+  allowedOrigins.includes(origin) ||
+  /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+const corsOptions = {
+  origin: (
+    origin: string | undefined,
+    callback: (error: Error | null, allowed?: boolean) => void,
+  ) => {
+    if (isAllowedOrigin(origin)) {
+      callback(null, true)
+      return
+    }
+    callback(new Error('Origin is not allowed by CORS'))
+  },
+  credentials: true,
+}
 app.set('trust proxy', 1)
-app.use(helmet()); app.use(cors({ origin: allowedOrigins, credentials: true })); app.use(compression()); app.use(express.json({ limit: '2mb', verify: (request, _response, buffer) => { (request as typeof request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer) } })); app.use(rateLimit({ windowMs: 60_000, limit: 120 }))
+app.use(helmet()); app.use(cors(corsOptions)); app.use(compression()); app.use(express.json({ limit: '2mb', verify: (request, _response, buffer) => { (request as typeof request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer) } })); app.use(rateLimit({ windowMs: 60_000, limit: 120 }))
 app.use(requestObservability)
 app.get('/health', (_request, response) => response.json({ ok: true, service: 'urban-tanker-api' }))
 app.get('/health/ready', async (_request, response) => {
@@ -46,7 +66,7 @@ app.get('/health/ready', async (_request, response) => {
 app.use('/api/auth', authRoutes); app.use('/api/devices', deviceRoutes); app.use('/api/public', publicTrackingRoutes); app.use('/api/customer', customerRoutes); app.use('/api/customer', customerExtendedRoutes); app.use('/api/vendor', vendorRoutes); app.use('/api/vendor', vendorExtendedRoutes); app.use('/api/admin', adminRoutes); app.use('/api/admin', adminExtendedRoutes); app.use('/api/payment', paymentRoutes); app.use('/api/uploads', uploadRoutes); app.use('/api/support', supportRoutes); app.use('/api/analytics', analyticsRoutes); app.use('/api/partner', partnerRoutes); app.use(errorHandler)
 app.use(express.static(frontendDist, { index: 'index.html', maxAge: '1y', immutable: true, setHeaders: (response, filePath) => { if (filePath.endsWith('index.html')) response.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate') } }))
 app.use((request, response, next) => { if (request.method !== 'GET' || request.path.startsWith('/api') || request.path.startsWith('/health') || request.path.startsWith('/socket.io')) return next(); response.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate'); response.sendFile(resolve(frontendDist, 'index.html')) })
-const io = new Server(httpServer, { cors: { origin: allowedOrigins, credentials: true } })
+const io = new Server(httpServer, { cors: corsOptions })
 io.use(async (socket, next) => {
   const token = socket.handshake.auth?.token
   if (typeof token !== 'string' || !token) return next(new Error('Authentication required'))
