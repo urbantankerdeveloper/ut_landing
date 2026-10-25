@@ -21,6 +21,47 @@ describe('request schemas', () => {
       deliveryDate: '2026-10-20',
     }).success).toBe(true)
   })
+  it('accepts a separate delivery date for every service without a shared date', () => {
+    expect(bookingSchema.safeParse({
+      services: [
+        { serviceId: 'water', capacity: '5000', details: 'Potable water', deliveryDate: '2026-10-20' },
+        { serviceId: 'cleaning', capacity: '2 tanks', details: 'Clean the rooftop tank', deliveryDate: '2026-10-22' },
+      ],
+      location: 'ECR',
+    }).success).toBe(true)
+  })
+  it('accepts one verified booking contact with a separate location for each service', () => {
+    expect(bookingSchema.safeParse({
+      services: [
+        { serviceId: 'water', deliveryDate: '2026-10-20', location: 'ECR, Chennai' },
+        { serviceId: 'cleaning', deliveryDate: '2026-10-22', location: 'OMR, Chennai' },
+      ],
+      location: 'ECR, Chennai',
+      phone: '9876543210',
+      phoneVerificationChallengeId: '00000000-0000-4000-8000-000000000001',
+    }).success).toBe(true)
+  })
+  it('accepts distinct service locations without requiring duplicate phone values', () => {
+    const parsed = bookingSchema.safeParse({
+      services: [
+        { serviceId: 'water', deliveryDate: '2026-10-20', location: 'ECR, Chennai' },
+        { serviceId: 'cleaning', deliveryDate: '2026-10-22', location: 'OMR, Chennai' },
+      ],
+      location: 'ECR, Chennai',
+      deliveryDate: '2026-10-20',
+      phone: '9876543210',
+    })
+    expect(parsed.success).toBe(true)
+  })
+  it('rejects multi-service bookings if a service has no date and no legacy shared date', () => {
+    expect(bookingSchema.safeParse({
+      services: [
+        { serviceId: 'water', deliveryDate: '2026-10-20' },
+        { serviceId: 'cleaning' },
+      ],
+      location: 'ECR',
+    }).success).toBe(false)
+  })
   it('rejects a booking without a service', () => {
     expect(bookingSchema.safeParse({ location: 'ECR', deliveryDate: '2026-10-20' }).success).toBe(false)
   })

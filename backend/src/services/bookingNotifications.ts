@@ -2,6 +2,7 @@ import { config } from '../config.js'
 import { supabase } from '../supabase.js'
 import { notifyCustomer } from './customerNotifications.js'
 import { notifyUser } from './providers.js'
+import { getOrCreateTrackingToken } from './trackingTokens.js'
 
 type AssignedBooking = {
   id: string
@@ -14,7 +15,8 @@ type AssignedBooking = {
 }
 
 export async function notifyCustomerOfAssignment(booking: AssignedBooking) {
-  const [profileResult, vehicleResult, driverResult] = await Promise.all([
+  const [{ token }, profileResult, vehicleResult, driverResult] = await Promise.all([
+    getOrCreateTrackingToken(booking.id),
     supabase.from('profiles').select('phone_e164').eq('id', booking.customer_id).maybeSingle(),
     booking.vehicle_id ? supabase.from('vehicles').select('registration_number').eq('id', booking.vehicle_id).maybeSingle() : Promise.resolve({ data: null, error: null }),
     booking.driver_id ? supabase.from('drivers').select('name').eq('id', booking.driver_id).maybeSingle() : Promise.resolve({ data: null, error: null }),
@@ -26,7 +28,7 @@ export async function notifyCustomerOfAssignment(booking: AssignedBooking) {
 
   const vehicle = vehicleResult.data?.registration_number ?? 'Assigned tanker'
   const driver = driverResult.data?.name ?? 'Assigned driver'
-  const trackingUrl = `${config.FRONTEND_ORIGIN}/workspace?screen=tracking&booking=${encodeURIComponent(booking.id)}`
+  const trackingUrl = `${config.FRONTEND_ORIGIN}/track/${token}`
   const customerMapUrl = booking.latitude !== null && booking.longitude !== null && booking.latitude !== undefined && booking.longitude !== undefined
     ? `https://www.google.com/maps/search/?api=1&query=${booking.latitude},${booking.longitude}`
     : null

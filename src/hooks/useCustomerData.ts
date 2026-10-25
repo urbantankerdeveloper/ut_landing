@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { customerApi, type CreateBookingPayload, type CreateSupportRequestPayload, type CustomerProfile } from '../api/customer'
+import { customerApi, type CreateBookingPayload, type CreateSupportRequestPayload } from '../api/customer'
 import { customerDemoDataEnabled } from '../constants/demo'
 import { useRealtimeInvalidation } from './useRealtimeInvalidation'
 import { loadRazorpayWidget } from './useFrontendFeatures'
@@ -8,6 +8,7 @@ const customerQueryOptions = { enabled: !customerDemoDataEnabled, staleTime: 60_
 export const customerQueryKeys = { bookings: ['customer', 'bookings'], addresses: ['customer', 'addresses'], subscriptions: ['customer', 'subscriptions'], invoices: ['customer', 'invoices'], support: ['customer', 'support'], profile: ['customer', 'profile'], wallet: ['customer', 'wallet'], contracts: ['customer', 'contracts'], offers: ['customer', 'offers'], membershipPlans: ['customer', 'membership-plans'], membership: ['customer', 'membership'], notifications: ['customer', 'notifications'], tracking: (orderId: string) => ['customer', 'tracking', orderId] } as const
 
 export function useCustomerBookings() { const query = useQuery({ queryKey: customerQueryKeys.bookings, queryFn: customerApi.bookings, ...customerQueryOptions }); useRealtimeInvalidation(customerQueryKeys.bookings); return query }
+export function useCustomerPhoneVerification(enabled: boolean) { return useQuery({ queryKey: ['customer', 'phone-verification'], queryFn: customerApi.phoneVerification, enabled: enabled && !customerDemoDataEnabled, staleTime: 60_000 }) }
 export function useCustomerUsage() { return useQuery({ queryKey: ['customer', 'usage'], queryFn: customerApi.usage, ...customerQueryOptions }) }
 export function useCustomerServices() { return useQuery({ queryKey: ['customer', 'services'], queryFn: customerApi.services, ...customerQueryOptions }) }
 export function useCustomerAddresses() { return useQuery({ queryKey: customerQueryKeys.addresses, queryFn: customerApi.addresses, ...customerQueryOptions }) }
@@ -34,7 +35,7 @@ export function useCreateCustomerBooking() { const queryClient = useQueryClient(
 export function useCreatePaymentOrder() { return useMutation({ mutationFn: (payload: { amount: number; bookingId: string }) => customerApi.createPaymentOrder(payload) }) }
 export function useVerifyPayment() { const queryClient = useQueryClient(); return useMutation({ mutationFn: (payload: { orderId: string; paymentId: string; signature: string }) => customerApi.verifyPayment(payload), onSuccess: () => queryClient.invalidateQueries({ queryKey: customerQueryKeys.bookings }) }) }
 export function useCreateSupportRequest() { const queryClient = useQueryClient(); return useMutation({ mutationFn: (payload: CreateSupportRequestPayload) => customerApi.createSupportRequest(payload), onSuccess: () => queryClient.invalidateQueries({ queryKey: customerQueryKeys.support }) }) }
-export function useUpdateCustomerProfile() { const queryClient = useQueryClient(); return useMutation({ mutationFn: (payload: CustomerProfile) => customerApi.updateProfile(payload), onSuccess: () => queryClient.invalidateQueries({ queryKey: customerQueryKeys.profile }) }) }
+export function useUpdateCustomerProfile() { const queryClient = useQueryClient(); return useMutation({ mutationFn: customerApi.updateProfile, onSuccess: () => queryClient.invalidateQueries({ queryKey: customerQueryKeys.profile }) }) }
 export function useCustomerReschedule() { const queryClient = useQueryClient(); return useMutation({ mutationFn: (payload: { orderId: string; scheduledFor: string }) => customerApi.rescheduleBooking(payload.orderId, payload.scheduledFor), onSuccess: () => queryClient.invalidateQueries({ queryKey: customerQueryKeys.bookings }) }) }
 export function useCustomerCancel() { const queryClient = useQueryClient(); return useMutation({ mutationFn: (orderId: string) => customerApi.cancelBooking(orderId), onSuccess: () => queryClient.invalidateQueries({ queryKey: customerQueryKeys.bookings }) }) }
 export function useCustomerRating() { return useMutation({ mutationFn: (payload: { orderId: string; rating: number; review?: string }) => customerApi.rateBooking(payload.orderId, payload.rating, payload.review) }) }

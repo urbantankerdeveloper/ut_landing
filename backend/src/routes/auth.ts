@@ -2,6 +2,7 @@ import { Router, type Response } from 'express'
 import crypto from 'node:crypto'
 import { z } from 'zod'
 import { authSupabase, supabase } from '../supabase.js'
+import { requireAuth } from '../middleware/auth.js'
 import { credentialsSchema } from '../lib/schemas.js'
 import { isEmailConfigured, sendEmail, sendSms } from '../services/providers.js'
 import { passwordResetEmail, signupConfirmationEmail } from '../services/signupEmail.js'
@@ -53,6 +54,21 @@ router.post('/guest/verify-otp', async (request, response) => {
   await supabase.from('guest_otp_challenges').update({ verified_at: new Date().toISOString() }).eq('id', challenge.id)
   setRefreshCookie(response, session.session.refresh_token)
   response.json({ accessToken: session.session.access_token, user: { username: `guest_${parsed.data.phone}`, name: parsed.data.name ?? 'Guest customer', role: 'customer' } })
+})
+router.post('/guest/verify-phone', requireAuth, async (request, response) => {
+  const parsed = z.object({ challengeId: z.string().uuid(), phone: phoneSchema, otp: z.string().regex(/^\d{6}$/) }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Enter the verification code sent to this mobile number.' })
+  const { data: challenge, error: challengeError } = await supabase.from('guest_otp_challenges').select('id,otp_hash,expires_at,attempts,verified_at').eq('id', parsed.data.challengeId).eq('phone_e164', `+91${parsed.data.phone}`).maybeSingle()
+  if (challengeError) return response.status(500).json({ error: challengeError.message })
+  if (!challenge || challenge.verified_at || challenge.attempts >= 5 || new Date(challenge.expires_at).getTime() <= Date.now()) return response.status(400).json({ error: 'This verification code is invalid or expired.' })
+  const { error: attemptError } = await supabase.from('guest_otp_challenges').update({ attempts: challenge.attempts + 1 }).eq('id', challenge.id)
+  if (attemptError) return response.status(500).json({ error: attemptError.message })
+  const expected = Buffer.from(challenge.otp_hash, 'hex')
+  const received = crypto.createHash('sha256').update(parsed.data.otp).digest()
+  if (expected.length !== received.length || !crypto.timingSafeEqual(expected, received)) return response.status(400).json({ error: 'The verification code is incorrect.' })
+  const { error: verifiedError } = await supabase.from('guest_otp_challenges').update({ verified_at: new Date().toISOString() }).eq('id', challenge.id)
+  if (verifiedError) return response.status(500).json({ error: verifiedError.message })
+  response.json({ verified: true })
 })
 router.post('/login', loginLimit, async (request, response) => { const parsed = credentialsSchema.safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid credentials', details: parsed.error.flatten() }); const credential = (parsed.data.email ?? parsed.data.username!).trim().toLowerCase(); let email = credential; let username = credential; if (!credential.includes('@')) { const { data: profile } = await supabase.from('profiles').select('id,username').ilike('username', credential).maybeSingle(); if (!profile) return response.status(401).json({ error: 'Invalid credentials' }); const { data: authUser } = await authSupabase.auth.admin.getUserById(profile.id); email = authUser.user?.email ?? ''; username = profile.username ?? credential } const { data, error } = await authSupabase.auth.signInWithPassword({ email, password: parsed.data.password }); if (error || !data.session || !data.user) return response.status(401).json({ error: 'Invalid credentials' }); const { data: profile } = await supabase.from('profiles').select('id,role,full_name,username').eq('id', data.user.id).single(); setRefreshCookie(response, data.session.refresh_token); const user = { id: data.user.id, email: data.user.email, username: profile?.username ?? username ?? data.user.email, name: profile?.full_name ?? data.user.email, role: profile?.role ?? 'customer' }; return response.json({ accessToken: data.session.access_token, ...(request.header('x-client-platform') === 'mobile' ? { refreshToken: data.session.refresh_token } : {}), user }) })
 router.post('/signup', signupLimit, async (request, response) => {

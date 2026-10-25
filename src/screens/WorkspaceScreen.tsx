@@ -52,7 +52,6 @@ export default function WorkspaceScreen() {
         <button className="sidebar-open" onClick={() => setSidebarOpen(true)} aria-label="Open sidebar"><Menu size={19} /></button>
         <span className="topbar-title">{activeItem === 'overview' ? data.title : data.nav.find((item) => item.key === activeItem)?.label}</span>
         <div className="topbar-identity">
-          {activeRole === 'customer' && <button className="button button-primary" onClick={() => navigate('booking')}>New booking</button>}
           <button className="topbar-home" onClick={() => navigate('home')}>Home</button>
           <span className="workspace-avatar-new">{displayName.slice(0, 1)}</span><span className="topbar-person">{displayName}</span>
           <button className="button button-quiet topbar-logout" onClick={logout}><LogOut size={14} /> Log out</button>

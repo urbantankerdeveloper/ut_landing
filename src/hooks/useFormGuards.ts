@@ -26,7 +26,7 @@ function configure(root: ParentNode = document) {
     const label = fieldLabel(input)
     if (/full name|driver name|^name$/.test(label)) {
       input.maxLength = 60
-      input.pattern = "[A-Za-z .'-]{2,60}"
+      input.pattern = "[A-Za-z .'\\x2d]{2,60}"
       input.title = 'Use 2 to 60 letters, spaces, apostrophes, periods, or hyphens.'
     }
     if (input.type === 'email' || /email address|email/.test(label)) {
@@ -60,7 +60,8 @@ export function useFormGuards() {
       if (input.form?.classList.contains('auth-form')) return
       const label = fieldLabel(input)
       if (input.type === 'tel' || /mobile number|phone number/.test(label)) {
-        input.value = input.value.replace(/\D/g, '').slice(0, 10)
+        const normalizedPhone = input.value.replace(/\D/g, '').slice(0, 10)
+        if (input.value !== normalizedPhone) input.value = normalizedPhone
         input.setCustomValidity(input.value.length === 10 ? '' : 'Enter a valid 10-digit mobile number.')
       }
       if (/full name|driver name|^name$/.test(label)) {

@@ -1,26 +1,95 @@
 @use "../theme/colors";
 
+.booking-exit-confirmation > p { margin:0 0 22px; color:colors.$muted; font-size:14px; line-height:1.6; }
+.booking-exit-confirmation > div { display:flex; justify-content:flex-end; gap:10px; }
+.booking-exit-confirmation .button { min-height:42px; }
+
 .booking-review-panel { display:grid; gap:0; }.review-item { padding:13px 0; border-top:1px solid #e2eae6; }.review-item p { margin:4px 0 0; color:colors.$muted; font-size:11px; }.payment-choice-list { display:grid; gap:10px; padding-top:14px; }.payment-choice-list label { display:flex; gap:10px; align-items:center; padding:13px; color:colors.$ink; background:#f8fbfa; border:1px solid #dce7e3; border-radius:10px; cursor:pointer; }.payment-choice-list label.selected { color:colors.$aqua-dark; background:colors.$aqua-light; border-color:colors.$aqua; }.payment-choice-list input { flex:none; min-height:auto; }.payment-choice-list label svg { color:colors.$aqua; }.payment-choice-list label span { display:flex; flex:1; flex-direction:column; gap:3px; }.payment-choice-list label small { color:colors.$muted; font-size:9px; }.payment-choice-list .button { margin-top:8px; }
 .service-detail-form {
-    display: grid;
-    gap: 12px;
+    display: block;
     margin: 14px 0;
-    padding: 16px;
+    padding: 0 16px 16px;
     border: 1px solid #dce7e3;
     border-radius: 12px;
     background: #fbfdfc;
+    overflow: hidden;
 }
 
-.service-detail-form legend {
-    padding: 0 6px;
+.service-detail-heading {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 52px;
+}
+
+.service-detail-toggle {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+    padding: 14px 0;
     color: colors.$ink;
-    font-size: 13px;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    font-size: 14px;
     font-weight: 800;
+}
+
+.service-detail-toggle svg {
+    flex: none;
+    transition: transform 160ms ease;
+}
+
+.service-detail-toggle[aria-expanded="true"] svg {
+    transform: rotate(180deg);
+}
+
+.service-detail-remove {
+    display: grid;
+    flex: none;
+    width: 34px;
+    height: 34px;
+    place-items: center;
+    padding: 0;
+    color: colors.$muted;
+    background: #fff;
+    border: 1px solid #dce7e3;
+    border-radius: 50%;
+}
+
+.service-detail-remove:hover {
+    color: #a14f44;
+    border-color: #a14f44;
+}
+
+.service-detail-fields {
+    display: grid;
+    gap: 12px;
 }
 
 .service-detail-form .field { margin: 0; }
 .service-detail-form input,
 .service-detail-form textarea { width: 100%; }
+.booking-field-error { color: #a14f44 !important; font-size: 11px !important; font-weight: 600; }
+.booking-review-hint { margin: 8px 0 0; color: colors.$muted; font-size: 11px; line-height: 1.5; }
+.booking-no-services { margin: 0; color: colors.$muted; font-size: 12px; }
+.field input[aria-invalid="true"],
+.field textarea[aria-invalid="true"],
+.field .input-with-icon:has(input[aria-invalid="true"]) { border-color: #a14f44; }
+.location-actions { display: flex; gap: 8px; }
+.delivery-location-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.delivery-location-row > .input-with-icon { min-width: 0; }
+.location-actions .button { display: grid; flex: none; width: 40px; min-width: 40px; min-height: 40px; padding: 0; place-items: center; }
+.location-actions .button svg { width: 14px; height: 14px; }
+.booking-location-toast { padding:10px 12px; margin:8px 0 0; color:#8a342b; background:#fff0ed; border:1px solid #f1c5bc; border-radius:8px; font-size:11px; line-height:1.5; }
+@media (max-width: 520px) {
+    .delivery-location-row { grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+    .location-actions { gap: 5px; }
+    .location-actions .button { width: 36px; min-width: 36px; min-height: 36px; }
+}
 .coupon-entry {
     display: grid;
     gap: 7px;

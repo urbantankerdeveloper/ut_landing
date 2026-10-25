@@ -27,19 +27,56 @@ router.get('/services', async (_request, response) => { const { data, error } = 
 router.get('/offers', async (_request, response) => { const { data, error } = await supabase.from('coupons').select('id,code,title,discount_type,discount_value,valid_until').eq('is_active', true).or('valid_until.is.null,valid_until.gte.' + new Date().toISOString()).order('created_at', { ascending: false }); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
 router.post('/coupons/validate', async (request, response) => { const parsed = z.object({ code: z.string().min(2).max(80), serviceCode: z.string().optional(), amount: z.number().nonnegative() }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid coupon request' }); const { data, error } = await supabase.from('coupons').select('*').eq('code', parsed.data.code.toUpperCase()).eq('is_active', true).or('valid_until.is.null,valid_until.gte.' + new Date().toISOString()).maybeSingle(); if (error || !data) return response.status(404).json({ error: 'Coupon is not available' }); response.json({ valid: true, coupon: data }) })
 router.use(requireAuth)
+router.get('/phone-verification', async (request, response) => {
+  const { data: profile, error: profileError } = await supabase.from('profiles').select('phone_e164').eq('id', request.authUser!.id).single()
+  if (profileError) return response.status(500).json({ error: profileError.message })
+  const phone = String(profile.phone_e164 ?? '').replace(/\D/g, '').slice(-10)
+  if (!/^\d{10}$/.test(phone)) return response.json({ phone: '', verified: false })
+  const { data: challenge, error } = await supabase.from('guest_otp_challenges').select('id').eq('phone_e164', `+91${phone}`).not('verified_at', 'is', null).order('verified_at', { ascending: false }).limit(1).maybeSingle()
+  if (error) return response.status(500).json({ error: error.message })
+  response.json({ phone, verified: Boolean(challenge) })
+})
 router.get('/usage', async (request, response) => { const { data, error } = await supabase.from('bookings').select('quoted_amount_paise,status').eq('customer_id', request.authUser!.id); if (error) return response.status(500).json({ error: error.message }); const delivered = (data ?? []).filter((item) => item.status === 'delivered'); const totalSpend = delivered.reduce((sum, item) => sum + Number(item.quoted_amount_paise ?? 0) / 100, 0); response.json({ deliveries: delivered.length, totalSpend, averageAmount: delivered.length ? Math.round(totalSpend / delivered.length) : 0 }) })
 router.get('/orders', async (request, response) => { const { data, error } = await supabase.from('bookings').select('*').eq('customer_id', request.authUser!.id).order('created_at', { ascending: false }); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
 function getBookingServices(data: z.infer<typeof bookingSchema>) {
+  const isLegacyPayload = !data.services?.length
   const items = data.services ?? (data.serviceId ?? '').split(',').map((serviceId) => ({
     serviceId,
     capacity: data.capacity,
     details: data.notes,
+    deliveryDate: data.deliveryDate,
+    location: data.location,
+    phone: data.phone,
+    latitude: data.latitude,
+    longitude: data.longitude,
+    phoneVerificationChallengeId: undefined,
   }))
   return items.map((item) => ({
     serviceId: item.serviceId.trim(),
     capacity: item.capacity?.trim() ?? '',
     details: item.details?.trim() ?? '',
+    deliveryDate: item.deliveryDate ?? data.deliveryDate ?? '',
+    location: item.location ?? data.location,
+    phone: item.phone ?? (isLegacyPayload ? data.phone : undefined),
+    latitude: item.latitude ?? (isLegacyPayload ? data.latitude : undefined),
+    longitude: item.longitude ?? (isLegacyPayload ? data.longitude : undefined),
+    phoneVerificationChallengeId: item.phoneVerificationChallengeId,
   })).filter((item) => item.serviceId)
+}
+async function validateServicePhoneVerification(data: z.infer<typeof bookingSchema>, services: ReturnType<typeof getBookingServices>) {
+  const contactChallenges = new Map<string, { phone: string; challengeId?: string; serviceId: string }>()
+  for (const service of services) {
+    if (service.phone) contactChallenges.set(service.phone, { phone: service.phone, challengeId: service.phoneVerificationChallengeId, serviceId: service.serviceId })
+  }
+  if (data.phone) contactChallenges.set(data.phone, { phone: data.phone, challengeId: data.phoneVerificationChallengeId, serviceId: 'booking contact' })
+  for (const service of contactChallenges.values()) {
+    let verificationQuery = supabase.from('guest_otp_challenges').select('id').eq('phone_e164', `+91${service.phone}`).not('verified_at', 'is', null)
+    if (service.challengeId) verificationQuery = verificationQuery.eq('id', service.challengeId)
+    const { data, error } = await verificationQuery.order('verified_at', { ascending: false }).limit(1).maybeSingle()
+    if (error) return { status: 500, message: 'Phone verification could not be confirmed.' }
+    if (!data) return { status: 400, message: `Verify the contact number for ${service.serviceId} before booking.` }
+  }
+  return null
 }
 function bookingInsert(data: z.infer<typeof bookingSchema>, services: ReturnType<typeof getBookingServices>, vendorId: string | null, quotedAmountPaise: number) {
   const primaryService = services[0]
@@ -47,17 +84,22 @@ function bookingInsert(data: z.infer<typeof bookingSchema>, services: ReturnType
   const capacityText = primaryService.capacity || (!data.services?.length ? data.capacity : '') || ''
   const capacityMatch = capacityText.match(/^([\d,]+)\s*(?:litres?|l)?$/i)
   const isTankerService = ['water_tanker', 'sewage_tanker'].includes(primaryService.serviceId)
+  const serviceDetails = services.map((service) => {
+    const persisted = { ...service }
+    delete persisted.phoneVerificationChallengeId
+    return persisted
+  })
   return {
-    customer_phone_e164: data.phone ?? null,
+    customer_phone_e164: data.phone ? `+91${data.phone}` : primaryService.phone ? `+91${primaryService.phone}` : null,
     payment_method: data.paymentMethod,
     vendor_id: vendorId,
     service_code: primaryService.serviceId,
     capacity_litres: (isTankerService || !data.services?.length) && capacityMatch ? Number.parseInt(capacityMatch[1]?.replace(/,/g, '') ?? '', 10) || null : null,
-    service_details: services,
-    address_text: data.location,
-    latitude: data.latitude ?? null,
-    longitude: data.longitude ?? null,
-    scheduled_for: data.deliveryDate,
+    service_details: serviceDetails,
+    address_text: primaryService.location ?? data.location,
+    latitude: primaryService.latitude ?? data.latitude ?? null,
+    longitude: primaryService.longitude ?? data.longitude ?? null,
+    scheduled_for: primaryService.deliveryDate || data.deliveryDate,
     access_notes: data.notes ?? null,
     quoted_amount_paise: quotedAmountPaise,
   }
@@ -67,6 +109,8 @@ router.post('/orders', async (request, response) => {
   if (!parsed.success) return response.status(400).json({ error: 'Invalid booking', details: parsed.error.flatten() })
   const services = getBookingServices(parsed.data)
   if (!services.length) return response.status(400).json({ error: 'At least one service is required' })
+  const verificationError = await validateServicePhoneVerification(parsed.data, services)
+  if (verificationError) return response.status(verificationError.status).json({ error: verificationError.message })
   const reference = `UT-${Date.now().toString().slice(-8)}`
   const vendor = await findAvailableVendor()
   const { data, error } = await supabase.from('bookings').insert({
@@ -89,6 +133,8 @@ router.post('/orders/quote', async (request, response) => {
   try {
     const services = getBookingServices(parsed.data)
     if (!services.length) return response.status(400).json({ error: 'At least one service is required' })
+    const verificationError = await validateServicePhoneVerification(parsed.data, services)
+    if (verificationError) return response.status(verificationError.status).json({ error: verificationError.message })
     const quote = await quoteServices(services.map((item) => item.serviceId), parsed.data.couponCode)
     const reference = `UT-${Date.now().toString().slice(-8)}`
     const vendor = await findAvailableVendor()
@@ -133,6 +179,26 @@ router.post('/addresses', async (request, response) => { const parsed = z.object
 router.patch('/addresses/:id', async (request, response) => { const parsed = z.object({ label: z.string().min(1).max(60).optional(), address: z.string().min(3).max(240).optional(), city: z.string().min(2).max(80).optional(), pincode: z.string().min(4).max(12).optional(), isDefault: z.boolean().optional() }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid address update' }); if (parsed.data.isDefault === true) await supabase.from('saved_addresses').update({ is_default: false }).eq('user_id', request.authUser!.id); const update = Object.fromEntries(Object.entries({ label: parsed.data.label, address: parsed.data.address, city: parsed.data.city, pincode: parsed.data.pincode, is_default: parsed.data.isDefault }).filter(([, value]) => value !== undefined)); const { data, error } = await supabase.from('saved_addresses').update(update).eq('id', request.params.id).eq('user_id', request.authUser!.id).select().single(); if (error) return response.status(400).json({ error: error.message }); response.json(data) })
 router.delete('/addresses/:id', async (request, response) => { const { error } = await supabase.from('saved_addresses').delete().eq('id', request.params.id).eq('user_id', request.authUser!.id); if (error) return response.status(400).json({ error: error.message }); response.status(204).send() })
 router.get('/subscriptions', async (request, response) => { const { data, error } = await supabase.from('subscriptions').select('*').eq('customer_id', request.authUser!.id).order('created_at', { ascending: false }); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
-router.get('/profile', async (request, response) => { const { data, error } = await supabase.from('profiles').select('*').eq('id', request.authUser!.id).single(); if (error) return response.status(500).json({ error: error.message }); response.json(data) })
-router.patch('/profile', async (request, response) => { const parsed = z.object({ name: z.string().min(2).max(60), email: z.string().email(), phone: z.string().regex(/^\d{10}$/) }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid profile' }); const { data: authData, error: authError } = await supabase.auth.admin.updateUserById(request.authUser!.id, { email: parsed.data.email }); if (authError) return response.status(400).json({ error: authError.message }); const { data, error } = await supabase.from('profiles').update({ full_name: parsed.data.name, phone_e164: parsed.data.phone }).eq('id', request.authUser!.id).select().single(); if (error) return response.status(400).json({ error: error.message }); response.json({ ...data, name: data.full_name, email: authData.user.email ?? parsed.data.email, phone: data.phone_e164 }) })
+router.get('/profile', async (request, response) => { const { data, error } = await supabase.from('profiles').select('full_name, phone_e164').eq('id', request.authUser!.id).single(); if (error) return response.status(500).json({ error: error.message }); response.json({ name: data.full_name, email: request.authUser!.email ?? '', phone: String(data.phone_e164 ?? '').replace(/\D/g, '').slice(-10) }) })
+router.patch('/profile', async (request, response) => {
+  const parsed = z.object({
+    name: z.string().min(2).max(60),
+    email: z.string().email(),
+    phone: z.string().regex(/^\d{10}$/).optional(),
+  }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Invalid profile' })
+  let email = request.authUser!.email ?? parsed.data.email
+  if (email !== parsed.data.email) {
+    const { data, error } = await supabase.auth.admin.updateUserById(request.authUser!.id, { email: parsed.data.email })
+    if (error) return response.status(400).json({ error: error.message })
+    email = data.user.email ?? parsed.data.email
+  }
+  const profileUpdate = {
+    full_name: parsed.data.name,
+    ...(parsed.data.phone ? { phone_e164: parsed.data.phone } : {}),
+  }
+  const { data, error } = await supabase.from('profiles').update(profileUpdate).eq('id', request.authUser!.id).select().single()
+  if (error) return response.status(400).json({ error: error.message })
+  response.json({ name: data.full_name, email, phone: String(data.phone_e164 ?? '').replace(/\D/g, '').slice(-10) })
+})
 export default router

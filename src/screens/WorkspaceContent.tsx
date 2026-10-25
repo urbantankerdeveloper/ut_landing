@@ -30,7 +30,7 @@ const adminRows = demoDataEnabled ? [{ id: 'UT-2412', service: 'Water tanker · 
 export function WorkspaceContent({ role, item, onNavigate, onNotice }: Props) {
   if (item === 'overview') return <>{<Overview role={role} onNavigate={onNavigate} onNotice={onNotice} />}{role === 'customer' && <CustomerHomeHighlights onNavigate={onNavigate} onNotice={onNotice} />}</>
   if (role === 'customer' && item === 'booking') return <BookingScreen />
-  if (role === 'customer' && item === 'bookings') return <section className="customer-bookings-combined"><BookingScreen /><CustomerBookingsTable onNavigate={onNavigate} onOpen={(id) => onNotice(`Booking ${id} opened.`)} /></section>
+  if (role === 'customer' && item === 'bookings') return <CustomerBookingsTable onNavigate={onNavigate} />
   if (role === 'admin' || role === 'dispatcher') return <AdminWorkspaceContent item={item} onNotice={onNotice} />
   if (role === 'customer' && item === 'support') return <CustomerSupportPanel onNotice={onNotice} />
   if (role === 'customer' && item === 'invoices') return <CustomerInvoicesScreen onNotice={onNotice} />
