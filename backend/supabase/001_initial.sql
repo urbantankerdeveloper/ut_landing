@@ -334,6 +334,41 @@ create policy "actor owns offline mutations" on public.offline_mutations for all
 alter table public.profiles add column if not exists username text;
 create unique index if not exists profiles_username_lower_idx on public.profiles(lower(username)) where username is not null;
 
+-- Rebuild public profiles for Supabase accounts retained across a schema reset.
+with account_profiles as (
+  select
+    id,
+    coalesce(
+      nullif(btrim(raw_user_meta_data->>'full_name'), ''),
+      nullif(btrim(raw_user_meta_data->>'name'), ''),
+      nullif(split_part(email, '@', 1), ''),
+      id::text
+    ) as full_name,
+    nullif(btrim(raw_user_meta_data->>'phone'), '') as phone_e164,
+    nullif(btrim(raw_user_meta_data->>'username'), '') as username,
+    raw_user_meta_data->>'role' as account_role
+  from auth.users
+), unique_accounts as (
+  select
+    *,
+    count(phone_e164) over (partition by phone_e164) as phone_count,
+    count(username) over (partition by lower(username)) as username_count
+  from account_profiles
+)
+insert into public.profiles (id, full_name, phone_e164, role, username)
+select
+  id,
+  full_name,
+  case when phone_count = 1 then phone_e164 end,
+  case
+    when account_role in ('customer', 'vendor', 'dispatcher', 'admin')
+      then account_role::public.user_role
+    else 'customer'::public.user_role
+  end,
+  case when username_count = 1 then username end
+from unique_accounts
+on conflict (id) do nothing;
+
 
 
 -- ===== Consolidated from 012_live_access_policies.sql =====
@@ -674,5 +709,7 @@ begin
     execute format('alter table public.%I enable row level security', table_name);
   end loop;
 end $$;
+
+notify pgrst, 'reload schema';
 
 commit;
