@@ -19,7 +19,7 @@ const GST_RATE = 0.18
 type Step = 'details' | 'review' | 'payment' | 'success'
 
 type CouponRecord = { discount_type?: string; discount_value?: number | string; discount?: number | string }
-type ServiceFieldErrors = { deliveryDate?: string; notes?: string; capacity?: string; waterType?: string; location?: string }
+type ServiceFieldErrors = { deliveryDate?: string; notes?: string; capacity?: string; waterType?: string; tankerCount?: string; location?: string }
 type ServiceDraft = { capacity: string; waterType: string; tankerCount: string; notes: string; deliveryDate: string; location: string; latitude?: number; longitude?: number }
 const bookingFormSchema = z.object({
   selectedServices: z.array(z.string()).min(1, 'Select at least one service.'),

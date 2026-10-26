@@ -12,7 +12,6 @@ export class VendorRealtimeClient {
     if (this.socket || !navigator.onLine) return
     const socket = io(this.url, {
       auth: (callback) => callback({ token: useAuthStore.getState().accessToken }),
-      transports: ['polling', 'websocket'],
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelayMax: 10_000,
