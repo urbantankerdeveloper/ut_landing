@@ -23,14 +23,16 @@ const phoneSchema = z.string().regex(/^\d{10}$/)
 router.post('/guest/request-otp', otpRequestLimit, async (request, response) => {
   const parsed = z.object({ phone: phoneSchema }).safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
-  const otp = crypto.randomInt(100000, 1000000).toString()
+  const otp = config.USE_DEFAULT_VERIFICATION_CODE ? config.DEFAULT_VERIFICATION_CODE : crypto.randomInt(100000, 1000000).toString()
   const { data: challenge, error } = await supabase.from('guest_otp_challenges').insert({ phone_e164: `+91${parsed.data.phone}`, otp_hash: crypto.createHash('sha256').update(otp).digest('hex'), expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString() }).select('id').single()
   if (error || !challenge) return response.status(500).json({ error: error?.message ?? 'OTP could not be created.' })
-  try {
-    const delivery = await sendSms(`+91${parsed.data.phone}`, `Your Urban Tanker verification code is ${otp}. It expires in 10 minutes.`)
-    if (!delivery.queued) return response.status(503).json({ error: 'Mobile verification is not configured yet.' })
-  } catch (error) {
-    return response.status(502).json({ error: error instanceof Error ? error.message : 'OTP delivery failed.' })
+  if (!config.USE_DEFAULT_VERIFICATION_CODE) {
+    try {
+      const delivery = await sendSms(`+91${parsed.data.phone}`, `Your Urban Tanker verification code is ${otp}. It expires in 10 minutes.`)
+      if (!delivery.queued) return response.status(503).json({ error: 'Mobile verification is not configured yet.' })
+    } catch (error) {
+      return response.status(502).json({ error: error instanceof Error ? error.message : 'OTP delivery failed.' })
+    }
   }
   response.status(202).json({ challengeId: challenge.id, expiresInSeconds: 600 })
 })

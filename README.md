@@ -38,6 +38,17 @@ For an existing database, apply `backend/supabase/012_booking_service_details.sq
 
 All application email (registration confirmation, password reset, and notifications) is sent by the backend through Gmail SMTP. Configure `SMTP_USER` with the Gmail address and `SMTP_PASSWORD` with its Google app password. The defaults are `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=465`, and `SMTP_SECURE=true`; set `MAIL_FROM` only if you use an address authorized by that Gmail account. Add `${FRONTEND_ORIGIN}/login` to the Supabase Auth redirect allow list.
 
+## Booking phone verification fallback
+
+Guest booking verification uses SMS by default. Until the SMS provider is configured, set these variables in the backend environment:
+
+```env
+USE_DEFAULT_VERIFICATION_CODE=true
+DEFAULT_VERIFICATION_CODE=123456
+```
+
+When `USE_DEFAULT_VERIFICATION_CODE` is `true`, SMS delivery is skipped and the configured six-digit code is used. Leave it unset or set it to `false` to use the normal random OTP and SMS delivery flow.
+
 ## Expanding the ESLint configuration
 
 If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:

@@ -30,6 +30,8 @@ const schema = z.object({
   TWILIO_ACCOUNT_SID: optionalSecret,
   TWILIO_AUTH_TOKEN: optionalSecret,
   TWILIO_FROM_NUMBER: optionalSecret,
+  USE_DEFAULT_VERIFICATION_CODE: z.preprocess((value) => value === undefined ? undefined : value === 'true', z.boolean().default(false)),
+  DEFAULT_VERIFICATION_CODE: z.string().regex(/^\d{6}$/, 'DEFAULT_VERIFICATION_CODE must be a 6-digit code').default('123456'),
   RAZORPAY_KEY_ID: optionalSecret,
   RAZORPAY_KEY_SECRET: optionalSecret,
   VAPID_PUBLIC_KEY: optionalSecret,
