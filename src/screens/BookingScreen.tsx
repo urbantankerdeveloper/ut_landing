@@ -19,8 +19,8 @@ const GST_RATE = 0.18
 type Step = 'details' | 'review' | 'payment' | 'success'
 
 type CouponRecord = { discount_type?: string; discount_value?: number | string; discount?: number | string }
-type ServiceFieldErrors = { deliveryDate?: string; notes?: string; capacity?: string; location?: string }
-type ServiceDraft = { capacity: string; notes: string; deliveryDate: string; location: string; latitude?: number; longitude?: number }
+type ServiceFieldErrors = { deliveryDate?: string; notes?: string; capacity?: string; waterType?: string; location?: string }
+type ServiceDraft = { capacity: string; waterType: string; tankerCount: string; notes: string; deliveryDate: string; location: string; latitude?: number; longitude?: number }
 const bookingFormSchema = z.object({
   selectedServices: z.array(z.string()).min(1, 'Select at least one service.'),
   capacity: z.string().optional(),
@@ -59,7 +59,7 @@ function loadBookingDraft(): Partial<BookingDraft> {
       if (Array.isArray(booking.services) && booking.services.length > 0) {
         const serviceDetails = Object.fromEntries(booking.services.map((service) => [
           service.serviceId,
-          {capacity: service.capacity ?? '', notes: service.details ?? '', deliveryDate: service.deliveryDate ?? booking.scheduledAt?.slice(0, 10) ?? '', location: service.location ?? booking.location ?? '', latitude: service.latitude ?? booking.latitude, longitude: service.longitude ?? booking.longitude},
+          {capacity: service.capacity ?? '', waterType: service.waterType ?? '', tankerCount: service.tankerCount ?? '', notes: service.details ?? '', deliveryDate: service.deliveryDate ?? booking.scheduledAt?.slice(0, 10) ?? '', location: service.location ?? booking.location ?? '', latitude: service.latitude ?? booking.latitude, longitude: service.longitude ?? booking.longitude},
         ]))
         return {
           selectedServices: booking.services.map((service) => service.serviceId),
@@ -89,6 +89,8 @@ function loadBookingDraft(): Partial<BookingDraft> {
         const service = savedServiceDetails[serviceId]
         return [serviceId, {
           capacity: service?.capacity ?? '',
+          waterType: service?.waterType ?? '',
+          tankerCount: service?.tankerCount ?? '',
           notes: service?.notes ?? '',
           deliveryDate: service?.deliveryDate ?? parsed.details?.deliveryDate ?? '',
           location: service?.location ?? parsed.details?.location ?? parsed.locationAddress ?? '',
@@ -135,7 +137,7 @@ function isValidDeliveryDate(value: string) {
 function getServiceFormLabels(code: string) {
   switch (code) {
     case 'water_tanker':
-      return { quantity: 'Delivery capacity (litres)', quantityHint: 'For example, 5,000 litres', details: 'Water type and delivery requirements', detailsHint: 'Tell us the water type, intended use, and any delivery requirements' }
+      return { quantity: 'Delivery capacity (litres)', quantityHint: 'For example, 5,000 litres', details: 'Service requirements', detailsHint: 'Add any special delivery requirements' }
     case 'sewage_tanker':
       return { quantity: 'Tank capacity or volume', quantityHint: 'Approximate volume is fine', details: 'Waste type and collection details', detailsHint: 'Describe the waste type, collection point, and any access requirements' }
     case 'tank_cleaning':
@@ -145,6 +147,7 @@ function getServiceFormLabels(code: string) {
     default:
       return { quantity: 'Quantity or capacity', quantityHint: 'Enter the quantity or capacity if applicable', details: 'Service requirements', detailsHint: 'Describe the work and any special requirements for this service' }
   }
+
 }
 
 export default function BookingScreen() {
@@ -158,7 +161,9 @@ export default function BookingScreen() {
   const phoneVerificationQuery = useCustomerPhoneVerification(Boolean(user && !user.username.startsWith('guest_')))
   const signIn = useAuthStore((state) => state.signIn)
   const offersQuery = useCustomerOffers()
-  const options = (servicesQuery.data ?? []).map((service) => ({ code: service.code, label: service.name, price: service.base_price_paise / 100 }))
+  const serviceCatalog = servicesQuery.data ?? []
+  const options = serviceCatalog.map((service) => ({ code: service.code, label: service.name, price: service.base_price_paise / 100 }))
+  const serviceConfig = (code: string) => serviceCatalog.find((service) => service.code === code)?.config
   const { control, register, handleSubmit, setValue, getValues, formState: { errors } } = useForm<BookingFormValues>({
     resolver: zodResolver(bookingFormSchema),
     mode: 'onChange',
@@ -205,6 +210,8 @@ export default function BookingScreen() {
   const serviceItems: BookingServiceDetails[] = activeServices.map((serviceId) => ({
     serviceId,
     capacity: serviceDetails[serviceId]?.capacity ?? '',
+    waterType: serviceDetails[serviceId]?.waterType ?? '',
+    tankerCount: serviceDetails[serviceId]?.tankerCount ?? '',
     details: serviceDetails[serviceId]?.notes?.trim() ?? '',
     deliveryDate: serviceDetails[serviceId]?.deliveryDate ?? '',
     location: serviceDetails[serviceId]?.location ?? '',
@@ -222,7 +229,7 @@ export default function BookingScreen() {
       return Boolean(
         values
         && isValidDeliveryDate(values.deliveryDate)
-        && values.notes.trim().length >= 3
+        && (service === 'water_tanker' || values.notes.trim().length >= 3)
         && values.notes.length <= 1000
         && values.capacity.trim().length <= 100
         && values.location.trim().length >= 3
@@ -250,10 +257,10 @@ export default function BookingScreen() {
     }
   }, [phone, phoneVerificationQuery.data, setValue])
 
-  function toggleService(service: string) { const current = selectedServices ?? []; const isSelected = current.includes(service); setValue('selectedServices', isSelected ? current.filter((item) => item !== service) : [...current, service], { shouldValidate: true }); setExpandedServices((expanded) => { const next = new Set(expanded); next.delete(service); return next }); setServiceFieldErrors((currentErrors) => { const next = { ...currentErrors }; delete next[service]; return next }); if (!isSelected) setServiceDetails((currentDetails) => currentDetails[service] ? currentDetails : { ...currentDetails, [service]: { capacity: '', notes: '', deliveryDate: '', location: '' } }) }
+  function toggleService(service: string) { const current = selectedServices ?? []; const isSelected = current.includes(service); setValue('selectedServices', isSelected ? current.filter((item) => item !== service) : [...current, service], { shouldValidate: true }); setExpandedServices((expanded) => { const next = new Set(expanded); next.delete(service); return next }); setServiceFieldErrors((currentErrors) => { const next = { ...currentErrors }; delete next[service]; return next }); if (!isSelected) setServiceDetails((currentDetails) => currentDetails[service] ? currentDetails : { ...currentDetails, [service]: { capacity: '', waterType: '', tankerCount: '', notes: '', deliveryDate: '', location: '' } }) }
   function toggleServiceDetails(service: string) { setExpandedServices((expanded) => { const next = new Set(expanded); if (next.has(service)) next.delete(service); else next.add(service); return next }) }
-  function updateServiceDetails(service: string, field: 'capacity' | 'notes' | 'deliveryDate' | 'location', value: string) {
-    setServiceDetails((current) => ({ ...current, [service]: { capacity: current[service]?.capacity ?? '', notes: current[service]?.notes ?? '', deliveryDate: current[service]?.deliveryDate ?? '', location: current[service]?.location ?? '', latitude: field === 'location' ? undefined : current[service]?.latitude, longitude: field === 'location' ? undefined : current[service]?.longitude, [field]: value } }))
+  function updateServiceDetails(service: string, field: 'capacity' | 'waterType' | 'tankerCount' | 'notes' | 'deliveryDate' | 'location', value: string) {
+    setServiceDetails((current) => ({ ...current, [service]: { capacity: current[service]?.capacity ?? '', waterType: current[service]?.waterType ?? '', tankerCount: current[service]?.tankerCount ?? '', notes: current[service]?.notes ?? '', deliveryDate: current[service]?.deliveryDate ?? '', location: current[service]?.location ?? '', latitude: field === 'location' ? undefined : current[service]?.latitude, longitude: field === 'location' ? undefined : current[service]?.longitude, [field]: value } }))
     if (field === 'location') {
       setLocationEligibility((current) => { const next = { ...current }; delete next[service]; return next })
       setLocationToasts((current) => { const next = { ...current }; delete next[service]; return next })
@@ -277,9 +284,8 @@ export default function BookingScreen() {
     setServiceFieldErrors((current) => { const next = { ...current }; if (next[service]) { delete next[service].location; if (!Object.keys(next[service]).length) delete next[service] }; return next })
     return true
   }
-  function updateMapLocation(service: string, point: LatLngLiteral, approximateName?: string) {
-    const name = approximateName ?? 'Selected delivery area'
-    setServiceDetails((current) => ({ ...current, [service]: { capacity: current[service]?.capacity ?? '', notes: current[service]?.notes ?? '', deliveryDate: current[service]?.deliveryDate ?? '', location: name, latitude: point.lat, longitude: point.lng } }))
+  function updateMapLocation(service: string, point: LatLngLiteral, _approximateName?: string) {
+    setServiceDetails((current) => ({ ...current, [service]: { capacity: current[service]?.capacity ?? '', waterType: current[service]?.waterType ?? '', tankerCount: current[service]?.tankerCount ?? '', notes: current[service]?.notes ?? '', deliveryDate: current[service]?.deliveryDate ?? '', location: current[service]?.location ?? '', latitude: point.lat, longitude: point.lng } }))
     setLocationEligibility((current) => ({ ...current, [service]: true }))
     setLocationToasts((current) => { const next = { ...current }; delete next[service]; return next })
     setServiceFieldErrors((current) => { const errors = current[service]; if (!errors?.location) return current; const next = { ...current, [service]: { ...errors } }; delete next[service].location; if (!Object.keys(next[service]).length) delete next[service]; return next })
@@ -320,11 +326,11 @@ export default function BookingScreen() {
     const fieldErrors: Record<string, ServiceFieldErrors> = {}
     const normalizedPhone = values.phone.replace(/\D/g, '').slice(-10)
     for (const service of activeServices) {
-      const values = serviceDetails[service] ?? { capacity: '', notes: '', deliveryDate: '', location: '' }
+      const values = serviceDetails[service] ?? { capacity: '', waterType: '', tankerCount: '', notes: '', deliveryDate: '', location: '' }
       const errors: ServiceFieldErrors = {}
       if (!values.deliveryDate) errors.deliveryDate = 'Choose a preferred delivery date.'
       else if (!isValidDeliveryDate(values.deliveryDate)) errors.deliveryDate = values.deliveryDate < today ? 'Choose today or a future date.' : 'Choose a valid delivery date.'
-      if (values.notes.trim().length < 3) errors.notes = 'Enter at least 3 characters describing this service.'
+      if (service !== 'water_tanker' && values.notes.trim().length < 3) errors.notes = 'Enter at least 3 characters describing this service.'
       else if (values.notes.length > 1000) errors.notes = 'Service details must be 1,000 characters or fewer.'
       if (values.capacity.trim().length > 100) errors.capacity = 'Capacity or quantity must be 100 characters or fewer.'
       if (values.location.trim().length < 3) errors.location = 'Enter a delivery location for this service.'
@@ -439,7 +445,7 @@ export default function BookingScreen() {
           <p className="eyebrow">SERVICES</p>
           {serviceItems.map((item) => {
             const serviceName = options.find((option) => option.code === item.serviceId)?.label ?? item.serviceId
-            return <div className="review-item" key={item.serviceId}><strong>{serviceName}</strong><p>{item.capacity || 'Quantity not specified'} · {item.details}</p><p>{item.location} · {item.deliveryDate}</p></div>
+            return <div className="review-item" key={item.serviceId}><strong>{serviceName}</strong><p>{item.capacity || 'Quantity not specified'}{item.waterType ? ` · ${item.waterType}` : ''}{item.tankerCount ? ` · ${item.tankerCount} tanker${item.tankerCount === '1' ? '' : 's'}` : ''} · {item.details}</p><p>{item.location} · {item.deliveryDate}</p></div>
           })}
           <div className="review-item"><strong>Shared contact number</strong><p>{phone}</p></div>
           <div className="review-item"><strong>Delivery access notes</strong><p>{details.notes || 'No additional notes'}</p></div>
@@ -488,15 +494,17 @@ export default function BookingScreen() {
               <button className="service-detail-remove" type="button" aria-label={`Remove ${serviceName}`} onClick={() => toggleService(service)}><X size={18} aria-hidden="true" /></button>
             </div>
             {expandedServices.has(service) && <div className="service-detail-fields">
-              <label className="field"><span>{formLabels.quantity} <small>Optional</small></span><input aria-invalid={Boolean(serviceFieldErrors[service]?.capacity)} maxLength={100} value={values.capacity} onChange={(event) => updateServiceDetails(service, 'capacity', event.target.value)} placeholder={formLabels.quantityHint} />{serviceFieldErrors[service]?.capacity && <small className="booking-field-error" role="alert">{serviceFieldErrors[service].capacity}</small>}</label>
+              <label className="field"><span>{formLabels.quantity} <small>Optional</small></span><select aria-invalid={Boolean(serviceFieldErrors[service]?.capacity)} value={values.capacity} onChange={(event) => updateServiceDetails(service, 'capacity', event.target.value)}><option value="">Select an option</option>{(serviceConfig(service)?.capacityOptions ?? []).map((option) => <option value={option} key={option}>{option}</option>)}</select>{serviceFieldErrors[service]?.capacity && <small className="booking-field-error" role="alert">{serviceFieldErrors[service].capacity}</small>}</label>
+              {serviceConfig(service)?.waterTypeOptions && <label className="field"><span>Water type <small>Optional</small></span><select value={values.waterType} onChange={(event) => updateServiceDetails(service, 'waterType', event.target.value)}><option value="">Select water type</option>{serviceConfig(service)?.waterTypeOptions?.map((option) => <option value={option} key={option}>{option}</option>)}</select></label>}
+              {serviceConfig(service)?.tankerCountOptions && <label className="field"><span>Number of tankers <small>Maximum 5</small></span><select value={values.tankerCount} onChange={(event) => updateServiceDetails(service, 'tankerCount', event.target.value)}><option value="">Select number of tankers</option>{serviceConfig(service)?.tankerCountOptions?.map((option) => <option value={option} key={option}>{option}</option>)}</select></label>}
               <label className="field"><span>Preferred delivery date</span><span className="input-with-icon"><CalendarDays size={16} /><input aria-label={`Preferred delivery date for ${serviceName}`} aria-invalid={Boolean(serviceFieldErrors[service]?.deliveryDate)} min={currentDateInputValue()} required type="date" value={values.deliveryDate} onChange={(event) => updateServiceDetails(service, 'deliveryDate', event.target.value)} /></span>{serviceFieldErrors[service]?.deliveryDate && <small className="booking-field-error" role="alert">{serviceFieldErrors[service].deliveryDate}</small>}</label>
-              <label className="field"><span>{formLabels.details}</span><textarea aria-invalid={Boolean(serviceFieldErrors[service]?.notes)} maxLength={1000} required aria-label={`${formLabels.details} for ${serviceName}`} value={values.notes} onChange={(event) => updateServiceDetails(service, 'notes', event.target.value)} rows={3} placeholder={formLabels.detailsHint} />{serviceFieldErrors[service]?.notes && <small className="booking-field-error" role="alert">{serviceFieldErrors[service].notes}</small>}</label>
+              {serviceConfig(service)?.detailOptions ? <label className="field"><span>{formLabels.details}</span><select aria-invalid={Boolean(serviceFieldErrors[service]?.notes)} required aria-label={`${formLabels.details} for ${serviceName}`} value={values.notes} onChange={(event) => updateServiceDetails(service, 'notes', event.target.value)}><option value="">Select an option</option>{serviceConfig(service)?.detailOptions?.map((option) => <option value={option} key={option}>{option}</option>)}</select>{serviceFieldErrors[service]?.notes && <small className="booking-field-error" role="alert">{serviceFieldErrors[service].notes}</small>}</label> : service !== 'water_tanker' && <label className="field"><span>{formLabels.details}</span><textarea aria-invalid={Boolean(serviceFieldErrors[service]?.notes)} maxLength={1000} required aria-label={`${formLabels.details} for ${serviceName}`} value={values.notes} onChange={(event) => updateServiceDetails(service, 'notes', event.target.value)} rows={3} placeholder={formLabels.detailsHint} />{serviceFieldErrors[service]?.notes && <small className="booking-field-error" role="alert">{serviceFieldErrors[service].notes}</small>}</label>}
               <label className="field delivery-location-field"><span>Delivery location for {serviceName}</span>
                 <div className="delivery-location-row">
                   <span className="input-with-icon"><MapPin size={16} /><input aria-label={`Delivery location for ${serviceName}`} aria-invalid={Boolean(serviceFieldErrors[service]?.location)} maxLength={200} required value={values.location} onBlur={() => { if (locationEligibility[service] !== true) void validateDeliveryAddress(service, values.location) }} onChange={(event) => updateServiceDetails(service, 'location', event.target.value)} placeholder="Area, street or landmark, Chennai" /></span>
                   <span className="location-actions"><button className="button button-quiet" type="button" aria-label={`Choose ${serviceName} delivery location on map`} title="Choose on map" onClick={() => { setLocationServiceId(service); setLocationModalOpen(true) }}><MapPin size={17} /></button><button className="button button-quiet" type="button" aria-label={`Use current location for ${serviceName}`} title="Use current location" onClick={() => detectLocation(service)}><Crosshair size={17} /></button></span>
                 </div>
-                <small>Delivery currently available only within Chennai.</small>
+                <small>Enter the address separately. Map selection stores latitude and longitude in the background.</small>
                 {locationToasts[service] && <p className="booking-location-toast" role="alert">{locationToasts[service]}</p>}
                 {locationStatus[service] && <small role="status">{locationStatus[service]}</small>}
                 {serviceFieldErrors[service]?.location && <small className="booking-field-error" role="alert">{serviceFieldErrors[service].location}</small>}

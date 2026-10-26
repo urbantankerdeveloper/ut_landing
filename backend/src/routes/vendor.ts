@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { requireAuth, requireRole } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 const router = Router(); router.use(requireAuth, requireRole('vendor'))
-type BookingServiceDetail = { serviceId: string; capacity?: string; details?: string; deliveryDate?: string; location?: string }
+type BookingServiceDetail = { serviceId: string; capacity?: string; waterType?: string; tankerCount?: string; details?: string; deliveryDate?: string; location?: string }
 type BookingRecord = { id: string; reference: string; service_code: string; service_details?: BookingServiceDetail[] | null; address_text: string; latitude?: number | null; longitude?: number | null; quoted_amount_paise?: number | null; status: string; vehicle_id?: string | null; driver_id?: string | null; created_at: string; scheduled_for?: string | null }
 type RelatedRecord = { id: string; name?: string; registration_number?: string }
 const statusMap: Record<string, 'Available' | 'Assigned' | 'Accepted' | 'En route' | 'Arrived' | 'Delivered' | 'Rejected'> = { pending_vendor: 'Available', vendor_assigned: 'Assigned', accepted: 'Accepted', en_route: 'En route', arrived: 'Arrived', delivered: 'Delivered', cancelled: 'Rejected' }
@@ -11,6 +11,8 @@ function normalizeOrder(order: BookingRecord, services: Map<string, string>, veh
   const serviceDetails = order.service_details?.map((item) => ({
     service: services.get(item.serviceId) ?? item.serviceId,
     capacity: item.capacity,
+    waterType: item.waterType,
+    tankerCount: item.tankerCount,
     details: item.details,
     deliveryDate: item.deliveryDate,
     location: item.location,

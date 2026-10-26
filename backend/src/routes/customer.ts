@@ -23,7 +23,7 @@ async function findAvailableVendor() {
   const { data } = await supabase.from('vendors').select('id,owner_profile_id').eq('is_online', true).eq('verification', 'approved').order('created_at').limit(1).maybeSingle()
   return data ?? null
 }
-router.get('/services', async (_request, response) => { const { data, error } = await supabase.from('service_catalog').select('code,name,description,base_price_paise,is_active').eq('is_active', true).order('name'); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
+router.get('/services', async (_request, response) => { const { data, error } = await supabase.from('service_catalog').select('code,name,description,base_price_paise,is_active,config').eq('is_active', true).order('name'); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
 router.get('/offers', async (_request, response) => { const { data, error } = await supabase.from('coupons').select('id,code,title,discount_type,discount_value,valid_until').eq('is_active', true).or('valid_until.is.null,valid_until.gte.' + new Date().toISOString()).order('created_at', { ascending: false }); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
 router.post('/coupons/validate', async (request, response) => { const parsed = z.object({ code: z.string().min(2).max(80), serviceCode: z.string().optional(), amount: z.number().nonnegative() }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid coupon request' }); const { data, error } = await supabase.from('coupons').select('*').eq('code', parsed.data.code.toUpperCase()).eq('is_active', true).or('valid_until.is.null,valid_until.gte.' + new Date().toISOString()).maybeSingle(); if (error || !data) return response.status(404).json({ error: 'Coupon is not available' }); response.json({ valid: true, coupon: data }) })
 router.use(requireAuth)
@@ -46,6 +46,8 @@ function getBookingServices(data: z.infer<typeof bookingSchema>) {
     details: data.notes,
     deliveryDate: data.deliveryDate,
     location: data.location,
+    waterType: undefined,
+    tankerCount: undefined,
     phone: data.phone,
     latitude: data.latitude,
     longitude: data.longitude,
@@ -54,7 +56,9 @@ function getBookingServices(data: z.infer<typeof bookingSchema>) {
   return items.map((item) => ({
     serviceId: item.serviceId.trim(),
     capacity: item.capacity?.trim() ?? '',
-    details: item.details?.trim() ?? '',
+    waterType: item.waterType?.trim() ?? '',
+    tankerCount: item.tankerCount,
+    details: item.serviceId === 'water_tanker' ? undefined : item.details?.trim() ?? '',
     deliveryDate: item.deliveryDate ?? data.deliveryDate ?? '',
     location: item.location ?? data.location,
     phone: item.phone ?? (isLegacyPayload ? data.phone : undefined),

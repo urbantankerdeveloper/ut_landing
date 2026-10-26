@@ -7,6 +7,8 @@ export const coordinatesSchema = {
 const bookingServiceSchema = z.object({
   serviceId: z.string().min(1),
   capacity: z.string().max(30).optional(),
+  waterType: z.string().max(40).optional(),
+  tankerCount: z.enum(['1', '2', '3', '4', '5']).optional(),
   details: z.string().max(1000).optional(),
   deliveryDate: z.string().min(10).optional(),
   location: z.string().min(3).max(200).optional(),

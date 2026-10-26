@@ -14,7 +14,7 @@ export type TrackingSnapshot = { orderId: string; status: string; latitude?: num
 export type PaymentOrder = { id: string; amount: number; currency: string; keyId?: string }
 export type PaymentVerification = { verified: boolean; orderId: string }
 export type BookingPaymentMethod = 'wallet' | 'gateway' | 'cod'
-export type BookingServiceDetails = { serviceId: string; capacity?: string; details: string; deliveryDate?: string; location?: string; phone?: string; latitude?: number; longitude?: number; phoneVerificationChallengeId?: string }
+export type BookingServiceDetails = { serviceId: string; capacity?: string; waterType?: string; tankerCount?: string; details: string; deliveryDate?: string; location?: string; phone?: string; latitude?: number; longitude?: number; phoneVerificationChallengeId?: string }
 export type CreateBookingPayload = { serviceId: string; services: BookingServiceDetails[]; capacity: string; location: string; deliveryDate: string; notes?: string; couponCode?: string; phone?: string; phoneVerificationChallengeId?: string; latitude?: number; longitude?: number; paymentMethod?: BookingPaymentMethod }
 export type GuestOtpChallenge = { challengeId: string; expiresInSeconds: number }
 export type GuestSession = { accessToken: string; user: { username: string; name: string; role: 'customer' } }
@@ -22,7 +22,7 @@ export type CreateSupportRequestPayload = { subject: string; message: string; or
 export type WalletTransaction = { id: string; amount: number; type: string; status: string; createdAt?: string }
 export type CustomerContract = { id: string; property_type: string; service_plan: Record<string, unknown>; address: string; estimate: number; status: string; created_at: string }
 export type CustomerOffer = { id: string; code: string; title: string; discount_type: string; discount_value: number; valid_until?: string }
-export type CustomerService = { code: string; name: string; description?: string; base_price_paise: number; is_active: boolean }
+export type CustomerService = { code: string; name: string; description?: string; base_price_paise: number; is_active: boolean; config?: { capacityOptions?: string[]; detailOptions?: string[]; waterTypeOptions?: string[]; tankerCountOptions?: string[] } }
 export type CustomerPhoneVerification = { phone: string; verified: boolean }
 export type PublicTracking = {
   bookingReference: string
@@ -44,6 +44,8 @@ function normalizeBooking(item: Record<string, unknown>): CustomerBooking {
       return [{
         serviceId: detail.serviceId,
         capacity: typeof detail.capacity === 'string' ? detail.capacity : '',
+        waterType: typeof detail.waterType === 'string' ? detail.waterType : undefined,
+        tankerCount: typeof detail.tankerCount === 'string' ? detail.tankerCount : undefined,
         details: typeof detail.details === 'string' ? detail.details : '',
         deliveryDate: typeof detail.deliveryDate === 'string' ? detail.deliveryDate : undefined,
         location: typeof detail.location === 'string' ? detail.location : undefined,
@@ -57,6 +59,8 @@ function normalizeBooking(item: Record<string, unknown>): CustomerBooking {
     services.push({
       serviceId: item.service_code,
       capacity: typeof item.capacity_litres === 'number' ? `${item.capacity_litres} litres` : '',
+      waterType: undefined,
+      tankerCount: undefined,
       details: '',
       deliveryDate: typeof item.scheduled_for === 'string' ? item.scheduled_for : undefined,
       location: typeof item.address_text === 'string' ? item.address_text : undefined,

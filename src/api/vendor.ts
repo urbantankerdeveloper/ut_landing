@@ -1,7 +1,7 @@
 import { apiFetch } from './client'
 
 export type VendorOrderStatus = 'Available' | 'Assigned' | 'Accepted' | 'En route' | 'Arrived' | 'Delivered' | 'Rejected'
-export type VendorOrder = { id: string; reference?: string; service: string; serviceDetails?: { service: string; capacity?: string; details?: string; deliveryDate?: string; location?: string }[]; location: string; latitude?: number | null; longitude?: number | null; distance?: number; amount: string; status: VendorOrderStatus; vehicle?: string; driver?: string; scheduledFor?: string; createdAt?: string }
+export type VendorOrder = { id: string; reference?: string; service: string; serviceDetails?: { service: string; capacity?: string; waterType?: string; tankerCount?: string; details?: string; deliveryDate?: string; location?: string }[]; location: string; latitude?: number | null; longitude?: number | null; distance?: number; amount: string; status: VendorOrderStatus; vehicle?: string; driver?: string; scheduledFor?: string; createdAt?: string }
 export type VendorDashboard = { orders: VendorOrder[]; vehicles: VendorVehicle[]; drivers: VendorDriver[] }
 export type VendorVehicle = { id: string; registration_number: string; capacity_litres?: number; is_active: boolean; verification: string }
 export type VendorDriver = { id: string; name: string; mobile_e164: string; licence_number?: string; is_active: boolean; verification: string }

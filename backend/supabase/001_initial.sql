@@ -598,16 +598,17 @@ alter table public.analytics_events enable row level security;
 
 -- ===== Consolidated from 016_standard_service_catalog.sql =====
 
-insert into public.service_catalog (code, name, description, base_price_paise, is_active)
+insert into public.service_catalog (code, name, description, base_price_paise, is_active, config)
 values
-  ('water_tanker', 'Water tanker', 'Potable and utility water delivery', 185000, true),
-  ('sewage_tanker', 'Sewage tanker', 'Sewage and wastewater transport', 185000, true),
-  ('tank_cleaning', 'Tank cleaning', 'Residential and commercial tank cleaning', 185000, true),
-  ('borewell_service', 'Borewell service', 'Borewell inspection and service support', 185000, true)
+  ('water_tanker', 'Water tanker', 'Potable and utility water delivery', 185000, true, '{"capacityOptions":["500 litres","1000 litres","2000 litres","5000 litres"],"waterTypeOptions":["Drinking water","Utility water"],"tankerCountOptions":["1","2","3","4","5"]}'),
+  ('sewage_tanker', 'Sewage tanker', 'Sewage and wastewater transport', 185000, true, '{"capacityOptions":["3000 litres","5000 litres","10000 litres"],"detailOptions":["Septic tank cleaning","Sewage pit emptying","Wastewater collection"],"tankerCountOptions":["1","2","3","4","5"]}'),
+  ('tank_cleaning', 'Tank cleaning', 'Residential and commercial tank cleaning', 185000, true, '{"capacityOptions":["1000 litres","2000 litres","5000 litres","10000 litres"],"detailOptions":["Overhead tank cleaning","Underground tank cleaning","Both overhead and underground tanks"]}'),
+  ('borewell_service', 'Borewell service', 'Borewell inspection and service support', 185000, true, '{"capacityOptions":["Single borewell","Multiple borewells"],"detailOptions":["Low water output","Pump issue","Borewell inspection","New borewell consultation"]}')
 on conflict (code) do update
 set name = excluded.name,
     description = excluded.description,
-    is_active = true;
+    is_active = true,
+    config = excluded.config || coalesce(public.service_catalog.config, '{}'::jsonb);
 
 
 

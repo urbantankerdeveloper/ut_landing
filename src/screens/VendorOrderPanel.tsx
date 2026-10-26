@@ -6,7 +6,7 @@ import { useVendorDeliveryVerification, useVendorDrivers, useVendorLocation, use
 import { useFileUpload } from '../hooks/useFrontendFeatures'
 
 type OrderStatus = 'Available' | 'Assigned' | 'Accepted' | 'En route' | 'Arrived' | 'Delivered' | 'Rejected'
-type VendorOrder = { id: string; reference?: string; service: string; serviceDetails?: { service: string; capacity?: string; details?: string; deliveryDate?: string; location?: string }[]; location: string; distance?: number; amount: string; status: OrderStatus; vehicle?: string; driver?: string }
+type VendorOrder = { id: string; reference?: string; service: string; serviceDetails?: { service: string; capacity?: string; waterType?: string; tankerCount?: string; details?: string; deliveryDate?: string; location?: string }[]; location: string; distance?: number; amount: string; status: OrderStatus; vehicle?: string; driver?: string }
 type Props = { onNotice: (message: string) => void }
 const demoOrders: VendorOrder[] = demoDataEnabled ? [{ id: 'UT-2412', service: 'Water tanker · 12 KL', location: 'OMR, Chennai', distance: 5.2, amount: '₹2,250', status: 'Available' }, { id: 'UT-2411', service: 'Sewage tanker · 9 KL', location: 'Guindy, Chennai', distance: 11.4, amount: '₹2,900', status: 'Accepted', vehicle: 'TN 38 AB 4120', driver: 'Arun Kumar' }, { id: 'UT-2409', service: 'Water tanker · 6 KL', location: 'Sholinganallur, Chennai', distance: 18.7, amount: '₹1,500', status: 'En route', vehicle: 'TN 09 CD 1811', driver: 'Meena S' }] : []
 const demoVehicles = [{ id: 'demo-vehicle-1', label: 'TN 38 AB 4120 · 12 KL' }, { id: 'demo-vehicle-2', label: 'TN 09 CD 1811 · 9 KL' }]
@@ -55,7 +55,7 @@ export default function VendorOrderPanel({ onNotice }: Props) {
       <div className="vendor-order-copy">
         <b>{order.reference ?? order.id} · {order.service}</b>
         <p><MapPin size={12} /> {order.location} · {order.distance === undefined ? 'Distance unavailable' : `${order.distance} km away`} · {order.amount}</p>
-        {order.serviceDetails?.map((item) => <small key={item.service}>{item.service}{item.capacity ? ` · ${item.capacity}` : ''}{item.deliveryDate ? ` · ${item.deliveryDate}` : ''}{item.location ? ` · ${item.location}` : ''}{item.details ? ` — ${item.details}` : ''}</small>)}
+        {order.serviceDetails?.map((item) => <small key={item.service}>{item.service}{item.capacity ? ` · ${item.capacity}` : ''}{item.waterType ? ` · ${item.waterType}` : ''}{item.tankerCount ? ` · ${item.tankerCount} tanker${item.tankerCount === '1' ? '' : 's'}` : ''}{item.deliveryDate ? ` · ${item.deliveryDate}` : ''}{item.location ? ` · ${item.location}` : ''}{item.details ? ` — ${item.details}` : ''}</small>)}
         {order.vehicle && <small><Truck size={12} /> {order.vehicle} · <UserRound size={12} /> {order.driver}</small>}
       </div>
       <span className={`status-tag ${order.status === 'Available' ? 'pending' : order.status === 'Delivered' ? '' : 'inactive'}`}>{order.status}</span>
