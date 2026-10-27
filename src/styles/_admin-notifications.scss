@@ -1,0 +1,196 @@
+@use '../theme/colors';
+
+.admin-notifications-panel {
+  .admin-notification-groups {
+    display: grid;
+    gap: 12px;
+  }
+
+  .admin-notification-group {
+    overflow: hidden;
+    background: #f8fbfa;
+    border: 1px solid #dfe9e5;
+    border-radius: 12px;
+
+    &.is-unread {
+      background: #eef8f4;
+      border-color: #b7dccc;
+    }
+  }
+
+  .admin-notification-group-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .admin-notification-toggle {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    align-items: center;
+    gap: 12px;
+    padding: 0;
+    color: colors.$ink;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    text-align: left;
+
+    &:focus-visible {
+      outline: 2px solid colors.$aqua;
+      outline-offset: 3px;
+    }
+
+    &[aria-expanded='true'] .admin-notification-chevron {
+      transform: rotate(180deg);
+    }
+  }
+
+  .admin-notification-icon {
+    display: grid;
+    flex: none;
+    width: 38px;
+    height: 38px;
+    place-items: center;
+    color: #2b7268;
+    background: #e6f1eb;
+    border-radius: 9px;
+  }
+
+  .admin-notification-group-summary {
+    display: grid;
+    flex: 1;
+    min-width: 0;
+    gap: 4px;
+
+    strong {
+      overflow-wrap: anywhere;
+      font-size: 12px;
+    }
+
+    > span,
+    small {
+      color: colors.$muted;
+      font-size: 10px;
+    }
+  }
+
+  .admin-notification-unread-count {
+    flex: none;
+    padding: 5px 8px;
+    color: #276b59;
+    background: #dcefe5;
+    border-radius: 20px;
+    font-size: 10px;
+    font-weight: 800;
+  }
+
+  .admin-notification-chevron {
+    flex: none;
+    color: colors.$muted;
+    transition: transform 160ms ease;
+  }
+
+  .admin-notification-mark-read {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 9px;
+    color: colors.$aqua-dark;
+    background: #fff;
+    border: 1px solid #cfe0db;
+    border-radius: 7px;
+    cursor: pointer;
+    font: inherit;
+    font-size: 10px;
+    font-weight: 800;
+    white-space: nowrap;
+
+    &:focus-visible {
+      outline: 2px solid colors.$aqua;
+      outline-offset: 3px;
+    }
+
+    &:disabled {
+      cursor: default;
+      opacity: .6;
+    }
+  }
+
+  .admin-notification-events {
+    display: grid;
+    padding: 0 16px 8px 64px;
+
+    article {
+      display: flex;
+      align-items: flex-start;
+      gap: 11px;
+      padding: 12px 0;
+      border-top: 1px solid #dfe9e5;
+    }
+
+    article > div {
+      flex: 1;
+      min-width: 0;
+    }
+
+    strong {
+      font-size: 11px;
+    }
+
+    p {
+      margin: 4px 0;
+      color: colors.$muted;
+      font-size: 10px;
+      overflow-wrap: anywhere;
+    }
+
+    small {
+      color: colors.$muted;
+      font-size: 9px;
+    }
+
+    article.is-unread .admin-notification-event-indicator {
+      background: #2b876d;
+    }
+  }
+
+  .admin-notification-event-indicator {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    margin-top: 5px;
+    background: #a7b9b1;
+    border-radius: 50%;
+  }
+
+  .admin-notification-unread-label {
+    color: #276b59;
+    font-size: 9px;
+    font-weight: 800;
+  }
+}
+
+@media (max-width: 600px) {
+  .admin-notifications-panel {
+    .admin-notification-group-header {
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+
+    .admin-notification-toggle {
+      flex-basis: calc(100% - 50px);
+    }
+
+    .admin-notification-mark-read {
+      margin-left: 50px;
+    }
+
+    .admin-notification-events {
+      padding-left: 18px;
+    }
+  }
+}

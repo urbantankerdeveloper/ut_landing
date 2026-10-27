@@ -37,6 +37,122 @@
     font-size: 12px;
 }
 
+.admin-booking-table {
+    width: 100%;
+    min-width: 0;
+    table-layout: fixed;
+}
+
+.admin-bookings-heading {
+    flex-wrap: wrap;
+    align-items: end;
+}
+
+.admin-bookings-heading > .button {
+    margin-left: auto;
+}
+
+.admin-booking-id {
+    padding: 0;
+    color: colors.$aqua-dark;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 800;
+    text-align: left;
+}
+
+.admin-booking-id:hover {
+    text-decoration: underline;
+}
+
+.admin-booking-id:focus-visible {
+    outline: 2px solid colors.$aqua;
+    outline-offset: 3px;
+    border-radius: 2px;
+}
+
+.admin-booking-location {
+    overflow-wrap: anywhere;
+}
+
+.admin-booking-table th:nth-child(1),
+.admin-booking-table td:nth-child(1) {
+    width: 18%;
+}
+
+.admin-booking-table th:nth-child(2),
+.admin-booking-table td:nth-child(2) {
+    width: 16%;
+}
+
+.admin-booking-table th:nth-child(3),
+.admin-booking-table td:nth-child(3) {
+    width: 28%;
+}
+
+.admin-booking-table th:nth-child(4),
+.admin-booking-table td:nth-child(4) {
+    width: 22%;
+}
+
+.admin-booking-table th:nth-child(5),
+.admin-booking-table td:nth-child(5) {
+    width: 16%;
+    white-space: nowrap;
+}
+
+.admin-booking-id {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+}
+
+.admin-booking-status-control {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+
+.admin-booking-status {
+    padding: 6px 23px 6px 9px;
+    border: 0;
+    appearance: none;
+    cursor: pointer;
+    font: inherit;
+}
+
+.admin-booking-status:disabled {
+    cursor: default;
+    opacity: 1;
+}
+
+.admin-booking-status-control > svg {
+    position: absolute;
+    right: 6px;
+    pointer-events: none;
+    color: currentColor;
+}
+
+.admin-booking-status:focus-visible {
+    outline: 2px solid colors.$aqua;
+    outline-offset: 2px;
+}
+
+.admin-cancel-dialog > label {
+    display: grid;
+    gap: 7px;
+    color: colors.$muted;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.admin-cancel-dialog > div {
+    display: flex;
+    justify-content: flex-end;
+    gap: 9px;
+}
+
 .customer-booking-table th {
     padding: 11px 10px;
     color: colors.$muted;

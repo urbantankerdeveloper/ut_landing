@@ -20,7 +20,8 @@ create table if not exists public.vendors (id uuid primary key default gen_rando
 create table if not exists public.vehicles (id uuid primary key default gen_random_uuid(), vendor_id uuid not null references public.vendors(id) on delete cascade, registration_number text not null unique, capacity_litres integer, supported_services text[] not null default '{}', is_active boolean not null default true, metadata jsonb not null default '{}');
 create table if not exists public.drivers (id uuid primary key default gen_random_uuid(), vendor_id uuid not null references public.vendors(id) on delete cascade, name text not null, mobile_e164 text not null, licence_number text not null, is_active boolean not null default false, verification text not null default 'pending', metadata jsonb not null default '{}');
 create table if not exists public.service_catalog (id uuid primary key default gen_random_uuid(), code text unique not null, name text not null, description text, base_price_paise integer not null default 0, is_active boolean not null default true, config jsonb not null default '{}');
-create table if not exists public.bookings (id uuid primary key default gen_random_uuid(), reference text unique not null, customer_id uuid not null references public.profiles(id), vendor_id uuid references public.vendors(id), vehicle_id uuid references public.vehicles(id), service_code text not null references public.service_catalog(code), capacity_litres integer, scheduled_for timestamptz, address_text text not null, latitude numeric(9,6), longitude numeric(9,6), access_notes text, service_details jsonb not null default '[]'::jsonb, quoted_amount_paise integer not null default 0, status public.booking_status not null default 'pending_vendor', delivery_otp_hash text, delivery_otp_expires_at timestamptz, tracking_token_hash text unique, tracking_token_expires_at timestamptz, created_at timestamptz not null default now(), updated_at timestamptz not null default now());
+create table if not exists public.bookings (id uuid primary key default gen_random_uuid(), reference text unique not null, customer_id uuid not null references public.profiles(id), vendor_id uuid references public.vendors(id), vehicle_id uuid references public.vehicles(id), service_code text not null references public.service_catalog(code), capacity_litres integer, scheduled_for timestamptz, address_text text not null, latitude numeric(9,6), longitude numeric(9,6), access_notes text, cancellation_reason text, service_details jsonb not null default '[]'::jsonb, quoted_amount_paise integer not null default 0, status public.booking_status not null default 'pending_vendor', delivery_otp_hash text, delivery_otp_expires_at timestamptz, tracking_token_hash text unique, tracking_token_expires_at timestamptz, created_at timestamptz not null default now(), updated_at timestamptz not null default now());
+alter table public.bookings add column if not exists cancellation_reason text;
 alter table public.bookings add column if not exists service_details jsonb not null default '[]'::jsonb;
 alter table public.bookings add column if not exists tracking_token_hash text unique;
 alter table public.bookings add column if not exists tracking_token_expires_at timestamptz;
@@ -142,7 +143,8 @@ create or replace function public.transition_booking(
   p_next_status public.booking_status,
   p_vendor_id uuid default null,
   p_vehicle_id uuid default null,
-  p_driver_id uuid default null
+  p_driver_id uuid default null,
+  p_cancellation_reason text default null
 ) returns public.bookings
 language plpgsql
 security definer
@@ -152,6 +154,10 @@ declare
   current_booking public.bookings;
   next_booking public.bookings;
 begin
+  if p_next_status = 'cancelled' and (p_cancellation_reason is null or length(btrim(p_cancellation_reason)) < 2 or length(btrim(p_cancellation_reason)) > 500) then
+    raise exception 'CANCELLATION_REASON_REQUIRED';
+  end if;
+
   select * into current_booking
   from public.bookings
   where id = p_booking_id
@@ -200,6 +206,7 @@ begin
 
   update public.bookings
   set status = p_next_status,
+      cancellation_reason = case when p_next_status = 'cancelled' then btrim(p_cancellation_reason) else cancellation_reason end,
       vendor_id = coalesce(p_vendor_id, vendor_id),
       vehicle_id = coalesce(p_vehicle_id, vehicle_id),
       driver_id = coalesce(p_driver_id, driver_id),
@@ -214,7 +221,7 @@ begin
 end;
 $$;
 
-grant execute on function public.transition_booking(uuid, uuid, public.booking_status, uuid, uuid, uuid) to service_role;
+grant execute on function public.transition_booking(uuid, uuid, public.booking_status, uuid, uuid, uuid, text) to service_role;
 
 
 -- ===== Consolidated from 005_memberships.sql =====

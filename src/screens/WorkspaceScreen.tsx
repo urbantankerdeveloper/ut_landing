@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import { BarChart3, Bell, CalendarCheck, CircleDollarSign, ClipboardList, FileText, Gauge, House, LayoutDashboard, LogOut, MapPin, Menu, PanelLeftClose, PanelLeftOpen, Receipt, Repeat, Settings2, Tag, Truck, UserRound, UserPlus, Users, Wallet, X } from 'lucide-react'
+import { BarChart3, Bell, CalendarCheck, ChevronDown, CircleDollarSign, ClipboardList, FileText, Gauge, House, LayoutDashboard, LogOut, MapPin, Menu, PanelLeftClose, PanelLeftOpen, Receipt, Repeat, Settings2, Tag, Truck, UserRound, UserPlus, Users, Wallet, X } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
 import { useNavigationStore, type WorkspaceRole } from '../stores/navigationStore'
 import { WorkspaceContentSkeleton } from '../components/ScreenSkeleton'
@@ -10,6 +10,21 @@ const WorkspaceContent = lazy(() => import('./WorkspaceContent').then(({ Workspa
 
 type NavItem = { label: string; icon: typeof House; key: string }
 type RoleData = { caption: string; title: string; description: string; nav: NavItem[]; metrics: { label: string; value: string; note: string; icon: typeof ClipboardList }[] }
+const adminNavGroups = [
+  { label: 'Bookings & dispatch', icon: ClipboardList, keys: ['live', 'bookings', 'notifications', 'complaints', 'alerts'] },
+  { label: 'People & fleet', icon: Users, keys: ['vendors', 'onboarding', 'fleet', 'drivers', 'customers'] },
+  { label: 'Finance & promos', icon: Wallet, keys: ['finance', 'coupons'] },
+  { label: 'Reports & setup', icon: Settings2, keys: ['reports', 'analytics', 'services', 'system-health'] },
+]
+const vendorNavGroups = [
+  { label: 'Orders & support', icon: ClipboardList, keys: ['orders', 'complaints', 'notifications'] },
+  { label: 'Services & team', icon: Users, keys: ['services', 'vehicles', 'drivers', 'documents', 'attendance'] },
+  { label: 'Earnings', icon: Wallet, keys: ['earnings'] },
+]
+const dispatcherNavGroups = [
+  { label: 'Dispatch operations', icon: ClipboardList, keys: ['live', 'bookings'] },
+  { label: 'Reports & alerts', icon: Bell, keys: ['reports', 'alerts'] },
+]
 const roleData: Record<WorkspaceRole, RoleData> = {
   customer: { caption: 'YOUR URBAN TANKER', title: 'My account', description: 'Keep your requests, deliveries and plans in one place.', nav: [{ label: 'My account', icon: House, key: 'overview' }, { label: 'My Bookings', icon: ClipboardList, key: 'bookings' }, { label: 'Live tracking', icon: MapPin, key: 'tracking' }, { label: 'Saved addresses', icon: MapPin, key: 'addresses' }, { label: 'My profile', icon: UserRound, key: 'profile' }, { label: 'Wallet & bills', icon: Wallet, key: 'wallet' }, { label: 'Invoices', icon: Receipt, key: 'invoices' }, { label: 'Notifications', icon: Bell, key: 'notifications' }, { label: 'Support', icon: Bell, key: 'support' }, { label: 'Yearly contracts', icon: Repeat, key: 'contracts' }], metrics: [] },
   vendor: { caption: 'VENDOR WORKSPACE', title: 'Overview', description: 'Turn nearby demand into reliable, trackable delivery.', nav: [{ label: 'Overview', icon: LayoutDashboard, key: 'overview' }, { label: 'Orders', icon: ClipboardList, key: 'orders' }, { label: 'My services', icon: Gauge, key: 'services' }, { label: 'My vehicles', icon: Truck, key: 'vehicles' }, { label: 'Drivers', icon: Users, key: 'drivers' }, { label: 'Documents', icon: FileText, key: 'documents' }, { label: 'Attendance', icon: CalendarCheck, key: 'attendance' }, { label: 'Earnings', icon: CircleDollarSign, key: 'earnings' }, { label: 'Complaints', icon: Bell, key: 'complaints' }, { label: 'Notifications', icon: Bell, key: 'notifications' }], metrics: [{ label: 'Available orders', value: '12 nearby', note: 'Within your service radius', icon: ClipboardList }, { label: 'Active delivery', value: '2 en route', note: 'Live status enabled', icon: Truck }, { label: 'This month', value: '₹84,600', note: '+12.4% from last month', icon: CircleDollarSign }] },
@@ -26,13 +41,37 @@ export default function WorkspaceScreen() {
   const [activeItem, setActiveItem] = useState('overview')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [expandedAdminGroups, setExpandedAdminGroups] = useState<Set<string>>(() => new Set())
   const [contentLoading, setContentLoading] = useState(activeRole === 'vendor' || activeRole === 'admin' || activeRole === 'dispatcher')
   const loadingTimer = useRef<number | null>(null)
   const [notices, setNotices] = useState<Array<{ id: number; message: string }>>([])
   const displayName = user?.name ?? (activeRole === 'admin' ? 'Operations team' : activeRole === 'dispatcher' ? 'Dispatch team' : activeRole === 'vendor' ? 'BlueDrop Services' : 'Customer')
-  const selectItem = (key: string) => { setActiveItem(key); setNotices([]); setSidebarOpen(false); const shouldLoadSkeleton = activeRole === 'vendor' || activeRole === 'admin' || activeRole === 'dispatcher'; setContentLoading(shouldLoadSkeleton); if (loadingTimer.current) window.clearTimeout(loadingTimer.current); if (shouldLoadSkeleton) loadingTimer.current = window.setTimeout(() => setContentLoading(false), MIN_SCREEN_LOADING_MS) }
+  const selectItem = (key: string) => { setActiveItem(key); const group = [...adminNavGroups, ...vendorNavGroups, ...dispatcherNavGroups].find((item) => item.keys.includes(key)); if (group) setExpandedAdminGroups((current) => new Set(current).add(group.label)); setNotices([]); setSidebarOpen(false); const shouldLoadSkeleton = activeRole === 'vendor' || activeRole === 'admin' || activeRole === 'dispatcher'; setContentLoading(shouldLoadSkeleton); if (loadingTimer.current) window.clearTimeout(loadingTimer.current); if (shouldLoadSkeleton) loadingTimer.current = window.setTimeout(() => setContentLoading(false), MIN_SCREEN_LOADING_MS) }
   const addNotice = (message: string) => { const id = Date.now() + Math.random(); setNotices((current) => [...current.slice(-4), { id, message }]); window.setTimeout(() => setNotices((current) => current.filter((notice) => notice.id !== id)), 5000) }
   const logout = () => { signOut(); navigate('home') }
+  const renderNavItem = ({ label, icon: Icon, key }: NavItem) => <button className={activeItem === key ? 'is-active' : ''} aria-current={activeItem === key ? 'page' : undefined} key={key} onClick={() => selectItem(key)} title={sidebarCollapsed ? label : undefined}><Icon size={16} /><span>{label}</span></button>
+  const groupedNavItems = activeRole === 'admin' ? adminNavGroups : activeRole === 'vendor' ? vendorNavGroups : dispatcherNavGroups
+  const renderNavGroups = (groups: typeof adminNavGroups) => <>
+    {data.nav.filter((item) => item.key === 'overview').map(renderNavItem)}
+    {groups.map((group) => {
+      const GroupIcon = group.icon
+      const isExpanded = expandedAdminGroups.has(group.label)
+      const items = data.nav.filter((item) => group.keys.includes(item.key))
+      return <div className="workspace-nav-group" key={group.label}>
+        <button className="workspace-nav-group-toggle" type="button" aria-expanded={isExpanded} onClick={() => setExpandedAdminGroups((current) => {
+          const next = new Set(current)
+          if (next.has(group.label)) next.delete(group.label)
+          else next.add(group.label)
+          return next
+        })} title={sidebarCollapsed ? group.label : undefined}>
+          <GroupIcon size={16} /><span>{group.label}</span><ChevronDown className="workspace-nav-group-chevron" size={14} />
+        </button>
+        <div className={`workspace-nav-group-items ${isExpanded ? 'is-expanded' : ''}`}>
+          {items.map(renderNavItem)}
+        </div>
+      </div>
+    })}
+  </>
   useEffect(() => {
     const shouldLoadSkeleton = activeRole === 'vendor' || activeRole === 'admin' || activeRole === 'dispatcher'
     const timer = window.setTimeout(() => setContentLoading(false), shouldLoadSkeleton ? MIN_SCREEN_LOADING_MS : 0)
@@ -43,7 +82,11 @@ export default function WorkspaceScreen() {
     <aside className={`workspace-sidebar-new ${sidebarOpen ? 'is-open' : ''}`}>
       <div className="sidebar-brand"><button className="brand" onClick={() => navigate('home')} aria-label="Urban Tanker home"><span className="brand-mark">UT</span><span>Urban <b>Tanker</b></span></button><button className="sidebar-collapse-toggle" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>{sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button><button className="sidebar-close" onClick={() => setSidebarOpen(false)} aria-label="Close sidebar"><X size={17} /></button></div>
       <p className="workspace-caption-new">{data.caption}</p>
-      <nav className="workspace-nav-new" aria-label={`${activeRole} workspace pages`}>{data.nav.map(({ label, icon: Icon, key }) => <button className={activeItem === key ? 'is-active' : ''} aria-current={activeItem === key ? 'page' : undefined} key={key} onClick={() => selectItem(key)} title={sidebarCollapsed ? label : undefined}><Icon size={16} /><span>{label}</span></button>)}</nav>
+      <nav className="workspace-nav-new" aria-label={`${activeRole} workspace pages`}>
+        {activeRole === 'admin' || activeRole === 'vendor' || activeRole === 'dispatcher'
+          ? renderNavGroups(groupedNavItems)
+          : data.nav.map(renderNavItem)}
+      </nav>
       <p className="workspace-caption-new sidebar-footer-label">URBAN TANKER · DEMO</p>
     </aside>
     {sidebarOpen && <button className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-label="Close sidebar" />}

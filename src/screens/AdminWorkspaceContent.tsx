@@ -31,7 +31,7 @@ export function AdminWorkspaceContent({ item, onNotice }: Props) {
   const close = () => setDialog(null)
   const open = (next: DialogState) => setDialog(next)
   const finish = (message: string) => { close(); onNotice(message) }
-  if (item === 'notifications') return <AdminNotificationsPanel />
+  if (item === 'notifications') return <AdminNotificationsPanel onNotice={onNotice} />
   if (item === 'analytics' && !demoDataEnabled) return <AdminAnalyticsScreen />
   if (item === 'system-health') return <AdminSystemHealthScreen />
   if (item === 'bookings' && !demoDataEnabled) return <AdminBookingOperationsScreen onNotice={onNotice} />

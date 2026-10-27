@@ -16,7 +16,7 @@ export function isBookingTransitionAllowed(current: BookingStatus, next: Booking
   return allowedTransitions[current].includes(next)
 }
 
-export async function transitionBooking(input: { bookingId: string; actorId: string; status: BookingStatus; vendorId?: string; vehicleId?: string; driverId?: string }) {
+export async function transitionBooking(input: { bookingId: string; actorId: string; status: BookingStatus; cancellationReason?: string; vendorId?: string; vehicleId?: string; driverId?: string }) {
   return supabase.rpc('transition_booking', {
     p_booking_id: input.bookingId,
     p_actor_id: input.actorId,
@@ -24,5 +24,6 @@ export async function transitionBooking(input: { bookingId: string; actorId: str
     p_vendor_id: input.vendorId ?? null,
     p_vehicle_id: input.vehicleId ?? null,
     p_driver_id: input.driverId ?? null,
+    p_cancellation_reason: input.cancellationReason ?? null,
   })
 }
