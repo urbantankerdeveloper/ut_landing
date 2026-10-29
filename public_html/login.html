@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10343a">
+  <link rel="stylesheet" href="styles.css">
+  <title>Log in | Urban Tanker</title>
+</head>
+<body data-page="auth" class="simple-login-page">
+  <a class="skip-link" href="#auth-main">Skip to sign in</a>
+  <main id="auth-main" class="simple-login-shell">
+    <a class="brand urban-brand" href="index.html" aria-label="Urban Tanker home"><span class="brand-mark ut-mark" aria-hidden="true">UT</span><span>Urban <span>Tanker</span></span></a>
+    <section class="simple-login-card" aria-labelledby="login-title">
+      <p class="eyebrow">ONE ACCOUNT. YOUR WORKSPACE.</p>
+      <h1 id="login-title">Welcome back.</h1>
+      <p class="login-intro">Log in. We’ll take you to the right place.</p>
+      <button class="google-button" id="login-google" type="button" aria-describedby="google-status">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="#4285F4" d="M21.6 12.23c0-.71-.06-1.39-.18-2.05H12v3.88h5.38a4.6 4.6 0 0 1-1.99 3.02v2.51h3.23c1.89-1.74 2.98-4.31 2.98-7.36Z"/><path fill="#34A853" d="M12 22c2.7 0 4.96-.9 6.62-2.41l-3.23-2.51c-.9.6-2.05.96-3.39.96-2.6 0-4.8-1.75-5.59-4.1H3.07v2.59A10 10 0 0 0 12 22Z"/><path fill="#FBBC05" d="M6.41 13.94A6 6 0 0 1 6.1 12c0-.67.11-1.32.31-1.94V7.47H3.07A10 10 0 0 0 2 12c0 1.61.39 3.14 1.07 4.53l3.34-2.59Z"/><path fill="#EA4335" d="M12 5.96c1.47 0 2.79.51 3.83 1.51l2.88-2.88A9.62 9.62 0 0 0 12 2a10 10 0 0 0-8.93 5.47l3.34 2.59C7.2 7.71 9.4 5.96 12 5.96Z"/></svg>
+        Continue with Google
+      </button>
+      <p class="login-provider-note" id="google-status">Google sign-in is not connected in this demo.</p>
+      <div class="or-divider"><span>or use your username</span></div>
+      <form id="unified-login-form" class="auth-form" novalidate>
+        <div class="field"><label for="login-username">Username or email</label><input id="login-username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Enter your username or email" required></div>
+        <div class="field"><label for="login-password">Password</label><div class="login-password-wrap"><input id="login-password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required><button type="button" id="toggle-login-password" aria-controls="login-password" aria-label="Show password" aria-pressed="false">Show</button></div></div>
+        <p id="login-error" class="login-error" role="alert" hidden></p>
+        <button class="button button-primary full-width" id="unified-login-submit" type="submit">Log in <span aria-hidden="true">→</span></button>
+      </form>
+      <p class="login-routing-note">Customer, vendor or admin — your account opens the right workspace automatically.</p>
+      <details class="login-demo-details"><summary>Try a demo account</summary><dl><div><dt>Customer</dt><dd><code>customer</code> / <code>customer123</code></dd></div><div><dt>Vendor</dt><dd><code>vendor</code> / <code>vendor123</code></dd></div><div><dt>Admin</dt><dd><code>admin</code> / <code>Maneesh@123</code></dd></div></dl><p>Demo credentials only. Use these sample accounts to explore the prototype.</p></details>
+      <p class="terms-note">By continuing, you agree to our <a href="terms.html">Terms</a> and <a href="policy.html">Privacy Policy</a>.</p>
+    </section>
+    <a class="back-link" href="index.html">← Back to Urban Tanker</a>
+  </main>
+  <script src="platform-data.js"></script><script src="app.js"></script>
+</body>
+</html>

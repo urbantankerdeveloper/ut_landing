@@ -1,0 +1,25 @@
+/* Shared navigation and demo session helpers. These checks are not production authorization. */
+(function(){
+'use strict';
+var P=UrbanTankerPlatform,role=document.body.dataset.workspace,view=document.body.dataset.view,data=P.get(),params=new URLSearchParams(location.search),profile=data.profile,guestBooking=role==='customer'&&view==='booking'&&params.get('id')===sessionStorage.getItem('ut-last-booking');
+var session=sessionStorage.getItem('urban-tanker-'+role+'-session')==='active';
+if((!session||(role==='customer'&&!profile))&&!guestBooking){location.replace('login.html?next='+encodeURIComponent(location.pathname.split('/').pop()));return;}
+var vendorId=sessionStorage.getItem('urban-tanker-vendor-id')||'v1',vendor=data.vendors.find(function(v){return v.id===vendorId}),person=role==='customer'?(profile?profile.name:'Guest'):role==='vendor'?(vendor?vendor.name:'Vendor'):'Administrator';
+document.getElementById('workspace-person').textContent=person;document.getElementById('workspace-avatar').textContent=person.slice(0,1).toUpperCase();
+document.getElementById('workspace-logout').onclick=function(){['customer','vendor','admin'].forEach(function(r){sessionStorage.removeItem('urban-tanker-'+r+'-session')});sessionStorage.removeItem('urban-tanker-vendor-id');sessionStorage.removeItem('ut-driver-session');P.update(function(d){d.profile=null});location.href='login.html';};
+var esc=P.escapeHTML;
+function link(view){return(role==='customer'?'account':role)+(view==='overview'?'':'-'+view)+'.html';}
+function heading(title,description){return '<div class="page-heading"><p class="eyebrow">'+esc(role==='customer'?'YOUR ACCOUNT':role.toUpperCase()+' WORKSPACE')+'</p><h1>'+esc(title)+'</h1><p>'+esc(description||'')+'</p></div>';}
+function metric(label,value,destination,note){return '<a class="metric-link" href="'+esc(destination)+'"><small>'+esc(label)+'</small><strong>'+esc(value)+'</strong><span>'+esc(note||'View details →')+'</span></a>';}
+function tile(title,description,destination,icon){return '<a class="destination-card" href="'+esc(destination)+'"><span class="card-icon" aria-hidden="true">'+esc(icon||'↗')+'</span><h2>'+esc(title)+'</h2><p>'+esc(description)+'</p><span class="card-arrow">Open page →</span></a>';}
+function badge(value){return '<span class="badge'+(/pending|review|await/i.test(value||'')?' pending':'')+'">'+esc(String(value||'Pending').replace(/_/g,' '))+'</span>';}
+function empty(text){return '<div class="empty-state">'+esc(text)+'</div>';}
+function row(title,subtitle,href,extra){return '<a class="record-row" href="'+esc(href)+'"><div><h3>'+esc(title)+'</h3><p>'+esc(subtitle||'')+'</p></div><span>'+(extra||'Details →')+'</span></a>';}
+function field(label,name,value,type,required){return '<label class="field">'+esc(label)+'<input name="'+esc(name)+'" type="'+(type||'text')+'" value="'+esc(value==null?'':value)+'" '+(required?'required':'')+(type==='tel'?' pattern="[0-9]{10}" maxlength="10"':'')+(type==='number'?' min="0" step="any"':'')+'></label>';}
+function select(label,name,values,current){return '<label class="field">'+esc(label)+'<select name="'+esc(name)+'">'+values.map(function(v){var value=Array.isArray(v)?v[0]:v,title=Array.isArray(v)?v[1]:v;return '<option value="'+esc(value)+'"'+(value===current?' selected':'')+'>'+esc(title)+'</option>'}).join('')+'</select></label>';}
+function detail(data){return '<dl class="detail-grid">'+Object.keys(data).filter(function(k){return data[k]!=null&&data[k]!==''&&!/password|token|secret/i.test(k)&&!(role==='vendor'&&/otp/i.test(k))}).map(function(k){var value=data[k];if(typeof value==='object')value=Array.isArray(value)?value.map(function(x){return typeof x==='object'?JSON.stringify(x):x}).join(', '):Object.keys(value).map(function(x){return x+': '+value[x]}).join(' · ');return '<div><dt>'+esc(k.replace(/([A-Z])/g,' $1'))+'</dt><dd>'+esc(value)+'</dd></div>'}).join('')+'</dl>';}
+function message(text){var box=document.getElementById('workspace-message');box.textContent=text;box.hidden=false;}
+function customerOrders(d){var p=d.profile;if(!p)return[];return d.orders.filter(function(o){return (o.customerId&&o.customerId===p.id)||(p.email&&o.customerEmail===p.email)||(p.phone&&o.customerPhone===p.phone);});}
+function records(kind,d){if(role!=='vendor')return d[kind==='coupons'?'couponRules':kind]||[];if(kind==='orders')return d.orders.filter(function(o){return !(o.rejectedVendorIds||[]).includes(vendorId)&&(o.vendorId===vendorId||(!o.vendorId&&P.eligible(vendorId,o.fulfillmentServiceId||o.serviceId)));});if(kind==='notifications')return(d.notifications||[]).filter(function(n){return n.vendorId===vendorId||(!n.vendorId&&n.type==='Network notification')});return(d[kind]||[]).filter(function(x){return x.vendorId===vendorId});}
+window.Workspace={P:P,role:role,view:view,params:params,vendorId:vendorId,profile:profile,guest:guestBooking,esc:esc,link:link,heading:heading,metric:metric,tile:tile,badge:badge,empty:empty,row:row,field:field,select:select,detail:detail,message:message,customerOrders:customerOrders,records:records,content:document.getElementById('workspace-content')};
+})();

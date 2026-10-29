@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Book one or more Urban Tanker services in a single delivery slot.">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="workspace.css">
+  <title>Book services | Urban Tanker</title>
+</head>
+<body class="booking-page">
+  <header class="site-header">
+    <a class="brand urban-brand" href="index.html" aria-label="Urban Tanker home"><span class="brand-mark ut-mark" aria-hidden="true">UT</span><span>Urban <span>Tanker</span></span></a>
+    <nav class="main-nav" aria-label="Main navigation"><a href="index.html">Home</a><a href="services.html">Services</a><a href="subscriptions.html">Subscription</a><a href="tracking.html">Track</a><a href="partner.html">Become a Partner</a></nav>
+    <div class="header-account-actions"><a class="button button-quiet" href="account.html">My Account</a></div>
+  </header>
+
+  <main>
+    <section class="booking-hero">
+      <div class="booking-hero-copy">
+        <a class="booking-back" href="index.html">← Back to home</a>
+        <p class="eyebrow">BOOK URBAN TANKER</p>
+        <h1>One booking.<br><em>Every service you need.</em></h1>
+        <p>Add multiple services, choose one convenient slot and submit everything as a single coordinated request.</p>
+      </div>
+      <div class="booking-hero-promise" aria-label="Booking benefits"><span><b>01</b> Add services</span><span><b>02</b> Choose one slot</span><span><b>03</b> Review & submit</span></div>
+    </section>
+
+    <div class="booking-new-shell">
+      <div class="booking-progress" aria-label="Booking progress">
+        <div class="active"><i>1</i><span><b>Requirements</b><small>Add every service</small></span></div><span class="booking-progress-line"></span>
+        <div><i>2</i><span><b>Shared slot</b><small>Location, date & time</small></span></div><span class="booking-progress-line"></span>
+        <div><i>3</i><span><b>Confirmation</b><small>Review one request</small></span></div>
+      </div>
+
+      <div class="booking-new-grid">
+        <form id="combined-booking-form" novalidate>
+          <div id="booking-edit">
+            <section class="surface booking-surface">
+              <div class="surface-heading booking-section-heading"><span class="section-number">01</span><div><h2>Select your services</h2><p>Add one or more requirements to the same booking slot.</p></div></div>
+              <div id="booking-items"></div>
+              <button class="add-service-button" id="add-booking-item" type="button"><span>＋</span><b>Add another service</b><small>Water, sewage, cleaning, borewell, RMC and more</small></button>
+            </section>
+
+            <section class="surface booking-surface">
+              <div class="surface-heading booking-section-heading"><span class="section-number">02</span><div><h2>Contact & delivery location</h2><p>These details apply to every service in this booking.</p></div></div>
+              <div class="split-fields">
+                <label class="field">Customer / company name<input id="booking-name" name="customerName" autocomplete="name" required minlength="2" placeholder="Your name or company"></label>
+                <label class="field">Mobile number<input id="booking-phone" name="customerPhone" type="tel" inputmode="numeric" pattern="[0-9]{10}" maxlength="10" required placeholder="10-digit mobile number"></label>
+              </div>
+              <label class="field">Use a saved address<select id="saved-location"><option value="">Enter a new address</option></select></label>
+              <p class="saved-location-preview" id="saved-location-preview" hidden></p>
+              <div id="manual-location">
+                <div class="split-fields">
+                  <label class="field">Service region<select id="booking-region"><option>South Chennai</option><option>Central Chennai</option><option>North Chennai</option><option>West Chennai</option><option>ECR / OMR</option></select></label>
+                  <label class="field">Address label<input id="address-label" placeholder="Home, Office or Site"></label>
+                </div>
+                <label class="field">Full address<textarea id="booking-address" rows="3" required placeholder="Door number, street, locality and landmark"></textarea></label>
+                <label class="check-line"><input id="save-booking-address" type="checkbox"> Save this address to my account for future bookings.</label>
+              </div>
+            </section>
+
+            <section class="surface booking-surface">
+              <div class="surface-heading booking-section-heading"><span class="section-number">03</span><div><h2>Choose one booking slot</h2><p>All selected services are requested for this date and time.</p></div></div>
+              <div class="split-fields"><label class="field">Required date<input id="booking-date" type="date" required></label><label class="field">Preferred time<select id="booking-time"><option>7 AM – 10 AM</option><option>10 AM – 1 PM</option><option>2 PM – 5 PM</option><option>6 PM – 9 PM</option></select></label></div>
+              <label class="field">Additional requirements<textarea id="booking-notes" rows="3" placeholder="Access, parking, handling or site instructions"></textarea></label>
+              <div class="booking-coupon-row"><label class="field">Have a coupon?<input id="booking-coupon" autocomplete="off" placeholder="Enter coupon code"></label><p id="coupon-feedback" class="coupon-feedback" aria-live="polite"></p></div>
+            </section>
+
+            <p class="login-error" id="booking-error" role="alert" hidden></p>
+            <button class="button button-primary booking-review-button" type="submit">Review combined booking →</button>
+          </div>
+
+          <section class="surface booking-surface booking-review-panel" id="booking-review-panel" hidden>
+            <div class="surface-heading booking-section-heading"><span class="section-number">✓</span><div><h2>Review your combined booking</h2><p>Confirm every service before creating the request.</p></div></div>
+            <div id="combined-review"></div>
+            <label class="check-line booking-consent"><input id="booking-consent" type="checkbox"> I confirm these requirements. Final vehicle availability, compatibility and project estimates may require vendor or admin review.</label>
+            <div class="booking-review-actions"><button class="button button-quiet" id="edit-booking" type="button">← Edit booking</button><button class="button button-primary" id="submit-combined-booking" type="button">Submit booking request →</button></div>
+          </section>
+        </form>
+
+        <aside class="surface booking-summary">
+          <p class="eyebrow">LIVE SUMMARY</p><h2>Your booking</h2><p class="muted">Each service becomes a trackable order under one booking reference.</p>
+          <div id="combined-summary"></div>
+          <div class="booking-assurance"><span>✓</span><div><b>Clear before confirmation</b><small>Known estimates and coupon savings update as you make changes.</small></div></div>
+          <div class="booking-assurance"><span>⌖</span><div><b>One shared slot</b><small>Your location, date and time apply to every selected service.</small></div></div>
+        </aside>
+      </div>
+
+      <section class="surface booking-success" id="combined-confirmation" hidden>
+        <span class="success-mark">✓</span><p class="eyebrow">REQUEST CREATED</p><h2>Your combined booking is ready.</h2>
+        <p>Reference <strong id="combined-reference"></strong> contains all selected service requests.</p><div id="confirmation-items"></div>
+        <div class="action-row"><a class="button button-primary" id="view-combined-booking" href="booking-details.html">View booking details</a><a class="button button-quiet" href="index.html">Return home</a></div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="site-footer"><a class="brand" href="index.html"><span class="brand-mark ut-mark">UT</span>Urban <span>Tanker</span></a><p>© 2026 Urban Tanker. All rights reserved.</p><div><a href="services.html">Services</a><a href="subscriptions.html">Subscriptions</a><a href="partner.html">Partner</a></div></footer>
+  <script src="platform-data.js?v=20260930"></script><script src="home.js"></script><script src="booking.js?v=20260930"></script>
+</body>
+</html>

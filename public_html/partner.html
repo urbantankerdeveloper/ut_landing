@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Apply to become a verified Urban Tanker service partner.">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="workspace.css">
+  <title>Become a Partner | Urban Tanker</title>
+</head>
+<body class="partner-page">
+  <header class="site-header">
+    <a class="brand urban-brand" href="index.html" aria-label="Urban Tanker home"><span class="brand-mark ut-mark" aria-hidden="true">UT</span><span>Urban <span>Tanker</span></span></a>
+    <nav class="main-nav" aria-label="Main navigation"><a href="index.html">Home</a><a href="services.html">Services</a><a href="subscriptions.html">Subscription</a><a href="partner.html" aria-current="page">Become a Partner</a></nav>
+    <div class="header-account-actions"><a class="button button-quiet" href="vendor-login.html">Vendor login</a><a class="button button-primary" href="booking.html">Book Now</a></div>
+  </header>
+
+  <main>
+    <section class="partner-hero">
+      <div><p class="eyebrow">GROW WITH URBAN TANKER</p><h1>Your expertise.<br><em>A wider network.</em></h1><p>Join a trusted service network, manage your availability and receive suitable customer requirements in your operating area.</p></div>
+      <div class="partner-hero-stats"><span><b>Simple</b><small>guided application</small></span><span><b>Verified</b><small>partner identity</small></span><span><b>Flexible</b><small>service availability</small></span></div>
+    </section>
+
+    <div class="partner-application-shell">
+      <form class="partner-application" id="partner-application" novalidate>
+        <div class="partner-form-intro"><div><p class="eyebrow">PARTNER APPLICATION</p><h2>Tell us about your business</h2><p>Most applications take only a few minutes. You can provide final verification documents during review.</p></div><span>Step-by-step</span></div>
+
+        <section class="partner-form-section">
+          <div class="partner-step"><i>1</i><div><h3>Business & contact</h3><p>How our verification team can reach you.</p></div></div>
+          <div class="split-fields">
+            <label class="field">Business / owner name<input name="name" required minlength="2" autocomplete="organization" placeholder="Enter registered or owner name"></label>
+            <label class="field">Partner type<select name="partnerType" required><option value="">Choose partner type</option><option>Individual vehicle owner</option><option>Fleet operator</option><option>Service contractor</option><option>Company</option></select></label>
+            <label class="field">Mobile number<input name="phone" type="tel" inputmode="numeric" pattern="[0-9]{10}" maxlength="10" required placeholder="10-digit mobile number"></label>
+            <label class="field">WhatsApp number<input name="whatsapp" type="tel" inputmode="numeric" pattern="[0-9]{10}" maxlength="10" placeholder="Leave blank if same as mobile"></label>
+            <label class="field">Email address<input name="email" type="email" required autocomplete="email" placeholder="name@business.com"></label>
+            <label class="field">Primary operating area<input name="zone" required placeholder="Adyar, OMR, Anna Nagar…"></label>
+          </div>
+          <label class="field">Business address<textarea name="address" rows="2" required placeholder="Door number, street, locality and city"></textarea></label>
+        </section>
+
+        <section class="partner-form-section">
+          <div class="partner-step"><i>2</i><div><h3>Services you provide</h3><p>Select every service your team can fulfil.</p></div></div>
+          <fieldset class="partner-services"><legend class="sr-only">Services offered</legend><div class="service-choice-grid" id="partner-service-choices"></div></fieldset>
+        </section>
+
+        <section class="partner-form-section">
+          <div class="partner-step"><i>3</i><div><h3>Fleet & readiness</h3><p>Give us a quick operational overview.</p></div></div>
+          <div class="split-fields">
+            <label class="field">Number of vehicles<input name="vehicleCount" type="number" min="1" max="250" value="1" required></label>
+            <label class="field">Primary vehicle registration<input name="registration" required placeholder="TN 09 AB 1234"></label>
+            <label class="field">Vehicle capacity<input name="capacity" required placeholder="e.g. 6 KL or 7 m³"></label>
+            <label class="field">Years in operation<input name="experience" type="number" min="0" max="75" placeholder="e.g. 5"></label>
+            <label class="field">Current availability<select name="availability"><option>Available for new orders</option><option>Available on selected days</option><option>Onboarding for future orders</option></select></label>
+            <label class="field">Verification documents<input name="documents" type="file" multiple accept="image/*,.pdf,.doc,.docx"><small>RC, insurance, permits or business proof. Demo mode stores filenames only.</small></label>
+          </div>
+          <label class="field">Anything else we should know?<textarea name="notes" rows="3" placeholder="Coverage area, special equipment, additional vehicles or working hours"></textarea></label>
+        </section>
+
+        <label class="check-line partner-declaration"><input name="declaration" type="checkbox" required> I confirm that the information is accurate and that required vehicle, insurance, permit and driver documents can be provided for verification.</label>
+        <p id="partner-message" role="status" hidden></p>
+        <button class="button button-primary partner-submit" type="submit">Submit partnership request →</button>
+      </form>
+
+      <aside class="partner-side-card">
+        <p class="eyebrow">WHAT HAPPENS NEXT</p><h2>A clear path to activation.</h2>
+        <ol><li><span>1</span><div><b>Application review</b><small>We check your service area and basic business details.</small></div></li><li><span>2</span><div><b>Document verification</b><small>Vehicles and drivers are verified separately.</small></div></li><li><span>3</span><div><b>Availability setup</b><small>Choose which approved services and vehicles are active.</small></div></li><li><span>4</span><div><b>Start receiving requests</b><small>Eligible bookings can be offered to your account.</small></div></li></ol>
+        <div class="partner-help"><b>Already registered?</b><p>Use your vendor account to manage vehicles, drivers and service availability.</p><a class="button button-quiet" href="vendor-login.html">Go to Vendor Login</a></div>
+      </aside>
+    </div>
+  </main>
+
+  <footer class="site-footer"><a class="brand" href="index.html"><span class="brand-mark ut-mark">UT</span>Urban <span>Tanker</span></a><p>© 2026 Urban Tanker. All rights reserved.</p><div><a href="services.html">Services</a><a href="booking.html">Book Now</a><a href="vendor-login.html">Vendor Login</a></div></footer>
+  <script src="platform-data.js?v=20260930"></script><script src="home.js"></script><script src="partner.js?v=20260930"></script>
+</body>
+</html>
