@@ -8,3 +8,5 @@
 .vendor-fleet-row { display:grid; grid-template-columns:auto repeat(3, minmax(0, 1fr)) auto auto auto; gap:12px; align-items:end; padding:14px; border:1px solid #e0e9e4; border-radius:11px; }
 .vendor-active-toggle { display:flex !important; flex-direction:row !important; align-items:center; white-space:nowrap; }
 @media (max-width:800px) { .vendor-create-form, .vendor-fleet-row { grid-template-columns:1fr; } .vendor-fleet-row > svg { display:none; } }
+.vendor-location-form { max-width:680px; margin-top:20px; }.vendor-location-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }.vendor-location-note { margin:0; color:colors.$muted; font-size:12px; }.vendor-location-actions { display:flex; flex-wrap:wrap; gap:10px; }
+@media (max-width:600px) { .vendor-location-fields { grid-template-columns:1fr; } }

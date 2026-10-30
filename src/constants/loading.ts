@@ -1,1 +1,0 @@
-export const MIN_SCREEN_LOADING_MS = 3000

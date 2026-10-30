@@ -1,7 +1,7 @@
 import { apiFetch } from './client'
 
 export type AdminOrder = { id: string; service: string; vendor?: string; location: string; status: string; amount: number }
-export type AdminVendor = { id: string; name: string; status: string; rating?: number }
+export type AdminVendor = { id: string; business_name?: string; name?: string; status?: string; verification?: string; is_online?: boolean; phone_e164?: string | null; service_zone?: string | null; rating?: number; email?: string; owner_profile_id?: string; account_only?: boolean }
 export type AdminResource = { id: string; name?: string; status?: string; verification?: string }
 export type AdminCustomer = { id: string; full_name: string; phone_e164?: string; role: string; created_at: string }
 export type AdminReportRequest = { type: string; from: string; to: string; status?: string; service?: string }
@@ -22,6 +22,7 @@ export const adminApi = {
   drivers: () => apiFetch<AdminResource[]>('/admin/drivers'),
   createDriver: (payload: { vendorId: string; name: string; mobileE164: string; licenceNumber: string }) => apiFetch<AdminResource>('/admin/drivers', { method: 'POST', body: JSON.stringify(payload) }),
   createVendor: (payload: { email: string; password: string; name: string; phone: string; businessName: string; serviceZone: string }) => apiFetch<AdminVendor>('/admin/vendors', { method: 'POST', body: JSON.stringify(payload) }),
+  provisionVendor: (profileId: string, payload: { businessName: string; phone: string; serviceZone: string }) => apiFetch<AdminVendor>(`/admin/vendors/${profileId}/provision`, { method: 'POST', body: JSON.stringify(payload) }),
   updateVendor: (id: string, payload: { businessName?: string; phone?: string; serviceZone?: string }) => apiFetch<AdminVendor>(`/admin/vendors/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   deleteVendor: (id: string) => apiFetch<void>(`/admin/vendors/${id}`, { method: 'DELETE' }),
   updateCustomer: (id: string, payload: { name?: string; phone?: string }) => apiFetch<AdminCustomer>(`/admin/customers/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
@@ -30,7 +31,7 @@ export const adminApi = {
   deleteVehicle: (id: string) => apiFetch<void>(`/admin/vehicles/${id}`, { method: 'DELETE' }),
   updateDriver: (id: string, payload: { name?: string; mobileE164?: string; licenceNumber?: string }) => apiFetch<AdminResource>(`/admin/drivers/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   deleteDriver: (id: string) => apiFetch<void>(`/admin/drivers/${id}`, { method: 'DELETE' }),
-  approveVendor: (id: string, status: 'approved' | 'rejected' | 'suspended') => apiFetch<AdminVendor>(`/admin/vendors/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+  updateVendorStatus: (id: string, payload: { status?: 'pending' | 'approved' | 'rejected' | 'suspended'; isOnline?: boolean }) => apiFetch<AdminVendor>(`/admin/vendors/${id}/status`, { method: 'PATCH', body: JSON.stringify(payload) }),
   updateVehicleStatus: (id: string, verification: 'pending' | 'approved' | 'rejected' | 'suspended', isActive?: boolean) => apiFetch<AdminResource>(`/admin/vehicles/${id}/status`, { method: 'PATCH', body: JSON.stringify({ verification, isActive }) }),
   updateDriverStatus: (id: string, verification: 'pending' | 'approved' | 'rejected' | 'suspended', isActive?: boolean) => apiFetch<AdminResource>(`/admin/drivers/${id}/status`, { method: 'PATCH', body: JSON.stringify({ verification, isActive }) }),
   assignOrder: (id: string, payload: { vendorId?: string; vehicleId?: string; driverId?: string }) => apiFetch<AdminOrder>(`/admin/orders/${id}/assignment`, { method: 'PATCH', body: JSON.stringify(payload) }),

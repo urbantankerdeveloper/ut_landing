@@ -1,33 +1,35 @@
+import { lazy, memo } from 'react'
 import { ArrowRight, Bell, CheckCircle2, CircleDollarSign, ClipboardList, FileText, MapPin, PackageCheck, Plus, Search, Settings2, Truck, UserRound, Users } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { WorkspaceRole } from '../stores/navigationStore'
-import { AdminWorkspaceContent } from './AdminWorkspaceContent'
-import CustomerInvoicesScreen from './CustomerInvoicesScreen'
-import { VendorOperationsPanel } from './VendorOperationsPanel'
-import VendorOrderPanel from './VendorOrderPanel'
-import { VendorManagementPanel } from './VendorManagementPanel'
-import { VendorFleetPanel } from './VendorFleetPanel'
-import { VendorComplaintsPanel } from './VendorComplaintsPanel'
-import { VendorServicesPanel } from './VendorServicesPanel'
-import { VendorDocumentsPanel } from './VendorDocumentsPanel'
-import { VendorPayoutPanel } from './VendorPayoutPanel'
-import { CustomerOperationsPanel } from './CustomerOperationsPanel'
-import { CustomerSupportPanel } from './CustomerSupportPanel'
-import BookingScreen from './BookingScreen'
-import { CustomerUsagePanel } from './CustomerUsagePanel'
-import { VendorOfflineConflicts } from '../components/VendorOfflineConflicts'
+const AdminWorkspaceContent = lazy(() => import('./AdminWorkspaceContent').then((module) => ({ default: module.AdminWorkspaceContent })))
+const CustomerInvoicesScreen = lazy(() => import('./CustomerInvoicesScreen'))
+const VendorOperationsPanel = lazy(() => import('./VendorOperationsPanel').then((module) => ({ default: module.VendorOperationsPanel })))
+const VendorOrderPanel = lazy(() => import('./VendorOrderPanel'))
+const VendorManagementPanel = lazy(() => import('./VendorManagementPanel').then((module) => ({ default: module.VendorManagementPanel })))
+const VendorFleetPanel = lazy(() => import('./VendorFleetPanel').then((module) => ({ default: module.VendorFleetPanel })))
+const VendorComplaintsPanel = lazy(() => import('./VendorComplaintsPanel').then((module) => ({ default: module.VendorComplaintsPanel })))
+const VendorServicesPanel = lazy(() => import('./VendorServicesPanel').then((module) => ({ default: module.VendorServicesPanel })))
+const VendorDocumentsPanel = lazy(() => import('./VendorDocumentsPanel').then((module) => ({ default: module.VendorDocumentsPanel })))
+const VendorPayoutPanel = lazy(() => import('./VendorPayoutPanel').then((module) => ({ default: module.VendorPayoutPanel })))
+const VendorLocationPanel = lazy(() => import('./VendorLocationPanel').then((module) => ({ default: module.VendorLocationPanel })))
+const CustomerOperationsPanel = lazy(() => import('./CustomerOperationsPanel').then((module) => ({ default: module.CustomerOperationsPanel })))
+const CustomerSupportPanel = lazy(() => import('./CustomerSupportPanel').then((module) => ({ default: module.CustomerSupportPanel })))
+const BookingScreen = lazy(() => import('./BookingScreen'))
+const CustomerUsagePanel = lazy(() => import('./CustomerUsagePanel').then((module) => ({ default: module.CustomerUsagePanel })))
+const VendorOfflineConflicts = lazy(() => import('../components/VendorOfflineConflicts').then((module) => ({ default: module.VendorOfflineConflicts })))
 import { demoDataEnabled, customerDemoDataEnabled } from '../constants/demo'
 import { useAdminOrders } from '../hooks/useAdminData'
 import { useCustomerBookings } from '../hooks/useCustomerData'
 import { useVendorOrders } from '../hooks/useVendorData'
-import { CustomerBookingsTable } from './CustomerBookingsTable'
+const CustomerBookingsTable = lazy(() => import('./CustomerBookingsTable').then((module) => ({ default: module.CustomerBookingsTable })))
 
 type Props = { role: WorkspaceRole; item: string; onNavigate: (screen: 'booking' | 'bookings' | 'offers' | 'home') => void; onNotice: (message: string) => void }
 const bookingRows = customerDemoDataEnabled ? [{ id: 'UT-2408', service: 'Water tanker · 9 KL', place: 'ECR, Chennai', status: 'In progress', amount: '₹1,850' }, { id: 'UT-2394', service: 'Tank & sump cleaning', place: 'Adyar, Chennai', status: 'Delivered', amount: '₹2,400' }, { id: 'UT-2388', service: 'Sewage tanker', place: 'Velachery, Chennai', status: 'Scheduled', amount: '₹3,100' }] : []
 const vendorRows = demoDataEnabled ? [{ id: 'UT-2412', service: 'Water tanker · 12 KL', place: 'OMR, Chennai', status: 'Available', amount: '₹2,250' }, { id: 'UT-2411', service: 'Sewage tanker · 9 KL', place: 'Guindy, Chennai', status: 'Review', amount: '₹2,900' }, { id: 'UT-2409', service: 'Water tanker · 6 KL', place: 'Sholinganallur, Chennai', status: 'Accepted', amount: '₹1,500' }] : []
 const adminRows = demoDataEnabled ? [{ id: 'UT-2412', service: 'Water tanker · 12 KL', place: 'OMR, Chennai', status: 'Awaiting vendor', amount: '₹2,250' }, { id: 'UT-2411', service: 'Sewage tanker · 9 KL', place: 'Guindy, Chennai', status: 'In progress', amount: '₹2,900' }, { id: 'UT-2409', service: 'Tank cleaning', place: 'Adyar, Chennai', status: 'Delivered', amount: '₹2,100' }] : []
 
-export function WorkspaceContent({ role, item, onNavigate, onNotice }: Props) {
+export const WorkspaceContent = memo(function WorkspaceContent({ role, item, onNavigate, onNotice }: Props) {
   if (item === 'overview') return <>{<Overview role={role} onNavigate={onNavigate} onNotice={onNotice} />}{role === 'customer' && <CustomerHomeHighlights onNavigate={onNavigate} onNotice={onNotice} />}</>
   if (role === 'customer' && item === 'booking') return <BookingScreen />
   if (role === 'customer' && item === 'bookings') return <CustomerBookingsTable onNavigate={onNavigate} />
@@ -41,6 +43,7 @@ export function WorkspaceContent({ role, item, onNavigate, onNotice }: Props) {
   if (role === 'vendor' && (item === 'vehicles' || item === 'drivers')) return <VendorFleetPanel mode={item} onNotice={onNotice} />
   if (role === 'vendor' && item === 'orders') return <><VendorOfflineConflicts /><VendorOrderPanel onNotice={onNotice} /></>
   if (role === 'vendor' && item === 'services') return <VendorServicesPanel onNotice={onNotice} />
+  if (role === 'vendor' && item === 'location') return <VendorLocationPanel onNotice={onNotice} />
   if (role === 'vendor' && item === 'documents') return <VendorDocumentsPanel onNotice={onNotice} />
   if (role === 'vendor' && item === 'earnings') return <VendorPayoutPanel onNotice={onNotice} />
   if (role === 'vendor' && item === 'attendance') return <VendorManagementPanel mode={item} onNotice={onNotice} />
@@ -49,7 +52,7 @@ export function WorkspaceContent({ role, item, onNavigate, onNotice }: Props) {
   if (role === 'customer') return <CustomerView item={item} onNavigate={onNavigate} onNotice={onNotice} />
   if (role === 'vendor') return <VendorView item={item} onNavigate={onNavigate} onNotice={onNotice} />
   return <AdminView item={item} onNavigate={onNavigate} onNotice={onNotice} />
-}
+})
 
 function CustomerHomeHighlights({ onNavigate, onNotice }: { onNavigate: Props['onNavigate']; onNotice: Props['onNotice'] }) { return <section className="customer-home-highlights" aria-label="Account highlights"><CustomerOperationsPanel mode="subscriptions" onNavigate={onNavigate} onNotice={onNotice} /><CustomerUsagePanel /><CustomerOperationsPanel mode="membership" onNavigate={onNavigate} onNotice={onNotice} /><CustomerOperationsPanel mode="offers" onNavigate={onNavigate} onNotice={onNotice} /></section> }
 
@@ -94,7 +97,7 @@ function LiveOverviewLayout({ eyebrow, title, summary, detail, role, onRefresh, 
 }
 function OverviewState({ message }: { message: string }) { return <section className="workspace-view-panel"><p className="eyebrow">WORKSPACE OVERVIEW</p><h2>{message}</h2></section> }
 function OverviewError({ message, onRetry }: { message: string; onRetry: () => void }) { return <section className="workspace-view-panel"><p className="eyebrow">WORKSPACE OVERVIEW</p><h2>{message}</h2><button className="button button-primary" onClick={onRetry}>Retry</button></section> }
-function Workflow({ role }: { role: WorkspaceRole }) { const labels = role === 'admin' ? ['Order received', 'Vendor response', 'Resolve exceptions', 'Reconcile'] : role === 'vendor' ? ['Review request', 'Assign fleet', 'Accept delivery', 'Verify delivery'] : ['Request received', 'Vendor assigned', 'En route', 'Delivered']; return <div className="workflow-mini"><p className="eyebrow">BOOKING LIFECYCLE</p><ol>{labels.map((label, index) => <li className={index < 2 ? 'complete' : ''} key={label}><span>{index < 2 ? <CheckCircle2 size={12} /> : index + 1}</span><b>{label}</b></li>)}</ol></div> }
+function Workflow({ role }: { role: WorkspaceRole }) { const labels = role === 'admin' ? ['Order received', 'Vendor response', 'Resolve exceptions', 'Reconcile'] : role === 'vendor' ? ['Review request', 'Assign fleet', 'Accept delivery', 'Verify delivery'] : ['Request received', 'Vendor assigned', 'En route', 'Delivered']; return <div className="workflow-mini"><p className="eyebrow">BOOKING LIFECYCLE</p><ol>{labels.map((label, index) => <li key={label}><span>{index + 1}</span><b>{label}</b></li>)}</ol></div> }
 function CustomerView({ item, onNavigate, onNotice }: Omit<Props, 'role'>) { if (item === 'bookings') return <TablePanel eyebrow="MY BOOKINGS" title="A clear record of every request." rows={bookingRows} action="Book again" onAction={() => onNavigate('booking')} />; if (item === 'addresses') return <CardPanel eyebrow="SAVED ADDRESSES" title="Places you book from." cards={[['ECR home', 'ECR, Chennai', MapPin], ['Adyar office', 'Adyar, Chennai', MapPin], ['Project site', 'OMR, Chennai', MapPin]]} action="Add address" onAction={() => onNotice('Address form ready for the next module.')} />; if (item === 'profile') return <FormPanel eyebrow="MY PROFILE" title="Your contact details." fields={['Full name', 'Email address', 'Phone number']} action="Save changes" onAction={() => onNotice('Profile changes saved.')} />; if (item === 'subscriptions') return <CardPanel eyebrow="SUBSCRIPTIONS" title="Reliable water, already planned." cards={['Home tanker lite', 'Property care'].map((name) => [name, 'Next delivery · 10–14 days', ClipboardList])} action="Explore plans" onAction={() => onNavigate('booking')} />; if (item === 'usage') return <MetricPanel eyebrow="USAGE & SPENDING" title="See where your services go." metrics={['₹8,450 total spend', '5 deliveries this quarter', '9 KL average capacity']} />; if (item === 'wallet') return <MetricPanel eyebrow="WALLET & BILLS" title="Your balance, ready when you are." metrics={['₹2,450 available balance', '3 paid invoices', '₹100 minimum top-up']} />; return <CardPanel eyebrow="SUPPORT" title="We are here when the details matter." cards={[['Open a request', 'Share a question about a booking', Bell], ['Help centre', 'Find answers to common questions', FileText]]} action="Contact support" onAction={() => onNotice('Support request form ready.')} /> }
 function VendorView({ item, onNotice }: Omit<Props, 'role'>) { if (item === 'orders') return <TablePanel eyebrow="ORDERS" title="Available and active deliveries." rows={vendorRows} action="Accept order" onAction={() => onNotice('Order acceptance flow opened.')} />; if (item === 'services') return <CardPanel eyebrow="MY SERVICES" title="What customers can request from you." cards={['Water tanker supply', 'Sewage collection', 'Tank cleaning'].map((name) => [name, 'Active service · Edit pricing', Settings2])} action="Add service" onAction={() => onNotice('Service form ready.')} />; if (item === 'vehicles') return <CardPanel eyebrow="MY VEHICLES" title="Fleet availability and compliance." cards={[['TN 38 AB 4120', '12 KL tanker · Active', Truck], ['TN 09 CD 1811', '9 KL tanker · Maintenance due', Truck]]} action="Register vehicle" onAction={() => onNotice('Vehicle registration form ready.')} />; if (item === 'drivers') return <CardPanel eyebrow="DRIVERS" title="People assigned to your fleet." cards={[['Arun Kumar', 'Active · TN 38 AB 4120', UserRound], ['Sanjay R', 'Pending documents', UserRound]]} action="Add driver" onAction={() => onNotice('Driver form ready.')} />; if (item === 'earnings') return <MetricPanel eyebrow="EARNINGS" title="Keep your delivery business moving." metrics={['₹84,600 this month', '₹12,400 pending payout', '92% acceptance rate']} />; return <CardPanel eyebrow={item.toUpperCase()} title="Keep your operations clear and responsive." cards={[[item === 'complaints' ? '2 open complaints' : '3 new updates', item === 'complaints' ? 'Review customer issues' : 'All delivery alerts', Bell]]} action="Open queue" onAction={() => onNotice('Queue opened.')} /> }
 function AdminView({ item, onNotice }: Omit<Props, 'role'>) { if (item === 'bookings') return <TablePanel eyebrow="BOOKINGS" title="Platform-wide order management." rows={adminRows} action="Open details" onAction={() => onNotice('Order detail opened.')} />; if (item === 'live') return <MetricPanel eyebrow="LIVE OPERATIONS" title="Watch the active network." metrics={['26 live deliveries', '4 orders need attention', '18 vendors online']} />; if (item === 'reports') return <CardPanel eyebrow="REPORTS" title="Operational intelligence for the team." cards={['Orders by service', 'Vendor performance', 'Revenue reconciliation'].map((name) => [name, 'Updated today · Export CSV', FileText])} action="Generate report" onAction={() => onNotice('Report generation started.')} />; if (['vendors', 'fleet', 'drivers', 'customers'].includes(item)) return <CardPanel eyebrow={item.toUpperCase()} title="Review and manage platform records." cards={['Active records', 'Pending approval', 'Needs attention'].map((name) => [name, 'View queue and take action', Users])} action="Open management queue" onAction={() => onNotice('Management queue opened.')} />; if (item === 'services') return <FormPanel eyebrow="SERVICES & PRICING" title="Control the service catalogue." fields={['Service name', 'Base price', 'Capacity range']} action="Save pricing" onAction={() => onNotice('Pricing changes saved.')} />; if (item === 'finance') return <MetricPanel eyebrow="FINANCE & PAYMENTS" title="Keep collection and payouts reconciled." metrics={['₹4.82L gross collection', '98.6% reconciled', '₹18,400 pending payout']} />; return <CardPanel eyebrow="ALERTS" title="Resolve exceptions before they grow." cards={['4 orders need attention', '2 vendor applications', '3 customer enquiries'].map((name) => [name, 'Review and assign an owner', Bell])} action="Review alerts" onAction={() => onNotice('Alerts queue opened.')} /> }

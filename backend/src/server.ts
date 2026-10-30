@@ -64,39 +64,68 @@ app.get('/health/ready', async (_request, response) => {
   response.status(databaseReady ? 200 : 503).json({ ok: databaseReady, service: 'urban-tanker-api', database: databaseReady ? 'ready' : 'unavailable' })
 })
 app.use('/api/auth', authRoutes); app.use('/api/devices', deviceRoutes); app.use('/api/public', publicTrackingRoutes); app.use('/api/customer', customerRoutes); app.use('/api/customer', customerExtendedRoutes); app.use('/api/vendor', vendorRoutes); app.use('/api/vendor', vendorExtendedRoutes); app.use('/api/admin', adminRoutes); app.use('/api/admin', adminExtendedRoutes); app.use('/api/payment', paymentRoutes); app.use('/api/uploads', uploadRoutes); app.use('/api/support', supportRoutes); app.use('/api/analytics', analyticsRoutes); app.use('/api/partner', partnerRoutes); app.use(errorHandler)
-app.use(express.static(frontendDist, { index: 'index.html', maxAge: '1y', immutable: true, setHeaders: (response, filePath) => { if (filePath.endsWith('index.html')) response.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate') } }))
+app.use(express.static(frontendDist, { index: 'index.html', setHeaders: (response, filePath) => {
+  if (filePath.endsWith('index.html')) {
+    response.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
+  } else if (filePath.includes('/assets/')) {
+    response.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+  } else {
+    response.setHeader('Cache-Control', 'public, max-age=86400')
+  }
+} }))
 app.use((request, response, next) => { if (request.method !== 'GET' || request.path.startsWith('/api') || request.path.startsWith('/health') || request.path.startsWith('/socket.io')) return next(); response.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate'); response.sendFile(resolve(frontendDist, 'index.html')) })
 const io = new Server(httpServer, { cors: corsOptions })
 io.use(async (socket, next) => {
-  const token = socket.handshake.auth?.token
-  if (typeof token !== 'string' || !token) return next(new Error('Authentication required'))
-  const { data, error } = await supabase.auth.getUser(token)
-  if (error || !data.user) return next(new Error('Invalid session'))
-  socket.data.userId = data.user.id
-  next()
+  try {
+    const token = socket.handshake.auth?.token
+    if (typeof token !== 'string' || !token) return next(new Error('Authentication required'))
+    const { data, error } = await supabase.auth.getUser(token)
+    if (error || !data.user) return next(new Error('Invalid session'))
+    socket.data.userId = data.user.id
+    next()
+  } catch {
+    next(new Error('Realtime authentication failed'))
+  }
 })
 io.on('connection', async (socket) => {
   let joinWindowStartedAt = Date.now()
   let joinCount = 0
   const joinedBookingRooms = new Set<string>()
   socket.join(`customer:${socket.data.userId}`)
-  const { data: profile } = await supabase.from('profiles').select('role').eq('id', socket.data.userId).maybeSingle()
+  const [{ data: profile, error: profileError }, { data: vendor, error: vendorError }] = await Promise.all([
+    supabase.from('profiles').select('role').eq('id', socket.data.userId).maybeSingle(),
+    supabase.from('vendors').select('id').eq('owner_profile_id', socket.data.userId).maybeSingle(),
+  ])
+  if (profileError || vendorError) {
+    console.error(JSON.stringify({ event: 'realtime.user_context_failed', userId: socket.data.userId, profileError: profileError?.message, vendorError: vendorError?.message }))
+    socket.disconnect(true)
+    return
+  }
   if (profile?.role === 'admin') socket.join('admins')
-  const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', socket.data.userId).maybeSingle()
   if (vendor) socket.join(`vendor:${vendor.id}`)
   socket.emit('connected', { service: 'urban-tanker-realtime', vendorId: vendor?.id ?? null, role: profile?.role ?? null })
   socket.on('vendor:join', (vendorId: unknown) => { if (vendor?.id === vendorId) socket.join(`vendor:${vendorId}`) })
+  socket.on('booking:leave', (bookingId: unknown) => {
+    if (typeof bookingId !== 'string' || !joinedBookingRooms.has(bookingId)) return
+    joinedBookingRooms.delete(bookingId)
+    void socket.leave(`booking:${bookingId}`)
+  })
   socket.on('booking:join', async (bookingId: unknown) => {
     if (typeof bookingId !== 'string' || !/^[0-9a-f-]{36}$/i.test(bookingId)) return
     if (Date.now() - joinWindowStartedAt >= 60_000) { joinWindowStartedAt = Date.now(); joinCount = 0 }
     if (joinCount >= 30 || (joinedBookingRooms.size >= 20 && !joinedBookingRooms.has(bookingId))) return
     joinCount += 1
-    const { data: booking } = await supabase.from('bookings').select('customer_id,vendor_id').eq('id', bookingId).maybeSingle()
-    if (!booking) return
-    const isCustomer = booking.customer_id === socket.data.userId
-    const isAdmin = profile?.role === 'admin'
-    const isVendor = Boolean(vendor?.id && booking.vendor_id === vendor.id)
-    if (isCustomer || isAdmin || isVendor) { joinedBookingRooms.add(bookingId); socket.join(`booking:${bookingId}`) }
+    try {
+      const { data: booking, error } = await supabase.from('bookings').select('customer_id,vendor_id').eq('id', bookingId).maybeSingle()
+      if (error) throw error
+      if (!booking) return
+      const isCustomer = booking.customer_id === socket.data.userId
+      const isAdmin = profile?.role === 'admin'
+      const isVendor = Boolean(vendor?.id && booking.vendor_id === vendor.id)
+      if (isCustomer || isAdmin || isVendor) { joinedBookingRooms.add(bookingId); socket.join(`booking:${bookingId}`) }
+    } catch (error) {
+      console.warn(JSON.stringify({ event: 'realtime.booking_room_join_failed', userId: socket.data.userId, error: error instanceof Error ? error.message : String(error) }))
+    }
   })
 })
 setRealtimeServer(io)

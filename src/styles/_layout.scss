@@ -1,0 +1,49 @@
+/* Shared shell geometry and element-level alignment rules. */
+.hero-copy,
+.reference-showcase,
+.content-screen,
+.public-reference-screen,
+.partner-hero,
+.partner-application-shell,
+.booking-page-header,
+.booking-page-footer,
+.site-footer,
+.booking-screen .booking-hero,
+.booking-screen .booking-new-shell,
+.workspace-screen {
+  width: 100%;
+  max-width: var(--app-content-max);
+  box-sizing: border-box;
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.hero-copy,
+.reference-showcase,
+.content-screen,
+.public-reference-screen,
+.partner-hero,
+.partner-application-shell,
+.booking-page-header,
+.booking-page-footer,
+.booking-screen .booking-hero,
+.booking-screen .booking-new-shell {
+  padding-right: var(--app-screen-gutter);
+  padding-left: var(--app-screen-gutter);
+}
+
+.site-header,
+.site-footer,
+.benefit-strip,
+.feature-strip { padding-right: var(--app-screen-gutter); padding-left: var(--app-screen-gutter); }
+
+.workspace-screen { padding-right: var(--app-screen-gutter); padding-left: var(--app-screen-gutter); }
+.workspace-topbar-new { width: auto; max-width: none; margin: 0; padding-right: var(--app-screen-gutter); padding-left: var(--app-screen-gutter); }
+.workspace-content-new { width: 100%; max-width: none; margin-right: auto; margin-left: auto; padding-right: var(--app-screen-gutter); padding-left: var(--app-screen-gutter); }
+.booking-page-header { width: 100%; max-width: none; margin-right: 0; margin-left: 0; }
+
+/* Preserve component-defined icon sizing and center icons alongside button labels. */
+svg { flex-shrink: 0; }
+button > svg,
+a > svg { display: block; flex: 0 0 auto; align-self: center; }
+img { display: block; max-width: 100%; }

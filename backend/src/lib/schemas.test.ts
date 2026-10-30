@@ -21,6 +21,27 @@ describe('request schemas', () => {
       deliveryDate: '2026-10-20',
     }).success).toBe(true)
   })
+  it('accepts repeated service items with one shared time slot', () => {
+    expect(bookingSchema.safeParse({
+      services: [
+        { serviceId: 'water_tanker', capacity: '6 KL', waterType: 'Domestic water', tankerCount: '1', deliveryDate: '2026-10-30', preferredTime: '07:00', location: 'ECR, Chennai' },
+        { serviceId: 'water_tanker', capacity: '12 KL', waterType: 'Raw water', tankerCount: '2', deliveryDate: '2026-10-30', preferredTime: '07:00', location: 'OMR, Chennai' },
+      ],
+      location: 'ECR, Chennai',
+      deliveryDate: '2026-10-30',
+      preferredTime: '07:00',
+      phone: '9876543210',
+    }).success).toBe(true)
+    expect(bookingSchema.safeParse({ serviceId: 'water_tanker', location: 'ECR, Chennai', deliveryDate: '2026-10-30', preferredTime: '11:00' }).success).toBe(false)
+  })
+  it('limits tanker count to five per service item', () => {
+    const booking = (tankerCount: string) => bookingSchema.safeParse({
+      services: [{ serviceId: 'water_tanker', tankerCount, deliveryDate: '2026-10-30' }],
+      location: 'ECR, Chennai',
+    }).success
+    expect(booking('5')).toBe(true)
+    expect(booking('6')).toBe(false)
+  })
   it('accepts a separate delivery date for every service without a shared date', () => {
     expect(bookingSchema.safeParse({
       services: [

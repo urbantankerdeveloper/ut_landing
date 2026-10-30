@@ -1,8 +1,10 @@
 import { apiFetch } from './client'
 
-export type VendorOrderStatus = 'Available' | 'Assigned' | 'Accepted' | 'En route' | 'Arrived' | 'Delivered' | 'Rejected'
-export type VendorOrder = { id: string; reference?: string; service: string; serviceDetails?: { service: string; capacity?: string; waterType?: string; tankerCount?: string; details?: string; deliveryDate?: string; location?: string }[]; location: string; latitude?: number | null; longitude?: number | null; distance?: number; amount: string; status: VendorOrderStatus; vehicle?: string; driver?: string; scheduledFor?: string; createdAt?: string }
+export type VendorOrderStatus = 'Available' | 'Assigned' | 'Accepted' | 'En route' | 'Arrived' | 'Delivered' | 'Rejected' | 'Unavailable'
+export type VendorOrder = { id: string; reference?: string; service: string; serviceDetails?: { service: string; capacity?: string; waterType?: string; tankerCount?: string; details?: string; deliveryDate?: string; location?: string }[]; location: string; latitude?: number | null; longitude?: number | null; distance?: number | null; statusMessage?: string; amount: string; status: VendorOrderStatus; vehicle?: string; driver?: string; scheduledFor?: string; createdAt?: string }
 export type VendorDashboard = { orders: VendorOrder[]; vehicles: VendorVehicle[]; drivers: VendorDriver[] }
+export type VendorProfileLocation = { id: string; business_name: string; service_zone: string; latitude: number | null; longitude: number | null }
+export type VendorOrderPage = { rows: VendorOrder[]; nextOffset: number | null }
 export type VendorVehicle = { id: string; registration_number: string; capacity_litres?: number; is_active: boolean; verification: string }
 export type VendorDriver = { id: string; name: string; mobile_e164: string; licence_number?: string; is_active: boolean; verification: string }
 export type VendorComplaint = { id: string; subject: string; booking_id?: string; status: string; message: string; created_at: string }
@@ -12,8 +14,14 @@ export type VendorOrderMutation = { orderId: string; action: 'accept' | 'reject'
 export type VendorOfflineMutation = { id: string; endpoint?: string; conflict_status: 'queued' | 'processing' | 'conflict' | 'applied' | 'discarded'; client_version: number; last_error?: string; created_at: string }
 
 export const vendorApi = {
+  profile: () => apiFetch<VendorProfileLocation>('/vendor/profile'),
+  updateProfileLocation: (payload: { latitude: number; longitude: number }) => apiFetch<VendorProfileLocation>('/vendor/profile/location', { method: 'PATCH', body: JSON.stringify(payload) }),
   dashboard: () => apiFetch<VendorDashboard>('/vendor/dashboard'),
-  orders: () => apiFetch<VendorOrder[]>('/vendor/orders'),
+  orders: async (offset = 0) => {
+    const path = offset === 0 ? '/vendor/orders' : `/vendor/orders?offset=${offset}&pageSize=100`
+    const response = await apiFetch<VendorOrderPage | VendorOrder[]>(path)
+    return Array.isArray(response) ? { rows: response, nextOffset: null } : response
+  },
   mutateOrder: (payload: VendorOrderMutation) => apiFetch<VendorOrder>(`/vendor/orders/${payload.orderId}/transition`, { method: 'PATCH', body: JSON.stringify(payload) }),
   vehicles: () => apiFetch<VendorVehicle[]>('/vendor/vehicles'),
   drivers: () => apiFetch<VendorDriver[]>('/vendor/drivers'),

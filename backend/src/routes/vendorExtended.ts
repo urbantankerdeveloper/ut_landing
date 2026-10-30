@@ -1,28 +1,130 @@
-import { Router } from 'express'
+import { Router, type Request, type Response } from 'express'
 import crypto from 'node:crypto'
 import { z } from 'zod'
 import { requireAuth, requireRole } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
-import { emitRealtime, emitRealtimeToBooking, emitRealtimeToUser } from '../services/realtime.js'
+import { emitRealtime, emitRealtimeToBooking, emitRealtimeToUser, emitRealtimeToVendor } from '../services/realtime.js'
 import { notifyCustomer } from '../services/customerNotifications.js'
 import { notifyCustomerOfAssignment } from '../services/bookingNotifications.js'
 import { transitionBooking, type BookingStatus } from '../services/bookingLifecycle.js'
 import { analyticsEventNames, recordAnalyticsEvent } from '../lib/analytics.js'
 const router = Router(); router.use(requireAuth, requireRole('vendor'))
 async function vendorId(userId: string) { const { data } = await supabase.from('vendors').select('id').eq('owner_profile_id', userId).single(); return data?.id }
+router.get('/profile', async (request, response) => {
+  const { data, error } = await supabase.from('vendors').select('id,business_name,service_zone,latitude,longitude').eq('owner_profile_id', request.authUser!.id).maybeSingle()
+  if (error) return response.status(500).json({ error: error.message })
+  if (!data) return response.status(404).json({ error: 'Vendor profile not found' })
+  response.json(data)
+})
+router.patch('/profile/location', async (request, response) => {
+  const parsed = z.object({ latitude: z.number().finite().min(-90).max(90), longitude: z.number().finite().min(-180).max(180) }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Provide a valid latitude and longitude.' })
+  const { data, error } = await supabase.from('vendors').update({ latitude: parsed.data.latitude, longitude: parsed.data.longitude }).eq('owner_profile_id', request.authUser!.id).select('id,business_name,service_zone,latitude,longitude').maybeSingle()
+  if (error) return response.status(400).json({ error: error.message })
+  if (!data) return response.status(404).json({ error: 'Vendor profile not found' })
+  response.json(data)
+})
 const statusMap: Record<string, string> = { Accepted: 'accepted', accepted: 'accepted', 'En route': 'en_route', en_route: 'en_route', Arrived: 'arrived', arrived: 'arrived', Delivered: 'delivered', delivered: 'delivered', Rejected: 'cancelled', rejected: 'cancelled', cancelled: 'cancelled' }
 const vendorOrderMutationSchema = z.object({ action: z.enum(['accept','reject','status','assign']), status: z.string().optional(), reason: z.string().trim().min(2).max(500).optional(), vehicleId: z.string().uuid().optional(), driverId: z.string().uuid().optional() }).superRefine((value, context) => {
   const requestedStatus = value.action === 'reject' ? 'cancelled' : value.action === 'status' && value.status ? statusMap[value.status] : undefined
   if (requestedStatus === 'cancelled' && !value.reason) context.addIssue({ code: 'custom', path: ['reason'], message: 'Cancellation reason is required' })
 })
-async function ensureAssignmentForAcceptance(bookingId: string, vendor: string) { const { data, error } = await supabase.from('bookings').select('vehicle_id,driver_id').eq('id', bookingId).eq('vendor_id', vendor).maybeSingle(); if (error) return { assigned: false, error: error.message }; return { assigned: Boolean(data?.vehicle_id && data.driver_id) } }
+async function ensureAssignmentForAcceptance(bookingId: string, vendor: string, vehicleId?: string, driverId?: string) {
+  const { data, error } = await supabase.from('bookings').select('vendor_id,vehicle_id,driver_id').eq('id', bookingId).maybeSingle()
+  if (error) return { assigned: false, conflict: false, error: error.message, vehicleId, driverId }
+  if (!data || (data.vendor_id && data.vendor_id !== vendor)) return { assigned: false, conflict: true, vehicleId, driverId }
+  const selectedVehicleId = vehicleId ?? data.vehicle_id ?? undefined
+  const selectedDriverId = driverId ?? data.driver_id ?? undefined
+  return { assigned: Boolean(selectedVehicleId && selectedDriverId), conflict: false, vehicleId: selectedVehicleId, driverId: selectedDriverId }
+}
+async function vendorOffer(ownerProfileId: string, bookingId: string) {
+  const { data, error } = await supabase.from('notifications').select('id,event_type,payload').eq('recipient_id', ownerProfileId).in('event_type', ['vendor_order_created', 'vendor_order_taken']).order('created_at', { ascending: false }).limit(200)
+  if (error) return { offer: null, error: error.message }
+  const offer = (data ?? []).find((item) => (item.payload as { bookingId?: string } | null)?.bookingId === bookingId)
+  return { offer: offer ?? null, error: null }
+}
+async function markOtherVendorOffersTaken(bookingId: string, winnerVendorId: string, reference: string) {
+  const { data: winner } = await supabase.from('vendors').select('owner_profile_id').eq('id', winnerVendorId).maybeSingle()
+  const { data: offers, error } = await supabase.from('notifications').select('id,recipient_id,payload').eq('event_type', 'vendor_order_created').limit(500)
+  if (error) { console.warn(JSON.stringify({ event: 'vendor_order.offers_lookup_failed', bookingId, error: error.message })); return }
+  const matching = (offers ?? []).filter((offer) => (offer.payload as { bookingId?: string } | null)?.bookingId === bookingId)
+  const losers = matching.filter((offer) => offer.recipient_id && offer.recipient_id !== winner?.owner_profile_id)
+  for (const offer of losers) {
+    const payload = { ...((offer.payload ?? {}) as Record<string, unknown>), outcome: 'accepted_elsewhere', winningVendorId: winnerVendorId }
+    const { error: updateError } = await supabase.from('notifications').update({ event_type: 'vendor_order_taken', title: 'Order already accepted by another vendor', payload }).eq('id', offer.id)
+    if (updateError) { console.warn(JSON.stringify({ event: 'vendor_order.offer_update_failed', bookingId, error: updateError.message })); continue }
+    const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', offer.recipient_id).maybeSingle()
+    if (vendor) emitRealtimeToVendor(vendor.id, 'vendor.order.taken', { bookingId, reference, status: 'unavailable', message: 'Already accepted by another vendor.' })
+  }
+}
+async function handleVendorOrderTransition(request: Request, response: Response) {
+  const vendor = await vendorId(request.authUser!.id)
+  if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' })
+  const parsed = vendorOrderMutationSchema.safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid order mutation' })
+  const { data: current, error: currentError } = await supabase.from('bookings').select('id,reference,status,vendor_id,vehicle_id,driver_id,customer_id').eq('id', request.params.id).maybeSingle()
+  if (currentError) return response.status(500).json({ error: currentError.message })
+  if (!current) return response.status(404).json({ error: 'Booking not found' })
+  if (parsed.data.action === 'reject' && current.status === 'pending_vendor' && !current.vendor_id) {
+    const { data: vendorProfile } = await supabase.from('vendors').select('owner_profile_id').eq('id', vendor).maybeSingle()
+    if (!vendorProfile?.owner_profile_id) return response.status(404).json({ error: 'Vendor profile not found' })
+    const { offer, error: offerError } = await vendorOffer(vendorProfile.owner_profile_id, current.id)
+    if (offerError) return response.status(500).json({ error: offerError })
+    if (!offer || offer.event_type !== 'vendor_order_created') return response.status(404).json({ error: 'Order offer not found' })
+    const payload = { ...((offer.payload ?? {}) as Record<string, unknown>), outcome: 'declined', declineReason: parsed.data.reason }
+    const { error } = await supabase.from('notifications').update({ event_type: 'vendor_order_declined', title: 'You declined this delivery request', payload }).eq('id', offer.id)
+    if (error) return response.status(500).json({ error: error.message })
+    emitRealtimeToVendor(vendor, 'vendor.order.declined', { bookingId: current.id, reference: current.reference })
+    return response.json({ id: current.id, status: 'Rejected' })
+  }
+  const requestedStatus = parsed.data.action === 'accept' ? 'accepted' : parsed.data.action === 'reject' ? 'cancelled' : parsed.data.status ? statusMap[parsed.data.status] : parsed.data.action === 'assign' ? 'vendor_assigned' : undefined
+  if (!requestedStatus) return response.status(400).json({ error: 'Invalid order transition' })
+  if (parsed.data.action === 'assign' && current.status === 'pending_vendor' && !current.vendor_id) return response.status(409).json({ error: 'Choose a vehicle and driver when accepting the shared order.' })
+  let vehicleId = parsed.data.vehicleId ?? undefined
+  let driverId = parsed.data.driverId ?? undefined
+  if (parsed.data.action === 'accept') {
+    const { data: vendorProfile } = await supabase.from('vendors').select('owner_profile_id').eq('id', vendor).maybeSingle()
+    if (!vendorProfile?.owner_profile_id) return response.status(404).json({ error: 'Vendor profile not found' })
+    if (!current.vendor_id) {
+      const { offer, error: offerError } = await vendorOffer(vendorProfile.owner_profile_id, current.id)
+      if (offerError) return response.status(500).json({ error: offerError })
+      if (!offer || offer.event_type !== 'vendor_order_created') return response.status(404).json({ error: 'Order offer not found' })
+    }
+    const assignment = await ensureAssignmentForAcceptance(current.id, vendor, vehicleId, driverId)
+    if (assignment.error) return response.status(500).json({ error: 'Booking assignment could not be verified' })
+    if (assignment.conflict) {
+      if (current.vendor_id && current.vendor_id !== vendor) return response.status(409).json({ error: 'Order already accepted by another vendor.' })
+      return response.status(404).json({ error: 'Booking not found' })
+    }
+    if (!assignment.assigned) return response.status(409).json({ error: 'Select an approved fleet vehicle and driver before accepting the booking' })
+    vehicleId = assignment.vehicleId
+    driverId = assignment.driverId
+  }
+  const { data, error } = await transitionBooking({ bookingId: current.id, actorId: request.authUser!.id, status: requestedStatus as BookingStatus, cancellationReason: parsed.data.reason, vendorId: vendor, vehicleId, driverId })
+  if (error || !data) {
+    const message = error?.message ?? 'Booking transition failed'
+    if (parsed.data.action === 'accept' && /BOOKING_VENDOR_MISMATCH|INVALID_BOOKING_TRANSITION/.test(message)) return response.status(409).json({ error: 'Order already accepted by another vendor.' })
+    return response.status(message.includes('NOT_FOUND') ? 404 : 409).json({ error: message })
+  }
+  const customerId = (data as { customer_id?: string }).customer_id
+  if (requestedStatus === 'accepted') {
+    void recordAnalyticsEvent(analyticsEventNames.vendorAccepted, { bookingId: current.id })
+    await markOtherVendorOffersTaken(current.id, vendor, current.reference)
+    await shareAssignment(data as Record<string, unknown>)
+  }
+  if (requestedStatus === 'cancelled') { const { data: vendorRecord } = await supabase.from('vendors').select('business_name').eq('id', vendor).maybeSingle(); void recordAnalyticsEvent(analyticsEventNames.rejected, { bookingId: current.id, vendorId: vendor, vendorName: vendorRecord?.business_name ?? 'Unknown vendor', reason: parsed.data.reason ?? 'Vendor rejected booking' }) }
+  if (requestedStatus === 'delivered') void recordAnalyticsEvent(analyticsEventNames.delivered, { bookingId: current.id })
+  emitRealtime('booking.updated', { bookingId: current.id, status: requestedStatus })
+  if (customerId) emitRealtimeToUser(customerId, 'notification.created', { bookingId: current.id, status: requestedStatus })
+  return response.json(data)
+}
 async function shareAssignment(data: Record<string, unknown>) { try { await notifyCustomerOfAssignment(data as Parameters<typeof notifyCustomerOfAssignment>[0]) } catch (error) { console.warn(JSON.stringify({ event: 'booking.assignment_notification_failed', bookingId: data.id, error: error instanceof Error ? error.message : 'Unknown error' })) } }
 router.post('/offline-mutations', async (request, response) => { const parsed = z.object({ mutationType: z.string().min(2), entityType: z.string().min(2), entityId: z.string().uuid().optional(), payload: z.record(z.string(), z.unknown()).default({}), clientVersion: z.number().int().positive().default(1) }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid offline mutation' }); const { data, error } = await supabase.from('offline_mutations').insert({ actor_id: request.authUser!.id, mutation_type: parsed.data.mutationType, entity_type: parsed.data.entityType, entity_id: parsed.data.entityId, payload: parsed.data.payload, client_version: parsed.data.clientVersion }).select().single(); if (error) return response.status(400).json({ error: error.message }); response.status(201).json(data) })
 router.get('/offline-mutations', async (request, response) => { const { data, error } = await supabase.from('offline_mutations').select('*').eq('actor_id', request.authUser!.id).order('created_at', { ascending: false }).limit(100); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
 router.post('/offline-mutations/:id/retry', async (request, response) => { const { data, error } = await supabase.from('offline_mutations').update({ conflict_status: 'queued', last_error: null, updated_at: new Date().toISOString() }).eq('id', request.params.id).eq('actor_id', request.authUser!.id).select().single(); if (error) return response.status(400).json({ error: error.message }); response.json(data) })
 router.delete('/offline-mutations/:id', async (request, response) => { const { error } = await supabase.from('offline_mutations').update({ conflict_status: 'discarded', updated_at: new Date().toISOString() }).eq('id', request.params.id).eq('actor_id', request.authUser!.id); if (error) return response.status(400).json({ error: error.message }); response.status(204).send() })
-router.patch('/orders/:id/transition', async (request, response) => { const vendor = await vendorId(request.authUser!.id); if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' }); const parsed = vendorOrderMutationSchema.safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid order mutation' }); const requestedStatus = parsed.data.action === 'accept' ? 'accepted' : parsed.data.action === 'reject' ? 'cancelled' : parsed.data.status ? statusMap[parsed.data.status] : parsed.data.action === 'assign' ? 'vendor_assigned' : undefined; if (!requestedStatus) return response.status(400).json({ error: 'Invalid order transition' }); if (parsed.data.action === 'accept') { const assignment = await ensureAssignmentForAcceptance(request.params.id, vendor); if (assignment.error) return response.status(500).json({ error: 'Booking assignment could not be verified' }); if (!assignment.assigned) return response.status(409).json({ error: 'Assign an approved fleet vehicle and driver before accepting the booking' }) } const { data, error } = await transitionBooking({ bookingId: request.params.id, actorId: request.authUser!.id, status: requestedStatus as BookingStatus, cancellationReason: parsed.data.reason, vendorId: vendor, vehicleId: parsed.data.vehicleId, driverId: parsed.data.driverId }); if (error || !data) return response.status(409).json({ error: error?.message ?? 'Booking transition failed' }); const customerId = (data as { customer_id?: string }).customer_id; if (requestedStatus === 'accepted') { void recordAnalyticsEvent(analyticsEventNames.vendorAccepted, { bookingId: request.params.id }); await shareAssignment(data as Record<string, unknown>) } if (requestedStatus === 'cancelled') { const { data: vendorRecord } = await supabase.from('vendors').select('business_name').eq('id', vendor).maybeSingle(); void recordAnalyticsEvent(analyticsEventNames.rejected, { bookingId: request.params.id, vendorId: vendor, vendorName: vendorRecord?.business_name ?? 'Unknown vendor', reason: parsed.data.reason ?? 'Vendor rejected booking' }) } if (requestedStatus === 'delivered') void recordAnalyticsEvent(analyticsEventNames.delivered, { bookingId: request.params.id }); emitRealtime('booking.updated', { bookingId: request.params.id }); if (customerId) emitRealtimeToUser(customerId, 'notification.created', { bookingId: request.params.id, status: requestedStatus }); response.json(data) })
-router.patch('/orders/:id', async (request, response) => { const vendor = await vendorId(request.authUser!.id); if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' }); const parsed = vendorOrderMutationSchema.safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid order mutation' }); const requestedStatus = parsed.data.action === 'accept' ? 'accepted' : parsed.data.action === 'reject' ? 'cancelled' : parsed.data.status ? statusMap[parsed.data.status] : parsed.data.action === 'assign' ? 'vendor_assigned' : undefined; if (!requestedStatus) return response.status(400).json({ error: 'Invalid order transition' }); if (parsed.data.action === 'accept') { const assignment = await ensureAssignmentForAcceptance(request.params.id, vendor); if (assignment.error) return response.status(500).json({ error: 'Booking assignment could not be verified' }); if (!assignment.assigned) return response.status(409).json({ error: 'Assign an approved fleet vehicle and driver before accepting the booking' }) } const { data, error } = await transitionBooking({ bookingId: request.params.id, actorId: request.authUser!.id, status: requestedStatus as BookingStatus, cancellationReason: parsed.data.reason, vendorId: vendor, vehicleId: parsed.data.vehicleId, driverId: parsed.data.driverId }); if (error || !data) { const message = error?.message ?? 'Booking transition failed'; const status = message.includes('NOT_FOUND') ? 404 : 409; return response.status(status).json({ error: message }); } const customerId = (data as { customer_id?: string }).customer_id; if (requestedStatus === 'accepted') await shareAssignment(data as Record<string, unknown>); if (requestedStatus === 'cancelled') { const { data: vendorRecord } = await supabase.from('vendors').select('business_name').eq('id', vendor).maybeSingle(); void recordAnalyticsEvent(analyticsEventNames.rejected, { bookingId: request.params.id, vendorId: vendor, vendorName: vendorRecord?.business_name ?? 'Unknown vendor', reason: parsed.data.reason ?? 'Vendor rejected booking' }) } emitRealtime('booking.updated', { bookingId: request.params.id }); if (customerId) emitRealtimeToUser(customerId, 'notification.created', { bookingId: request.params.id, status: requestedStatus }); response.json(data) })
+router.patch('/orders/:id/transition', handleVendorOrderTransition)
+router.patch('/orders/:id', handleVendorOrderTransition)
 router.post('/location', async (request, response) => { const vendor = await vendorId(request.authUser!.id); const parsed = z.object({ bookingId: z.string().uuid(), latitude: z.number().finite().min(-90).max(90), longitude: z.number().finite().min(-180).max(180), accuracy: z.number().finite().nonnegative().optional() }).safeParse(request.body); if (!vendor || !parsed.success) return response.status(400).json({ error: 'Invalid location' }); const { data: booking, error: bookingError } = await supabase.from('bookings').select('id,customer_id,status').eq('id', parsed.data.bookingId).eq('vendor_id', vendor).single(); if (bookingError || !booking) return response.status(404).json({ error: 'Vendor booking not found' }); if (!['en_route', 'arrived'].includes(booking.status)) return response.status(409).json({ error: 'Location updates are only allowed while a booking is en route or arrived' }); const { data, error } = await supabase.from('vendor_location_updates').insert({ booking_id: parsed.data.bookingId, vendor_id: vendor, latitude: parsed.data.latitude, longitude: parsed.data.longitude, accuracy_metres: parsed.data.accuracy }).select().single(); if (error) return response.status(400).json({ error: error.message }); const locationPayload = { bookingId: parsed.data.bookingId, latitude: parsed.data.latitude, longitude: parsed.data.longitude, accuracy: parsed.data.accuracy, recorded_at: data.recorded_at }; emitRealtimeToBooking(parsed.data.bookingId, 'booking.location.updated', locationPayload); if (booking?.customer_id) { try { await notifyCustomer({ customerId: booking.customer_id, eventType: 'booking_location_updated', title: 'Your delivery location updated', detail: 'Your driver location has been refreshed.', bookingId: parsed.data.bookingId, payload: locationPayload }) } catch { console.warn(JSON.stringify({ event: 'booking.location_notification_failed', bookingId: parsed.data.bookingId })) } } response.status(201).json(data) })
 router.patch('/vehicles/:id', async (request, response) => { const vendor = await vendorId(request.authUser!.id); const parsed = z.object({ registrationNumber: z.string().min(3).optional(), capacityLitres: z.number().int().positive().optional(), isActive: z.boolean().optional() }).safeParse(request.body); if (!vendor || !parsed.success) return response.status(400).json({ error: 'Invalid vehicle update' }); const { data, error } = await supabase.from('vehicles').update(Object.fromEntries(Object.entries({ registration_number: parsed.data.registrationNumber, capacity_litres: parsed.data.capacityLitres, is_active: parsed.data.isActive }).filter(([, value]) => value !== undefined))).eq('id', request.params.id).eq('vendor_id', vendor).select().single(); if (error) return response.status(400).json({ error: error.message }); response.json(data) })
 router.post('/vehicles', async (request, response) => { const vendor = await vendorId(request.authUser!.id); const parsed = z.object({ registrationNumber: z.string().min(3).max(40), capacityLitres: z.number().int().positive(), isActive: z.boolean().default(true) }).safeParse(request.body); if (!vendor || !parsed.success) return response.status(400).json({ error: 'Invalid vehicle' }); const { data, error } = await supabase.from('vehicles').insert({ vendor_id: vendor, registration_number: parsed.data.registrationNumber, capacity_litres: parsed.data.capacityLitres, is_active: parsed.data.isActive }).select().single(); if (error) return response.status(400).json({ error: error.message }); response.status(201).json(data) })

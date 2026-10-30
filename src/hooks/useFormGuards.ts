@@ -10,19 +10,28 @@ function fieldLabel(input: HTMLInputElement) {
   return input.closest('label')?.textContent?.toLowerCase() ?? ''
 }
 
+function queryAll<T extends Element>(root: ParentNode, selector: string): T[] {
+  const matches = Array.from(root.querySelectorAll<T>(selector))
+  if (root instanceof Element && root.matches(selector)) matches.unshift(root as unknown as T)
+  return matches
+}
+
 function configure(root: ParentNode = document) {
   const currentDate = today()
-  root.querySelectorAll<HTMLInputElement>('input[type="date"]').forEach((input) => {
+  queryAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(root, 'input, textarea, select').forEach((field) => {
+    field.autocomplete = 'off'
+  })
+  queryAll<HTMLInputElement>(root, 'input[type="date"]').forEach((input) => {
     input.min = currentDate
     input.setCustomValidity(input.value && input.value < currentDate ? 'Choose today or a future date.' : '')
   })
-  root.querySelectorAll<HTMLInputElement>('input[name="registration"]').forEach((input) => {
+  queryAll<HTMLInputElement>(root, 'input[name="registration"]').forEach((input) => {
     input.inputMode = 'text'
     input.pattern = '[A-Z]{2}\\s?[0-9]{1,2}\\s?[A-Z]{1,3}\\s?[0-9]{1,4}'
     input.title = 'Use a valid registration such as TN 38 AB 4120.'
     input.value = input.value.toUpperCase()
   })
-  root.querySelectorAll<HTMLInputElement>('input').forEach((input) => {
+  queryAll<HTMLInputElement>(root, 'input').forEach((input) => {
     const label = fieldLabel(input)
     if (/full name|driver name|^name$/.test(label)) {
       input.maxLength = 60
@@ -36,13 +45,13 @@ function configure(root: ParentNode = document) {
       input.title = 'Enter a valid email address.'
     }
   })
-  root.querySelectorAll<HTMLInputElement>('input[type="tel"]').forEach((input) => {
+  queryAll<HTMLInputElement>(root, 'input[type="tel"]').forEach((input) => {
     input.inputMode = 'numeric'
     input.pattern = '[0-9]{10}'
     input.maxLength = 10
     input.title = 'Enter a valid 10-digit mobile number.'
   })
-  root.querySelectorAll<HTMLInputElement>('label input').forEach((input) => {
+  queryAll<HTMLInputElement>(root, 'label input').forEach((input) => {
     if (!/mobile number|phone number/.test(fieldLabel(input))) return
     input.type = 'tel'
     input.inputMode = 'numeric'
@@ -54,6 +63,14 @@ function configure(root: ParentNode = document) {
 export function useFormGuards() {
   useEffect(() => {
     configure()
+    const configureAddedFields = (records: MutationRecord[]) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (!(node instanceof HTMLElement)) continue
+          if (node.matches('input, textarea, select') || node.querySelector('input, textarea, select')) configure(node)
+        }
+      }
+    }
     const onInput = (event: Event) => {
       const input = event.target
       if (!(input instanceof HTMLInputElement)) return
@@ -86,7 +103,7 @@ export function useFormGuards() {
         form.reportValidity()
       }
     }
-    const observer = new MutationObserver(() => configure())
+    const observer = new MutationObserver(configureAddedFields)
     observer.observe(document.body, { childList: true, subtree: true })
     document.addEventListener('input', onInput, true)
     document.addEventListener('submit', onSubmit, true)

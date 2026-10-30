@@ -18,6 +18,8 @@ export function AdminNotificationsPanel({ onNotice }: Props) {
   const query = useAdminNotifications()
   const markRead = useMarkAdminNotificationRead()
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
+  const [pendingGroupKeys, setPendingGroupKeys] = useState<Set<string>>(() => new Set())
+  const [markingAll, setMarkingAll] = useState(false)
   const notifications = useMemo(() => query.data ?? [], [query.data])
   const groups = useMemo(() => {
     const grouped = new Map<string, NotificationGroup>()
@@ -37,13 +39,23 @@ export function AdminNotificationsPanel({ onNotice }: Props) {
   async function markGroupRead(group: NotificationGroup) {
     const unread = group.notifications.filter((item) => !item.read_at)
     if (!unread.length) return
-    const results = await Promise.allSettled(unread.map((item) => markRead.mutateAsync(item.id)))
-    if (results.some((result) => result.status === 'rejected')) onNotice?.('Some notifications could not be marked as read.')
+    setPendingGroupKeys((current) => new Set(current).add(group.key))
+    try {
+      const results = await Promise.allSettled(unread.map((item) => markRead.mutateAsync(item.id)))
+      if (results.some((result) => result.status === 'rejected')) onNotice?.('Some notifications could not be marked as read.')
+    } finally {
+      setPendingGroupKeys((current) => { const next = new Set(current); next.delete(group.key); return next })
+    }
   }
 
   async function markAllRead() {
-    const results = await Promise.allSettled(unreadNotifications.map((item) => markRead.mutateAsync(item.id)))
-    if (results.some((result) => result.status === 'rejected')) onNotice?.('Some notifications could not be marked as read.')
+    setMarkingAll(true)
+    try {
+      const results = await Promise.allSettled(unreadNotifications.map((item) => markRead.mutateAsync(item.id)))
+      if (results.some((result) => result.status === 'rejected')) onNotice?.('Some notifications could not be marked as read.')
+    } finally {
+      setMarkingAll(false)
+    }
   }
 
   if (query.isLoading) return <section className="admin-view-panel"><h2>Loading notifications...</h2></section>
@@ -52,7 +64,7 @@ export function AdminNotificationsPanel({ onNotice }: Props) {
   return <section className="admin-view-panel admin-notifications-panel">
     <div className="view-panel-heading">
       <div><p className="eyebrow">OPERATIONS NOTIFICATIONS</p><h2>All booking and delivery events.</h2></div>
-      <button className="button button-quiet" onClick={() => void markAllRead()} disabled={!unreadNotifications.length || markRead.isPending}>Mark all read</button>
+      <button className="button button-quiet" onClick={() => void markAllRead()} disabled={!unreadNotifications.length || markingAll}>Mark all read</button>
     </div>
     <div className="admin-notification-groups">
       {groups.map((group) => {
@@ -76,7 +88,7 @@ export function AdminNotificationsPanel({ onNotice }: Props) {
               {unreadCount > 0 && <span className="admin-notification-unread-count">{unreadCount} unread</span>}
               <ChevronDown className="admin-notification-chevron" size={17} aria-hidden="true" />
             </button>
-            <button className="admin-notification-mark-read" type="button" onClick={() => void markGroupRead(group)} disabled={!unreadCount || markRead.isPending} aria-label={`Mark ${group.label} notifications as read`}>
+            <button className="admin-notification-mark-read" type="button" onClick={() => void markGroupRead(group)} disabled={!unreadCount || pendingGroupKeys.has(group.key) || markingAll} aria-label={`Mark ${group.label} notifications as read`}>
               {unreadCount ? <><CheckCheck size={15} /> Mark read</> : <Check size={16} aria-label="All notifications read" />}
             </button>
           </div>
