@@ -1,10 +1,36 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { requireAuth, requireRole } from '../middleware/auth.js'
-import { supabase } from '../supabase.js'
+import { authSupabase, supabase } from '../supabase.js'
 const router = Router(); router.use(requireAuth, requireRole('admin', 'dispatcher'))
 router.get('/orders', async (request, response) => { const page = Math.max(1, Number(request.query.page ?? 1)); const pageSize = Math.min(100, Math.max(1, Number(request.query.pageSize ?? 25))); const from = (page - 1) * pageSize; const to = from + pageSize - 1; let query = supabase.from('bookings').select('*', { count: 'exact' }).order('created_at', { ascending: false }).range(from, to); if (typeof request.query.status === 'string') query = query.eq('status', request.query.status); if (typeof request.query.service === 'string') query = query.eq('service_code', request.query.service); if (typeof request.query.vendorId === 'string') query = query.eq('vendor_id', request.query.vendorId); if (request.query.assigned === 'true') query = query.not('vendor_id', 'is', null); if (request.query.assigned === 'false') query = query.is('vendor_id', null); if (typeof request.query.from === 'string') query = query.gte('scheduled_for', `${request.query.from}T00:00:00.000Z`); if (typeof request.query.to === 'string') query = query.lte('scheduled_for', `${request.query.to}T23:59:59.999Z`); const { data, error, count } = await query; if (error) return response.status(500).json({ error: error.message }); response.json({ rows: data ?? [], page, pageSize, total: count ?? 0 }) })
-router.get('/vendors', async (_request, response) => { const { data, error } = await supabase.from('vendors').select('*').order('created_at', { ascending: false }); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
+router.get('/vendors', async (_request, response) => {
+  const [vendorsResult, profilesResult] = await Promise.all([
+    supabase.from('vendors').select('*').order('created_at', { ascending: false }),
+    supabase.from('profiles').select('id,full_name,phone_e164,role,created_at').eq('role', 'vendor').order('created_at', { ascending: false }),
+  ])
+  if (vendorsResult.error) return response.status(500).json({ error: vendorsResult.error.message })
+  if (profilesResult.error) return response.status(500).json({ error: profilesResult.error.message })
+  const vendors = vendorsResult.data ?? []
+  const linkedProfiles = new Set(vendors.map((vendor) => vendor.owner_profile_id).filter(Boolean))
+  const orphanProfiles = (profilesResult.data ?? []).filter((profile) => !linkedProfiles.has(profile.id))
+  const accountRows = await Promise.all(orphanProfiles.map(async (profile) => {
+    const { data } = await authSupabase.auth.admin.getUserById(profile.id)
+    return {
+      id: profile.id,
+      owner_profile_id: profile.id,
+      business_name: profile.full_name ?? 'Vendor account',
+      email: data.user?.email ?? undefined,
+      phone_e164: profile.phone_e164,
+      service_zone: null,
+      verification: 'setup_required',
+      is_online: false,
+      created_at: profile.created_at,
+      account_only: true,
+    }
+  }))
+  response.json([...vendors, ...accountRows])
+})
 router.get('/vendors/:id', async (request, response) => { const { data, error } = await supabase.from('vendors').select('*, vehicles(*), drivers(*)').eq('id', request.params.id).single(); if (error || !data) return response.status(404).json({ error: 'Vendor not found' }); response.json(data) })
 router.get('/customers', async (_request, response) => { const { data, error } = await supabase.from('profiles').select('id,full_name,phone_e164,role,created_at').eq('role', 'customer').order('created_at', { ascending: false }); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
 router.get('/customers/:id', async (request, response) => { const { data: profile, error } = await supabase.from('profiles').select('id,full_name,phone_e164,role,created_at').eq('id', request.params.id).eq('role', 'customer').single(); if (error || !profile) return response.status(404).json({ error: 'Customer not found' }); const { data: bookings, error: bookingError } = await supabase.from('bookings').select('*').eq('customer_id', request.params.id).order('created_at', { ascending: false }); if (bookingError) return response.status(500).json({ error: bookingError.message }); response.json({ ...profile, bookings: bookings ?? [] }) })

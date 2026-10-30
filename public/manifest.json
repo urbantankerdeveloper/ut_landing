@@ -5,5 +5,9 @@
   "display": "standalone",
   "background_color": "#f5fbfc",
   "theme_color": "#007c91",
+  "icons": [
+    { "src": "/urban-tanker-mark-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/urban-tanker-mark.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
   "description": "One app for every water service."
 }

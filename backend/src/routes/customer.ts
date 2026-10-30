@@ -19,9 +19,45 @@ function pushVendorOrder(ownerId: string, bookingId: string, reference: string) 
     error: error instanceof Error ? error.message : 'Unknown error',
   })))
 }
-async function findAvailableVendor() {
-  const { data } = await supabase.from('vendors').select('id,owner_profile_id').eq('is_online', true).eq('verification', 'approved').order('created_at').limit(1).maybeSingle()
-  return data ?? null
+type GeoPoint = { latitude: number; longitude: number }
+type DispatchVendor = { id: string; owner_profile_id: string | null; service_zone: string; latitude: number | null; longitude: number | null }
+function distanceKm(first: GeoPoint, second: GeoPoint) {
+  const radians = (degrees: number) => degrees * Math.PI / 180
+  const latitudeDelta = radians(second.latitude - first.latitude)
+  const longitudeDelta = radians(second.longitude - first.longitude)
+  const a = Math.sin(latitudeDelta / 2) ** 2 + Math.cos(radians(first.latitude)) * Math.cos(radians(second.latitude)) * Math.sin(longitudeDelta / 2) ** 2
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+async function findNearbyVendors(latitude?: number | null, longitude?: number | null) {
+  const { data, error } = await supabase.from('vendors').select('id,owner_profile_id,service_zone,latitude,longitude').eq('is_online', true).eq('verification', 'approved')
+  if (error) throw new Error(`Nearby vendors could not be loaded: ${error.message}`)
+  const origin = latitude !== null && latitude !== undefined && longitude !== null && longitude !== undefined
+    ? { latitude: Number(latitude), longitude: Number(longitude) }
+    : null
+  const nearby = ((data ?? []) as DispatchVendor[]).map((vendor) => {
+    const vendorPoint = vendor.latitude !== null && vendor.longitude !== null
+      ? { latitude: Number(vendor.latitude), longitude: Number(vendor.longitude) }
+      : null
+    const distance = origin && vendorPoint ? distanceKm(origin, vendorPoint) : null
+    return { ...vendor, distance_km: distance === null ? null : Math.round(distance * 10) / 10 }
+  }).filter((vendor) => vendor.distance_km === null || vendor.distance_km <= 50)
+  return nearby.sort((first, second) => (first.distance_km ?? Number.POSITIVE_INFINITY) - (second.distance_km ?? Number.POSITIVE_INFINITY))
+}
+function vendorNotifications(vendors: Awaited<ReturnType<typeof findNearbyVendors>>, booking: { id: string; reference: string; payment_method?: string }) {
+  const recipients = vendors.filter((vendor): vendor is typeof vendor & { owner_profile_id: string } => Boolean(vendor.owner_profile_id))
+  return recipients.map((vendor) => ({
+    recipient_id: vendor.owner_profile_id,
+    event_type: 'vendor_order_created',
+    title: 'New nearby delivery request',
+    payload: { bookingId: booking.id, reference: booking.reference, paymentMethod: booking.payment_method, distanceKm: vendor.distance_km },
+  }))
+}
+function notifyNearbyVendors(vendors: Awaited<ReturnType<typeof findNearbyVendors>>, booking: { id: string; reference: string; payment_method?: string }, sendPush: boolean) {
+  const recipients = vendors.filter((vendor): vendor is typeof vendor & { owner_profile_id: string } => Boolean(vendor.owner_profile_id))
+  for (const vendor of recipients) {
+    if (sendPush) pushVendorOrder(vendor.owner_profile_id, booking.id, booking.reference)
+    emitRealtimeToVendor(vendor.id, 'vendor.order.created', { vendorId: vendor.id, bookingId: booking.id, reference: booking.reference, distanceKm: vendor.distance_km })
+  }
 }
 router.get('/services', async (_request, response) => { const { data, error } = await supabase.from('service_catalog').select('code,name,description,base_price_paise,is_active,config').eq('is_active', true).order('name'); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
 router.get('/offers', async (_request, response) => { const { data, error } = await supabase.from('coupons').select('id,code,title,discount_type,discount_value,valid_until').eq('is_active', true).or('valid_until.is.null,valid_until.gte.' + new Date().toISOString()).order('created_at', { ascending: false }); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
@@ -37,7 +73,17 @@ router.get('/phone-verification', async (request, response) => {
   response.json({ phone, verified: Boolean(challenge) })
 })
 router.get('/usage', async (request, response) => { const { data, error } = await supabase.from('bookings').select('quoted_amount_paise,status').eq('customer_id', request.authUser!.id); if (error) return response.status(500).json({ error: error.message }); const delivered = (data ?? []).filter((item) => item.status === 'delivered'); const totalSpend = delivered.reduce((sum, item) => sum + Number(item.quoted_amount_paise ?? 0) / 100, 0); response.json({ deliveries: delivered.length, totalSpend, averageAmount: delivered.length ? Math.round(totalSpend / delivered.length) : 0 }) })
-router.get('/orders', async (request, response) => { const { data, error } = await supabase.from('bookings').select('*').eq('customer_id', request.authUser!.id).order('created_at', { ascending: false }); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
+router.get('/orders', async (request, response) => {
+  const offset = Number(request.query.offset ?? 0)
+  const pageSize = Number(request.query.pageSize ?? 100)
+  if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) return response.status(400).json({ error: 'Invalid booking page' })
+  const { data, error } = await supabase.from('bookings')
+    .select('id,reference,service_code,service_details,address_text,latitude,longitude,quoted_amount_paise,status,scheduled_for,customer_phone_e164,access_notes,payment_method,created_at')
+    .eq('customer_id', request.authUser!.id).order('created_at', { ascending: false }).range(offset, offset + pageSize)
+  if (error) return response.status(500).json({ error: error.message })
+  const rows = data ?? []
+  response.json({ rows: rows.slice(0, pageSize), nextOffset: rows.length > pageSize ? offset + pageSize : null })
+})
 function getBookingServices(data: z.infer<typeof bookingSchema>) {
   const isLegacyPayload = !data.services?.length
   const items = data.services ?? (data.serviceId ?? '').split(',').map((serviceId) => ({
@@ -45,9 +91,17 @@ function getBookingServices(data: z.infer<typeof bookingSchema>) {
     capacity: data.capacity,
     details: data.notes,
     deliveryDate: data.deliveryDate,
+    preferredTime: data.preferredTime,
     location: data.location,
     waterType: undefined,
     tankerCount: undefined,
+    serviceType: undefined,
+    quantity: undefined,
+    depth: undefined,
+    grade: undefined,
+    pump: undefined,
+    pickupLocation: undefined,
+    materialType: undefined,
     phone: data.phone,
     latitude: data.latitude,
     longitude: data.longitude,
@@ -58,8 +112,16 @@ function getBookingServices(data: z.infer<typeof bookingSchema>) {
     capacity: item.capacity?.trim() ?? '',
     waterType: item.waterType?.trim() ?? '',
     tankerCount: item.tankerCount,
+    serviceType: item.serviceType?.trim() ?? '',
+    quantity: item.quantity?.trim() ?? '',
+    depth: item.depth?.trim() ?? '',
+    grade: item.grade?.trim() ?? '',
+    pump: item.pump,
+    pickupLocation: item.pickupLocation?.trim() ?? '',
+    materialType: item.materialType?.trim() ?? '',
     details: item.serviceId === 'water_tanker' ? undefined : item.details?.trim() ?? '',
     deliveryDate: item.deliveryDate ?? data.deliveryDate ?? '',
+    preferredTime: item.preferredTime ?? data.preferredTime,
     location: item.location ?? data.location,
     phone: item.phone ?? (isLegacyPayload ? data.phone : undefined),
     latitude: item.latitude ?? (isLegacyPayload ? data.latitude : undefined),
@@ -103,10 +165,35 @@ function bookingInsert(data: z.infer<typeof bookingSchema>, services: ReturnType
     address_text: primaryService.location ?? data.location,
     latitude: primaryService.latitude ?? data.latitude ?? null,
     longitude: primaryService.longitude ?? data.longitude ?? null,
-    scheduled_for: primaryService.deliveryDate || data.deliveryDate,
+    scheduled_for: primaryService.deliveryDate && primaryService.preferredTime
+      ? new Date(`${primaryService.deliveryDate}T${primaryService.preferredTime}:00+05:30`).toISOString()
+      : primaryService.deliveryDate || data.deliveryDate,
     access_notes: data.notes ?? null,
     quoted_amount_paise: quotedAmountPaise,
   }
+}
+async function createBookingAndNotifications(input: {
+  customerId: string
+  reference: string
+  idempotencyKey?: string
+  booking: ReturnType<typeof bookingInsert>
+  vendors: Awaited<ReturnType<typeof findNearbyVendors>>
+  payment?: { provider: string; amount_paise: number; currency: string; status: string }
+}) {
+  const { data, error } = await supabase.rpc('create_customer_booking', {
+    p_booking: {
+      ...input.booking,
+      reference: input.reference,
+      customer_id: input.customerId,
+      idempotency_key: input.idempotencyKey ?? null,
+    },
+    p_notifications: vendorNotifications(input.vendors, { id: '', reference: input.reference, payment_method: input.booking.payment_method }),
+    p_payment: input.payment ?? null,
+  })
+  if (error) throw new Error(`Booking could not be saved: ${error.message}`)
+  const result = data as { booking: { id: string; reference: string; vendor_id: string | null; quoted_amount_paise?: number; payment_method?: string }; created: boolean }
+  if (result?.booking?.id) notifyNearbyVendors(input.vendors, result.booking, result.created)
+  return result
 }
 router.post('/orders', async (request, response) => {
   const parsed = bookingSchema.safeParse(request.body)
@@ -115,21 +202,15 @@ router.post('/orders', async (request, response) => {
   if (!services.length) return response.status(400).json({ error: 'At least one service is required' })
   const verificationError = await validateServicePhoneVerification(parsed.data, services)
   if (verificationError) return response.status(verificationError.status).json({ error: verificationError.message })
-  const reference = `UT-${Date.now().toString().slice(-8)}`
-  const vendor = await findAvailableVendor()
-  const { data, error } = await supabase.from('bookings').insert({
-    reference,
-    customer_id: request.authUser!.id,
-    ...bookingInsert(parsed.data, services, vendor?.id ?? null, 0),
-  }).select('id,reference,vendor_id').single()
-  if (error) return response.status(500).json({ error: error.message })
-  if (vendor) {
-    await supabase.from('notifications').insert({ recipient_id: vendor.owner_profile_id, event_type: 'vendor_order_created', title: 'New delivery request', payload: { bookingId: data.id, reference: data.reference } })
-    pushVendorOrder(vendor.owner_profile_id, data.id, data.reference)
-    emitRealtimeToVendor(vendor.id, 'vendor.order.created', { vendorId: vendor.id, bookingId: data.id, reference: data.reference })
+  try {
+    const reference = `UT-${Date.now().toString().slice(-8)}`
+    const vendors = await findNearbyVendors(parsed.data.latitude, parsed.data.longitude)
+    const result = await createBookingAndNotifications({ customerId: request.authUser!.id, reference, idempotencyKey: parsed.data.idempotencyKey, booking: bookingInsert(parsed.data, services, null, 0), vendors })
+    emitRealtimeToUser(request.authUser!.id, 'booking.created', result.booking)
+    response.status(result.created ? 201 : 200).json(result.booking)
+  } catch (error) {
+    response.status(500).json({ error: error instanceof Error ? error.message : 'Booking could not be saved' })
   }
-  emitRealtimeToUser(request.authUser!.id, 'booking.created', data)
-  response.status(201).json(data)
 })
 router.post('/orders/quote', async (request, response) => {
   const parsed = bookingSchema.safeParse(request.body)
@@ -139,27 +220,19 @@ router.post('/orders/quote', async (request, response) => {
     if (!services.length) return response.status(400).json({ error: 'At least one service is required' })
     const verificationError = await validateServicePhoneVerification(parsed.data, services)
     if (verificationError) return response.status(verificationError.status).json({ error: verificationError.message })
-    const quote = await quoteServices(services.map((item) => item.serviceId), parsed.data.couponCode)
+    const quote = await quoteServices(services, parsed.data.couponCode)
     const reference = `UT-${Date.now().toString().slice(-8)}`
-    const vendor = await findAvailableVendor()
-    const { data, error } = await supabase.from('bookings').insert({
+    const vendors = await findNearbyVendors(parsed.data.latitude, parsed.data.longitude)
+    const result = await createBookingAndNotifications({
+      customerId: request.authUser!.id,
       reference,
-      customer_id: request.authUser!.id,
-      ...bookingInsert(parsed.data, services, vendor?.id ?? null, quote.totalPaise),
-    }).select('id,reference,vendor_id,quoted_amount_paise,payment_method').single()
-    if (error) return response.status(500).json({ error: error.message })
-    if (parsed.data.paymentMethod === 'cod') {
-      const { error: paymentError } = await supabase.from('payments').insert({ booking_id: data.id, provider: 'cash_on_delivery', amount_paise: quote.totalPaise, currency: 'INR', status: 'pending' })
-      if (paymentError) return response.status(500).json({ error: paymentError.message })
-    }
-    if (vendor) {
-      const { error: notificationError } = await supabase.from('notifications').insert({ recipient_id: vendor.owner_profile_id, event_type: 'vendor_order_created', title: 'New delivery request', payload: { bookingId: data.id, reference: data.reference, paymentMethod: parsed.data.paymentMethod } })
-      if (notificationError) return response.status(500).json({ error: notificationError.message })
-      pushVendorOrder(vendor.owner_profile_id, data.id, data.reference)
-      emitRealtimeToVendor(vendor.id, 'vendor.order.created', { vendorId: vendor.id, bookingId: data.id, reference: data.reference })
-    }
-    emitRealtimeToUser(request.authUser!.id, 'booking.created', data)
-    response.status(201).json({ ...data, quote })
+      idempotencyKey: parsed.data.idempotencyKey,
+      booking: bookingInsert(parsed.data, services, null, quote.totalPaise),
+      vendors,
+      payment: parsed.data.paymentMethod === 'cod' ? { provider: 'cash_on_delivery', amount_paise: quote.totalPaise, currency: 'INR', status: 'pending' } : undefined,
+    })
+    emitRealtimeToUser(request.authUser!.id, 'booking.created', result.booking)
+    response.status(result.created ? 201 : 200).json({ ...result.booking, quote })
   } catch (error) {
     response.status(400).json({ error: error instanceof Error ? error.message : 'Booking quote failed' })
   }
@@ -170,13 +243,13 @@ router.post('/orders/quote-preview', async (request, response) => {
   try {
     const services = getBookingServices(parsed.data)
     if (!services.length) return response.status(400).json({ error: 'At least one service is required' })
-    const quote = await quoteServices(services.map((item) => item.serviceId), parsed.data.couponCode)
+    const quote = await quoteServices(services, parsed.data.couponCode)
     response.json({ quote, paymentMethod: parsed.data.paymentMethod ?? 'cod' })
   } catch (error) {
     response.status(400).json({ error: error instanceof Error ? error.message : 'Booking quote failed' })
   }
 })
-router.get('/invoices', async (request, response) => { const { data, error } = await supabase.from('invoices').select('*').eq('customer_id', request.authUser!.id).order('created_at', { ascending: false }); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
+router.get('/invoices', async (request, response) => { const { data, error } = await supabase.from('invoices').select('*').eq('customer_id', request.authUser!.id).order('issued_at', { ascending: false }); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
 router.get('/invoices/:invoiceId/download', async (request, response) => { const { data, error } = await supabase.from('invoices').select('*').eq('id', request.params.invoiceId).eq('customer_id', request.authUser!.id).single(); if (error || !data) return response.status(404).json({ error: 'Invoice not found' }); response.json(data) })
 router.get('/addresses', async (request, response) => { const { data, error } = await supabase.from('saved_addresses').select('*').eq('user_id', request.authUser!.id).order('is_default', { ascending: false }).order('created_at', { ascending: false }); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
 router.post('/addresses', async (request, response) => { const parsed = z.object({ label: z.string().min(1).max(60), address: z.string().min(3).max(240), city: z.string().min(2).max(80), pincode: z.string().min(4).max(12), latitude: z.number().optional(), longitude: z.number().optional(), isDefault: z.boolean().default(false) }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid address' }); if (parsed.data.isDefault) await supabase.from('saved_addresses').update({ is_default: false }).eq('user_id', request.authUser!.id); const { data, error } = await supabase.from('saved_addresses').insert({ user_id: request.authUser!.id, label: parsed.data.label, address: parsed.data.address, city: parsed.data.city, pincode: parsed.data.pincode, latitude: parsed.data.latitude, longitude: parsed.data.longitude, is_default: parsed.data.isDefault }).select().single(); if (error) return response.status(400).json({ error: error.message }); response.status(201).json(data) })

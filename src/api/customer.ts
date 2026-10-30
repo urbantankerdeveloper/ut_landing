@@ -1,6 +1,7 @@
 import { apiFetch } from './client'
 
 export type CustomerBooking = { id: string; service: string; services: BookingServiceDetails[]; location: string; status: string; amount: number; scheduledAt: string; phone?: string; notes?: string; paymentMethod?: BookingPaymentMethod; latitude?: number; longitude?: number }
+export type CustomerBookingPage = { rows: CustomerBooking[]; nextOffset: number | null }
 export type SavedAddress = { id: string; label: string; address: string; city: string; pincode: string; latitude?: number; longitude?: number }
 export type CustomerSubscription = { id: string; name: string; status: 'active' | 'paused' | 'cancelled'; nextDelivery?: string; amount: number }
 export type MembershipPlan = { id: string; name: string; description: string; amount: number; billing_period: string; benefits: string[] }
@@ -14,10 +15,10 @@ export type TrackingSnapshot = { orderId: string; status: string; latitude?: num
 export type PaymentOrder = { id: string; amount: number; currency: string; keyId?: string }
 export type PaymentVerification = { verified: boolean; orderId: string }
 export type BookingPaymentMethod = 'wallet' | 'gateway' | 'cod'
-export type BookingServiceDetails = { serviceId: string; capacity?: string; waterType?: string; tankerCount?: string; details: string; deliveryDate?: string; location?: string; phone?: string; latitude?: number; longitude?: number; phoneVerificationChallengeId?: string }
-export type CreateBookingPayload = { serviceId: string; services: BookingServiceDetails[]; capacity: string; location: string; deliveryDate: string; notes?: string; couponCode?: string; phone?: string; phoneVerificationChallengeId?: string; latitude?: number; longitude?: number; paymentMethod?: BookingPaymentMethod }
+export type BookingServiceDetails = { serviceId: string; capacity?: string; waterType?: string; tankerCount?: string; serviceType?: string; quantity?: string; depth?: string; grade?: string; pump?: string; pickupLocation?: string; materialType?: string; details: string; deliveryDate?: string; preferredTime?: string; location?: string; phone?: string; latitude?: number; longitude?: number; phoneVerificationChallengeId?: string }
+export type CreateBookingPayload = { idempotencyKey: string; serviceId: string; services: BookingServiceDetails[]; capacity: string; location: string; deliveryDate: string; preferredTime?: string; notes?: string; couponCode?: string; phone?: string; phoneVerificationChallengeId?: string; latitude?: number; longitude?: number; paymentMethod?: BookingPaymentMethod }
 export type GuestOtpChallenge = { challengeId: string; expiresInSeconds: number }
-export type GuestSession = { accessToken: string; user: { username: string; name: string; role: 'customer' } }
+export type GuestSession = { accessToken: string; refreshToken?: string; user: { username: string; name: string; role: 'customer' } }
 export type CreateSupportRequestPayload = { subject: string; message: string; orderId?: string; priority?: string }
 export type WalletTransaction = { id: string; amount: number; type: string; status: string; createdAt?: string }
 export type CustomerContract = { id: string; property_type: string; service_plan: Record<string, unknown>; address: string; estimate: number; status: string; created_at: string }
@@ -46,8 +47,16 @@ function normalizeBooking(item: Record<string, unknown>): CustomerBooking {
         capacity: typeof detail.capacity === 'string' ? detail.capacity : '',
         waterType: typeof detail.waterType === 'string' ? detail.waterType : undefined,
         tankerCount: typeof detail.tankerCount === 'string' ? detail.tankerCount : undefined,
+        serviceType: typeof detail.serviceType === 'string' ? detail.serviceType : undefined,
+        quantity: typeof detail.quantity === 'string' ? detail.quantity : undefined,
+        depth: typeof detail.depth === 'string' ? detail.depth : undefined,
+        grade: typeof detail.grade === 'string' ? detail.grade : undefined,
+        pump: typeof detail.pump === 'string' ? detail.pump : undefined,
+        pickupLocation: typeof detail.pickupLocation === 'string' ? detail.pickupLocation : undefined,
+        materialType: typeof detail.materialType === 'string' ? detail.materialType : undefined,
         details: typeof detail.details === 'string' ? detail.details : '',
         deliveryDate: typeof detail.deliveryDate === 'string' ? detail.deliveryDate : undefined,
+        preferredTime: typeof detail.preferredTime === 'string' ? detail.preferredTime : undefined,
         location: typeof detail.location === 'string' ? detail.location : undefined,
         phone: typeof detail.phone === 'string' ? detail.phone : undefined,
         latitude: typeof detail.latitude === 'number' ? detail.latitude : undefined,
@@ -61,8 +70,16 @@ function normalizeBooking(item: Record<string, unknown>): CustomerBooking {
       capacity: typeof item.capacity_litres === 'number' ? `${item.capacity_litres} litres` : '',
       waterType: undefined,
       tankerCount: undefined,
+      serviceType: undefined,
+      quantity: undefined,
+      depth: undefined,
+      grade: undefined,
+      pump: undefined,
+      pickupLocation: undefined,
+      materialType: undefined,
       details: '',
       deliveryDate: typeof item.scheduled_for === 'string' ? item.scheduled_for : undefined,
+      preferredTime: undefined,
       location: typeof item.address_text === 'string' ? item.address_text : undefined,
       phone: typeof item.customer_phone_e164 === 'string' ? item.customer_phone_e164.replace(/^\+91/, '') : undefined,
       latitude: typeof item.latitude === 'number' ? item.latitude : undefined,
@@ -94,7 +111,12 @@ export const customerApi = {
   requestGuestOtp: (phone: string) => apiFetch<GuestOtpChallenge>('/auth/guest/request-otp', { method: 'POST', body: JSON.stringify({ phone }) }),
   verifyGuestOtp: (payload: { challengeId: string; phone: string; otp: string; name?: string }) => apiFetch<GuestSession>('/auth/guest/verify-otp', { method: 'POST', body: JSON.stringify(payload) }),
   verifyContactPhoneOtp: (payload: { challengeId: string; phone: string; otp: string }) => apiFetch<{ verified: boolean }>('/auth/guest/verify-phone', { method: 'POST', body: JSON.stringify(payload) }),
-  bookings: async () => (await apiFetch<Record<string, unknown>[]>('/customer/orders')).map(normalizeBooking),
+  bookings: async (offset = 0) => {
+    const path = offset === 0 ? '/customer/orders' : `/customer/orders?offset=${offset}&pageSize=100`
+    const page = await apiFetch<{ rows: Record<string, unknown>[]; nextOffset: number | null } | Record<string, unknown>[]>(path)
+    if (Array.isArray(page)) return { rows: page.map(normalizeBooking), nextOffset: null }
+    return { rows: page.rows.map(normalizeBooking), nextOffset: page.nextOffset }
+  },
   phoneVerification: () => apiFetch<CustomerPhoneVerification>('/customer/phone-verification'),
   services: () => apiFetch<CustomerService[]>('/customer/services'),
   createBooking: (payload: CreateBookingPayload) => apiFetch<{ id: string; quotedAmountPaise?: number }>('/customer/orders/quote', { method: 'POST', body: JSON.stringify(payload) }),

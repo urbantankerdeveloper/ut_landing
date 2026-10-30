@@ -86,8 +86,7 @@ export function AdminBookingOperationsScreen({ onNotice }: { onNotice: (message:
   const [sort, setSort] = useState<'recent' | 'status' | 'amount'>('recent')
   const [page, setPage] = useState(1)
 
-  const rows = (query.data ?? []) as BookingRow[]
-  const filteredRows = useMemo(() => rows.filter((booking) => filter === 'all' || booking.status === filter), [filter, rows])
+  const filteredRows = useMemo(() => ((query.data ?? []) as BookingRow[]).filter((booking) => filter === 'all' || booking.status === filter), [filter, query.data])
   const sortedRows = useMemo(() => [...filteredRows].sort((first, second) => {
     if (sort === 'status') return first.status.localeCompare(second.status)
     if (sort === 'amount') return (second.quoted_amount_paise ?? second.amount * 100) - (first.quoted_amount_paise ?? first.amount * 100)
@@ -119,7 +118,7 @@ export function AdminBookingOperationsScreen({ onNotice }: { onNotice: (message:
   })
 
   if (query.isLoading) return <section className="admin-view-panel"><h2>Loading bookings...</h2></section>
-  if (query.isError) return <section className="admin-view-panel"><h2>Bookings are unavailable.</h2><button className="button button-primary" onClick={() => query.refetch()}>Retry</button></section>
+  if (query.isError) return <section className="admin-view-panel"><h2>Bookings are unavailable.</h2><p role="status">{query.error instanceof Error ? query.error.message : 'The admin API request failed.'}</p><button className="button button-primary" onClick={() => query.refetch()}>Retry</button></section>
 
   function cancel() {
     if (!selected || reason.trim().length < 2) return
@@ -151,7 +150,7 @@ export function AdminBookingOperationsScreen({ onNotice }: { onNotice: (message:
               <td><button className="admin-booking-id" type="button" onClick={() => setSelectedBooking(booking)}>{id}</button></td>
               <td>{service}</td>
               <td className="admin-booking-location">{location}</td>
-              <td><label className="admin-booking-status-control"><select className={`status-tag admin-booking-status ${booking.status === 'delivered' ? '' : booking.status === 'cancelled' ? 'inactive' : 'pending'}`} aria-label={`Booking actions for ${id}`} value={booking.status} onChange={(event) => { if (event.target.value === '__assign__') { setAssigningBooking(booking); setVendorId(''); setVehicleId(''); setDriverId('') } else if (event.target.value === '__cancel__') { setSelected(booking.id); setReason('') } }} disabled={assignOrder.isPending || mutations.cancel.isPending || booking.status === 'cancelled' || booking.status === 'delivered'}><option value={booking.status}>{formatStatus(booking.status)}</option>{booking.status === 'pending_vendor' && <option value="__assign__">Assign vendor…</option>}<option value="__cancel__">Cancel order…</option></select><ChevronDown size={12} aria-hidden="true" /></label></td>
+              <td><label className="admin-booking-status-control"><select className={`status-tag admin-booking-status ${booking.status === 'delivered' ? '' : booking.status === 'cancelled' ? 'inactive' : 'pending'}`} aria-label={`Booking actions for ${id}`} value={booking.status} onChange={(event) => { if (event.target.value === '__assign__') { setAssigningBooking(booking); setVendorId(''); setVehicleId(''); setDriverId('') } else if (event.target.value === '__cancel__') { setSelected(booking.id); setReason('') } }} disabled={(assignOrder.isPending && assigningBooking?.id === booking.id) || (mutations.cancel.isPending && selected === booking.id) || booking.status === 'cancelled' || booking.status === 'delivered'}><option value={booking.status}>{formatStatus(booking.status)}</option>{booking.status === 'pending_vendor' && <option value="__assign__">Assign vendor…</option>}<option value="__cancel__">Cancel order…</option></select><ChevronDown size={12} aria-hidden="true" /></label></td>
               <td>₹{(amount ?? 0).toLocaleString('en-IN')}</td>
             </tr>
           })}</tbody>

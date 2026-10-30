@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import { Header } from '../components/Header'
 import { Footer } from '../components/Footer'
 import { ScreenRenderer } from '../components/ScreenRenderer'
@@ -8,6 +8,7 @@ import { useFormGuards } from '../hooks/useFormGuards'
 import { useAuthStore } from '../stores/authStore'
 import type { WorkspaceRole } from '../stores/navigationStore'
 import { Modal } from '../screens/WorkspaceInteractive'
+import { BookingPageFooter, BookingPageHeader } from '../components/booking/BookingPageChrome'
 
 export function AppShell() {
 	useFormGuards()
@@ -15,6 +16,7 @@ export function AppShell() {
 	const isPublicTracking = typeof window !== 'undefined' && /^\/track\/[A-Za-z0-9_-]+$/.test(window.location.pathname)
 	const openWorkspace = useNavigationStore((state) => state.openWorkspace)
 	const pendingNavigation = useNavigationStore((state) => state.pendingNavigation)
+	const partnerFormDirty = useNavigationStore((state) => state.partnerFormDirty)
 	const confirmNavigation = useNavigationStore((state) => state.confirmNavigation)
 	const cancelNavigation = useNavigationStore((state) => state.cancelNavigation)
 	const user = useAuthStore((state) => state.user)
@@ -22,19 +24,21 @@ export function AppShell() {
 	useEffect(() => {
 		if (user && (activeScreen === 'home' || activeScreen === 'login' || activeScreen === 'account')) openWorkspace(user.role as WorkspaceRole)
 	}, [activeScreen, openWorkspace, user])
+	const isBookingScreen = activeScreen === 'booking'
+	const isPartnerDraft = activeScreen === 'partner' && partnerFormDirty
 	useEffect(() => {
-		if (activeScreen !== 'booking') return
+		if (!isBookingScreen && !isPartnerDraft) return
 		const confirmBeforeUnload = (event: BeforeUnloadEvent) => {
 			event.preventDefault()
 			event.returnValue = ''
 		}
 		window.addEventListener('beforeunload', confirmBeforeUnload)
 		return () => window.removeEventListener('beforeunload', confirmBeforeUnload)
-	}, [activeScreen])
+	}, [activeScreen, isBookingScreen, isPartnerDraft])
 	const isWorkspace = activeScreen.endsWith('-workspace')
 	const isAuthScreen = activeScreen === 'login'
 	const mainRef = useRef<HTMLElement>(null)
-	useEffect(() => {
+	useLayoutEffect(() => {
 		const titles: Record<string, string> = {
 			home: 'Urban Tanker | One App. All Water Services.',
 			services: 'Services | Urban Tanker',
@@ -55,14 +59,15 @@ export function AppShell() {
 			'dispatcher-workspace': 'Dispatch workspace | Urban Tanker',
 		}
 		document.title = titles[activeScreen] ?? 'Urban Tanker'
-		mainRef.current?.focus()
+		window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+		mainRef.current?.focus({ preventScroll: true })
 	}, [activeScreen])
 	if (!hasHydrated) return <div className="app-shell app-shell-hydrating"><main id="main-content"><ScreenSkeleton workspace={false} /></main></div>
 	return <div className={`app-shell ${isWorkspace ? 'app-shell-workspace' : ''} ${isAuthScreen ? 'app-shell-auth' : ''} ${isPublicTracking ? 'app-shell-public-tracking' : ''}`}>
 		<a className="skip-link" href="#main-content">Skip to main content</a>
-		{isPublicTracking ? <header className="public-tracking-header"><span>Track your booking</span></header> : !isWorkspace && !isAuthScreen && <Header />}
+		{isPublicTracking ? <header className="public-tracking-header"><span>Track your booking</span></header> : isBookingScreen ? <BookingPageHeader /> : !isWorkspace && !isAuthScreen && <Header />}
 		<main ref={mainRef} id="main-content" tabIndex={-1} aria-labelledby={isPublicTracking ? undefined : 'page-announcement'}>{!isPublicTracking && <span id="page-announcement" className="visually-hidden" aria-live="polite">{activeScreen.replaceAll('-', ' ')}</span>}<ScreenRenderer /></main>
-		{!isPublicTracking && !isWorkspace && !isAuthScreen && <Footer />}
-		{pendingNavigation && <Modal title="Leave booking?" onClose={cancelNavigation}><div className="booking-exit-confirmation"><p>Are you sure you want to leave the booking screen? Any details entered here will be cleared.</p><div><button className="button button-quiet" type="button" onClick={cancelNavigation}>Stay on this page</button><button className="button button-primary" type="button" onClick={confirmNavigation}>Leave booking</button></div></div></Modal>}
+		{isBookingScreen ? <BookingPageFooter /> : !isPublicTracking && !isWorkspace && !isAuthScreen && <Footer />}
+		{pendingNavigation && <Modal title={activeScreen === 'partner' ? 'Leave partner application?' : 'Leave booking?'} onClose={cancelNavigation}><div className="booking-exit-confirmation"><p>{activeScreen === 'partner' ? 'You have an unfinished partner application. If you leave now, the details entered here will be cleared.' : 'Are you sure you want to leave the booking screen? Any details entered here will be cleared.'}</p><div><button className="button button-quiet" type="button" onClick={cancelNavigation}>Stay on this page</button><button className="button button-primary" type="button" onClick={confirmNavigation}>{activeScreen === 'partner' ? 'Leave application' : 'Leave booking'}</button></div></div></Modal>}
 	</div>
 }

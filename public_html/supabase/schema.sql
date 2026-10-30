@@ -25,6 +25,8 @@ create table public.vendors (
   driver_name text,
   phone_e164 text not null,
   service_zone text not null,
+  latitude numeric(9,6),
+  longitude numeric(9,6),
   is_online boolean not null default false,
   verified_at timestamptz,
   created_at timestamptz not null default now()

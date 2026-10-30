@@ -55,7 +55,7 @@ router.post('/guest/verify-otp', async (request, response) => {
   if (sessionError || !session.session) return response.status(500).json({ error: sessionError?.message ?? 'Guest session could not be created.' })
   await supabase.from('guest_otp_challenges').update({ verified_at: new Date().toISOString() }).eq('id', challenge.id)
   setRefreshCookie(response, session.session.refresh_token)
-  response.json({ accessToken: session.session.access_token, user: { username: `guest_${parsed.data.phone}`, name: parsed.data.name ?? 'Guest customer', role: 'customer' } })
+  response.json({ accessToken: session.session.access_token, refreshToken: session.session.refresh_token, user: { username: `guest_${parsed.data.phone}`, name: parsed.data.name ?? 'Guest customer', role: 'customer' } })
 })
 router.post('/guest/verify-phone', requireAuth, async (request, response) => {
   const parsed = z.object({ challengeId: z.string().uuid(), phone: phoneSchema, otp: z.string().regex(/^\d{6}$/) }).safeParse(request.body)
@@ -72,7 +72,45 @@ router.post('/guest/verify-phone', requireAuth, async (request, response) => {
   if (verifiedError) return response.status(500).json({ error: verifiedError.message })
   response.json({ verified: true })
 })
-router.post('/login', loginLimit, async (request, response) => { const parsed = credentialsSchema.safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid credentials', details: parsed.error.flatten() }); const credential = (parsed.data.email ?? parsed.data.username!).trim().toLowerCase(); let email = credential; let username = credential; if (!credential.includes('@')) { const { data: profile } = await supabase.from('profiles').select('id,username').ilike('username', credential).maybeSingle(); if (!profile) return response.status(401).json({ error: 'Invalid credentials' }); const { data: authUser } = await authSupabase.auth.admin.getUserById(profile.id); email = authUser.user?.email ?? ''; username = profile.username ?? credential } const { data, error } = await authSupabase.auth.signInWithPassword({ email, password: parsed.data.password }); if (error || !data.session || !data.user) return response.status(401).json({ error: 'Invalid credentials' }); const { data: profile } = await supabase.from('profiles').select('id,role,full_name,username').eq('id', data.user.id).single(); setRefreshCookie(response, data.session.refresh_token); const user = { id: data.user.id, email: data.user.email, username: profile?.username ?? username ?? data.user.email, name: profile?.full_name ?? data.user.email, role: profile?.role ?? 'customer' }; return response.json({ accessToken: data.session.access_token, ...(request.header('x-client-platform') === 'mobile' ? { refreshToken: data.session.refresh_token } : {}), user }) })
+router.post('/login', loginLimit, async (request, response) => {
+  const parsed = credentialsSchema.safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Invalid credentials', details: parsed.error.flatten() })
+  const credential = (parsed.data.email ?? parsed.data.username!).trim().toLowerCase()
+  let email = credential
+  let username = credential
+  if (!credential.includes('@')) {
+    const { data: usernameProfile } = await supabase.from('profiles').select('id,username').ilike('username', credential).maybeSingle()
+    if (!usernameProfile) return response.status(401).json({ error: 'Invalid credentials' })
+    const { data: authUser } = await authSupabase.auth.admin.getUserById(usernameProfile.id)
+    email = authUser.user?.email ?? ''
+    username = usernameProfile.username ?? credential
+  }
+  const { data, error } = await authSupabase.auth.signInWithPassword({ email, password: parsed.data.password })
+  if (error || !data.session || !data.user) return response.status(401).json({ error: 'Invalid credentials' })
+  const { data: profile, error: profileError } = await supabase.from('profiles').select('id,role,full_name,username,phone_e164').eq('id', data.user.id).single()
+  if (profileError || !profile) return response.status(403).json({ error: 'Account profile is unavailable.' })
+  if (profile.role === 'vendor') {
+    const { data: vendor, error: vendorLookupError } = await supabase.from('vendors').select('id').eq('owner_profile_id', profile.id).maybeSingle()
+    if (vendorLookupError) return response.status(500).json({ error: 'Vendor profile could not be checked.' })
+    if (!vendor) {
+      const phone = profile.phone_e164 ?? (typeof data.user.user_metadata?.phone === 'string' ? data.user.user_metadata.phone : null) ?? data.user.phone
+      if (phone) {
+        const { error: vendorCreateError } = await supabase.from('vendors').insert({
+          owner_profile_id: profile.id,
+          business_name: profile.full_name?.trim() || 'Vendor account setup required',
+          phone_e164: phone,
+          service_zone: 'Unassigned',
+          verification: 'pending',
+          is_online: false,
+        })
+        if (vendorCreateError) return response.status(500).json({ error: 'Vendor profile could not be created.' })
+      }
+    }
+  }
+  setRefreshCookie(response, data.session.refresh_token)
+  const user = { id: data.user.id, email: data.user.email, username: profile.username ?? username ?? data.user.email, name: profile.full_name ?? data.user.email, role: profile.role ?? 'customer' }
+  return response.json({ accessToken: data.session.access_token, refreshToken: data.session.refresh_token, user })
+})
 router.post('/signup', signupLimit, async (request, response) => {
   const parsed = z.object({
     email: z.string().email(),
@@ -202,7 +240,7 @@ router.post('/password-update', passwordUpdateLimit, async (request, response) =
   }
   return response.json({ updated: true })
 })
-router.post('/refresh', async (request, response) => { const cookies = parseCookies(request.headers.cookie); const refreshToken = cookies.refresh_token ?? request.body?.refreshToken; if (!refreshToken) return response.status(401).json({ error: 'Refresh token required' }); const { data, error } = await authSupabase.auth.refreshSession({ refresh_token: refreshToken }); if (error || !data.session) return response.status(401).json({ error: 'Session expired' }); setRefreshCookie(response, data.session.refresh_token); return response.json({ accessToken: data.session.access_token }) })
+router.post('/refresh', async (request, response) => { const cookies = parseCookies(request.headers.cookie); const refreshToken = request.body?.refreshToken ?? cookies.refresh_token; if (!refreshToken) return response.status(401).json({ error: 'Refresh token required' }); const { data, error } = await authSupabase.auth.refreshSession({ refresh_token: refreshToken }); if (error || !data.session) return response.status(401).json({ error: 'Session expired' }); setRefreshCookie(response, data.session.refresh_token); return response.json({ accessToken: data.session.access_token, refreshToken: data.session.refresh_token }) })
 router.post('/mobile-refresh', async (request, response) => { const parsed = z.object({ refreshToken: z.string().min(20).max(4096) }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Refresh token required' }); const { data, error } = await authSupabase.auth.refreshSession({ refresh_token: parsed.data.refreshToken }); if (error || !data.session || !data.user) return response.status(401).json({ error: 'Session expired' }); const { data: profile } = await supabase.from('profiles').select('id,role,full_name,username').eq('id', data.user.id).single(); return response.json({ accessToken: data.session.access_token, refreshToken: data.session.refresh_token, user: { id: data.user.id, email: data.user.email, username: profile?.username ?? data.user.email, name: profile?.full_name ?? data.user.email, role: profile?.role ?? 'customer' } }) })
 router.post('/logout', (_request, response) => { clearRefreshCookie(response); return response.status(204).send() })
 export default router

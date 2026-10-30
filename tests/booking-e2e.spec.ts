@@ -4,7 +4,10 @@ const services = [
   { code: 'water_tanker', name: 'Water tanker', description: 'Reliable supply', base_price_paise: 250000, is_active: true },
   { code: 'tank_cleaning', name: 'Tank cleaning', description: 'Tank cleaning', base_price_paise: 180000, is_active: true },
 ]
-const offers = [{ id: 'offer-1', code: 'WELCOME10', title: 'Welcome discount', discount_type: 'percentage', discount_value: 10, is_active: true }]
+const offers = [
+  { id: 'offer-1', code: 'WELCOME10', title: 'Welcome discount', discount_type: 'percentage', discount_value: 10, is_active: true },
+  { id: 'offer-2', code: 'WATER15', title: 'Water service offer', discount_type: 'percentage', discount_value: 15, is_active: true },
+]
 
 function futureDateInputValue(days = 1) {
   const date = new Date()
@@ -24,30 +27,37 @@ async function mockBookingApi(page: Page, verifiedPhone = false) {
   await page.route('**/api/auth/guest/verify-otp', fulfill({ accessToken: 'mock-access-token', user: { username: 'guest_9876543210', name: 'Test Guest', role: 'customer' } }))
   await page.route('**/api/auth/guest/verify-phone', fulfill({ verified: true }))
   await page.route('**/api/customer/orders', fulfill([]))
+  await page.route('**/api/customer/addresses', fulfill([]))
   await page.route('**/api/customer/phone-verification', fulfill({ phone: '9876543210', verified: verifiedPhone }))
   await page.route('**/api/customer/services', fulfill(services))
   await page.route('**/api/customer/offers', fulfill(offers))
   await page.route('**/api/customer/coupons/validate', fulfill({ valid: true, coupon: { discount_type: 'percentage', discount_value: 10 } }))
   await page.route('**/api/customer/orders/quote', route => {
-    bookingPayloads.push(route.request().postDataJSON() as Record<string, unknown>)
-    return fulfill({ id: 'booking-1', quotedAmountPaise: 250000 })(route)
+    const payload = route.request().postDataJSON() as Record<string, unknown>
+    bookingPayloads.push(payload)
+    return fulfill({ id: 'booking-1', quotedAmountPaise: payload.couponCode ? 270000 : 295000 })(route)
   })
   return bookingPayloads
 }
 
-async function completeBookingDetails(page: Page) {
+async function completeBookingDetails(page: Page, applyCoupon = false) {
   await page.getByRole('button', { name: /Book now|Start a new booking/ }).first().click()
-  await page.getByRole('checkbox', { name: /Water tanker/ }).check()
-  await page.getByRole('button', { name: 'Water tanker details' }).click()
-  await page.getByLabel('Water type and delivery requirements for Water tanker').fill('Potable water for the building')
-  await page.getByLabel('Preferred delivery date for Water tanker').fill('2026-11-20')
-  await page.getByRole('textbox', { name: 'Delivery location for Water tanker' }).fill('MG Road, Chennai')
+  await page.locator('.booking-line').first().getByLabel('Water type').selectOption('Construction water')
+  await page.getByRole('textbox', { name: 'Customer / company name' }).fill('Test Customer')
+  await page.getByRole('textbox', { name: 'Full address' }).fill('MG Road, Chennai')
+  await page.getByLabel('Required date').fill('2026-11-20')
+  await page.getByLabel('Preferred time').selectOption('07:00')
+  await expect(page.getByRole('button', { name: 'Scroll coupons left' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Scroll coupons right' })).toBeVisible()
+  await expect(page.locator('.booking-coupon-card')).toHaveCount(2)
+  if (applyCoupon) await page.getByRole('button', { name: /WELCOME10/ }).click()
   await page.getByRole('textbox', { name: /Mobile number/ }).fill('9876543210')
   await page.getByRole('button', { name: 'Send code' }).click()
   await page.getByRole('textbox', { name: 'Mobile verification code' }).fill('123456')
   await page.getByRole('button', { name: 'Verify' }).click()
   await expect(page.getByText('Mobile number verified. It can be used for all selected services.')).toBeVisible()
-  await page.getByRole('button', { name: 'Review request' }).click()
+  await page.getByRole('button', { name: /Review combined booking/ }).click()
+  await page.getByRole('checkbox', { name: /I confirm these requirements/ }).check()
   await page.getByRole('button', { name: /Continue to payment/ }).click()
 }
 
@@ -55,14 +65,15 @@ test('guest can verify mocked OTP and complete COD booking without leaving payme
   await mockBookingApi(page)
 
   await page.goto('/')
-  await completeBookingDetails(page)
-  await page.getByRole('button', { name: /WELCOME10/ }).click()
+  await completeBookingDetails(page, true)
 
+  await expect(page.locator('.booking-price-total')).toContainText('2,700')
   await expect(page.getByText('This shared number is verified and will receive booking updates and delivery OTPs.')).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Choose how to pay.' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /Confirm booking · INR 2,700/ })).toBeVisible()
   await page.getByRole('radio', { name: /Cash on delivery/ }).check()
   await page.getByRole('button', { name: /Confirm booking/ }).click()
-  await expect(page.getByRole('heading', { name: 'Request received.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Your combined booking is ready.' })).toBeVisible()
 })
 
 test('authenticated customer can complete COD booking', async ({ page }) => {
@@ -78,7 +89,45 @@ test('authenticated customer can complete COD booking', async ({ page }) => {
   await completeBookingDetails(page)
   await page.getByRole('radio', { name: /Cash on delivery/ }).check()
   await page.getByRole('button', { name: /Confirm booking/ }).click()
-  await expect(page.getByRole('heading', { name: 'Request received.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Your combined booking is ready.' })).toBeVisible()
+})
+
+test('registered customer can select a saved address and save a new one during booking', async ({ page }) => {
+  await page.addInitScript(() => {
+    sessionStorage.setItem('urban-tanker-auth', JSON.stringify({
+      state: { user: { username: 'customer@example.com', name: 'Test Customer', role: 'customer' } },
+      version: 0,
+    }))
+  })
+  await mockBookingApi(page, true)
+  let savedAddress: Record<string, unknown> | undefined
+  await page.route('**/api/customer/addresses', async (route) => {
+    if (route.request().method() === 'POST') {
+      savedAddress = route.request().postDataJSON() as Record<string, unknown>
+      await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ id: 'address-2', ...savedAddress }) })
+      return
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 'address-1', label: 'Site', address: 'T Nagar', city: 'Chennai', pincode: '600017' }]) })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: /Book now|Start a new booking/ }).first().click()
+  await page.getByRole('combobox', { name: 'Use a saved address' }).selectOption('address-1')
+  await expect(page.getByText('T Nagar, Chennai 600017')).toBeVisible()
+  await page.getByRole('combobox', { name: 'Use a saved address' }).selectOption('')
+  await page.getByRole('textbox', { name: 'Full address' }).fill('MG Road, Chennai')
+  await page.getByRole('textbox', { name: 'Address label' }).fill('Project site')
+  await page.getByRole('checkbox', { name: /Save this address to my account/ }).check()
+  await page.getByRole('textbox', { name: 'City' }).fill('Chennai')
+  await page.getByRole('textbox', { name: 'Pincode' }).fill('600001')
+  await page.getByRole('button', { name: /Review combined booking/ }).click()
+  await page.getByRole('checkbox', { name: /I confirm these requirements/ }).check()
+  await page.getByRole('button', { name: /Continue to payment/ }).click()
+  await page.getByRole('radio', { name: /Cash on delivery/ }).check()
+  await page.getByRole('button', { name: /Confirm booking/ }).click()
+
+  await expect(page.getByRole('heading', { name: 'Your combined booking is ready.' })).toBeVisible()
+  expect(savedAddress).toEqual({ label: 'Project site', address: 'MG Road, Chennai', city: 'Chennai', pincode: '600001' })
 })
 
 test('verified saved phone skips OTP until the customer changes the number', async ({ page }) => {
@@ -91,7 +140,6 @@ test('verified saved phone skips OTP until the customer changes the number', asy
   await mockBookingApi(page, true)
   await page.goto('/')
   await page.getByRole('button', { name: /Book now|Start a new booking/ }).first().click()
-  await page.getByRole('checkbox', { name: /Water tanker/ }).check()
 
   const mobileInput = page.getByRole('textbox', { name: 'Mobile number' })
   await expect(mobileInput).toHaveValue('9876543210')
@@ -105,57 +153,60 @@ test('verified saved phone skips OTP until the customer changes the number', asy
   await expect(page.getByText('Mobile number verified. It can be used for all selected services.')).toHaveCount(0)
 })
 
-test('selected service details collapse and can be removed from selection', async ({ page }) => {
+test('service items can be added separately and removed independently', async ({ page }) => {
   await mockBookingApi(page)
   await page.goto('/')
   await page.getByRole('button', { name: /Book now|Start a new booking/ }).first().click()
-  const waterService = page.getByRole('checkbox', { name: /Water tanker/ })
-  await waterService.check()
+  await expect(page.locator('.booking-line')).toHaveCount(1)
+  const tankerCount = page.getByRole('spinbutton', { name: /Number of tankers/ })
+  await expect(tankerCount).toHaveAttribute('max', '5')
+  await tankerCount.fill('6')
+  expect(await tankerCount.evaluate((input) => !(input as HTMLInputElement).validity.valid)).toBe(true)
+  await tankerCount.fill('5')
+  expect(await tankerCount.evaluate((input) => (input as HTMLInputElement).validity.valid)).toBe(true)
+  await expect(page.getByRole('textbox', { name: 'Required date' })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Full address' })).toBeVisible()
 
-  const accordionToggle = page.getByRole('button', { name: 'Water tanker details' })
-  await expect(accordionToggle).toHaveAttribute('aria-expanded', 'false')
-  await expect(page.getByLabel('Preferred delivery date for Water tanker')).toHaveCount(0)
-  await accordionToggle.click()
-  await expect(accordionToggle).toHaveAttribute('aria-expanded', 'true')
-  await expect(page.getByLabel('Preferred delivery date for Water tanker')).toBeVisible()
-  const locationRow = page.locator('.delivery-location-row').first()
-  await expect(locationRow).toHaveCSS('display', 'grid')
-  await expect(page.getByRole('button', { name: 'Choose Water tanker delivery location on map' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Use current location for Water tanker' })).toBeVisible()
-  await accordionToggle.click()
-  await expect(accordionToggle).toHaveAttribute('aria-expanded', 'false')
-  await expect(page.getByLabel('Preferred delivery date for Water tanker')).toHaveCount(0)
-  await accordionToggle.click()
+  await page.getByRole('button', { name: 'Add another service' }).click()
+  await expect(page.locator('.booking-line')).toHaveCount(2)
+  await page.locator('.booking-line').nth(1).getByLabel('Service for item 2').selectOption('tank_cleaning')
+  await expect(page.getByLabel('Service for item 1')).toBeVisible()
+  await expect(page.getByLabel('Service for item 2')).toHaveValue('tank_cleaning')
+  await page.getByRole('button', { name: 'Remove service item 2' }).click()
+  await expect(page.locator('.booking-line')).toHaveCount(1)
+  await expect(page.getByRole('button', { name: 'Remove service item 1' })).toBeVisible()
+})
 
-  await page.getByRole('button', { name: 'Remove Water tanker' }).click()
-  await expect(waterService).not.toBeChecked()
-  await expect(accordionToggle).toHaveCount(0)
-  await expect(page.getByRole('heading', { name: '0 services' })).toBeVisible()
-  await expect(page.getByRole('textbox', { name: /Delivery location/ })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: /delivery location on map/ })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: /Use current location for/ })).toHaveCount(0)
-  await expect(page.getByRole('textbox', { name: /Mobile number/ })).toHaveCount(0)
-  await expect(page.getByLabel('Delivery access notes')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Review request' })).toHaveCount(0)
+test('customer can remove every service item and explicitly add another later', async ({ page }) => {
+  await mockBookingApi(page)
+  await page.goto('/')
+  await page.getByRole('button', { name: /Book now|Start a new booking/ }).first().click()
+  await page.getByRole('button', { name: 'Add another service' }).click()
+  await expect(page.locator('.booking-line')).toHaveCount(2)
+
+  await page.getByRole('button', { name: 'Remove all services' }).click()
+  const confirmation = page.getByRole('group', { name: 'Confirm removing all services' })
+  await expect(confirmation).toContainText('Remove all 2 service items?')
+  await confirmation.getByRole('button', { name: 'Remove all' }).click()
+  await expect(page.locator('.booking-line')).toHaveCount(0)
+  await expect(page.getByText('Select at least one service to enter delivery and contact details.')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Add another service' }).click()
+  await expect(page.locator('.booking-line')).toHaveCount(1)
 })
 
 test('out-of-service locations show a toast and require a Chennai location', async ({ page }) => {
   await mockBookingApi(page)
   await page.goto('/')
   await page.getByRole('button', { name: 'Book now' }).first().click()
-  await page.getByRole('checkbox', { name: /Water tanker/ }).check()
-  await page.getByRole('button', { name: 'Water tanker details' }).click()
-
-  const locationInput = page.getByRole('textbox', { name: 'Delivery location for Water tanker' })
+  const locationInput = page.getByRole('textbox', { name: 'Full address' })
   await locationInput.fill('Erode, Tamil Nadu')
   await locationInput.press('Tab')
   await expect(page.getByRole('alert').filter({ hasText: 'We currently deliver only within Chennai.' })).toBeVisible()
-  await expect(locationInput).toHaveAttribute('aria-invalid', 'true')
 
   await locationInput.fill('T Nagar, Chennai')
   await locationInput.press('Tab')
   await expect(page.getByRole('alert').filter({ hasText: 'We currently deliver only within Chennai.' })).toHaveCount(0)
-  await expect(locationInput).not.toHaveAttribute('aria-invalid', 'true')
 })
 
 test('booking validates each service date and requirement before review', async ({ page }) => {
@@ -168,22 +219,19 @@ test('booking validates each service date and requirement before review', async 
   await mockBookingApi(page, true)
   await page.goto('/')
   await page.getByRole('button', { name: /Book now|Start a new booking/ }).first().click()
-  await page.getByRole('checkbox', { name: /Water tanker/ }).check()
-  await page.getByRole('button', { name: 'Water tanker details' }).click()
   const yesterday = new Date()
   yesterday.setDate(yesterday.getDate() - 1)
   const pastDate = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`
-  await page.getByLabel('Preferred delivery date for Water tanker').fill(pastDate)
-  await page.getByLabel('Water type and delivery requirements for Water tanker').fill('ok')
-  await page.getByRole('textbox', { name: 'Delivery location for Water tanker' }).fill('MG Road, Chennai')
-  const reviewButton = page.getByRole('button', { name: 'Review request' })
+  await page.getByRole('textbox', { name: 'Required date' }).fill(pastDate)
+  await page.getByRole('textbox', { name: 'Full address' }).fill('MG Road, Chennai')
+  await page.getByRole('textbox', { name: /Mobile number/ }).fill('9876543210')
+  const reviewButton = page.getByRole('button', { name: /Review combined booking/ })
   await expect(reviewButton).toBeDisabled()
-  await page.getByLabel('Preferred delivery date for Water tanker').fill(futureDateInputValue())
-  await page.getByLabel('Water type and delivery requirements for Water tanker').fill('Potable water for the building')
+  await page.getByRole('textbox', { name: 'Required date' }).fill(futureDateInputValue())
   await expect(reviewButton).toBeEnabled()
 })
 
-test('review request stays disabled until every selected service is complete', async ({ page }) => {
+test('shared address and date gate review for every service item', async ({ page }) => {
   await page.addInitScript(() => {
     sessionStorage.setItem('urban-tanker-auth', JSON.stringify({
       state: { user: { username: 'customer@example.com', name: 'Test Customer', role: 'customer' } },
@@ -193,25 +241,16 @@ test('review request stays disabled until every selected service is complete', a
   await mockBookingApi(page, true)
   await page.goto('/')
   await page.getByRole('button', { name: /Book now|Start a new booking/ }).first().click()
-  await page.getByRole('checkbox', { name: /Water tanker/ }).check()
-  await page.getByRole('checkbox', { name: /Tank cleaning/ }).check()
-  const reviewButton = page.getByRole('button', { name: 'Review request' })
+  await page.getByRole('button', { name: 'Add another service' }).click()
+  await page.locator('.booking-line').nth(1).getByLabel('Service for item 2').selectOption('tank_cleaning')
+  const reviewButton = page.getByRole('button', { name: /Review combined booking/ })
   await expect(reviewButton).toBeDisabled()
-
-  await page.getByRole('button', { name: 'Water tanker details' }).click()
-  await page.getByRole('button', { name: 'Tank cleaning details' }).click()
-  await page.getByLabel('Preferred delivery date for Water tanker').fill(futureDateInputValue())
-  await page.getByLabel('Water type and delivery requirements for Water tanker').fill('Potable water for the building')
-  await page.getByRole('textbox', { name: 'Delivery location for Water tanker' }).fill('MG Road, Chennai')
-  await expect(reviewButton).toBeDisabled()
-
-  await page.getByLabel('Preferred delivery date for Tank cleaning').fill(futureDateInputValue(2))
-  await page.getByLabel('Tank type and cleaning requirements for Tank cleaning').fill('Clean the rooftop tanks')
-  await page.getByRole('textbox', { name: 'Delivery location for Tank cleaning' }).fill('OMR, Chennai')
+  await page.getByRole('textbox', { name: 'Required date' }).fill(futureDateInputValue())
+  await page.getByRole('textbox', { name: 'Full address' }).fill('MG Road, Chennai')
   await expect(page.getByRole('textbox', { name: 'Mobile number' })).toHaveValue('9876543210')
   await expect(page.getByText('Mobile number verified. It can be used for all selected services.')).toBeVisible()
   await expect(reviewButton).toBeEnabled()
-  await expect(page.getByRole('heading', { name: 'Tell us what you need.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'One booking. Every service you need.' })).toBeVisible()
 })
 
 test('multiple services retain separate details in one booking request', async ({ page }) => {
@@ -225,40 +264,47 @@ test('multiple services retain separate details in one booking request', async (
 
   await page.goto('/')
   await page.getByRole('button', { name: /Book now|Start a new booking/ }).first().click()
-  await page.getByRole('checkbox', { name: /Water tanker/ }).check()
-  await page.getByRole('checkbox', { name: /Tank cleaning/ }).check()
-  await page.getByRole('button', { name: 'Water tanker details' }).click()
-  await page.getByRole('button', { name: 'Tank cleaning details' }).click()
-  await page.getByLabel('Delivery capacity (litres)').fill('5,000 litres')
-  await page.getByLabel('Water type and delivery requirements for Water tanker').fill('Potable water for the building')
-  await page.getByLabel('Preferred delivery date for Water tanker').fill('2026-11-20')
-  await page.getByLabel('Tank size or number of tanks').fill('2 tanks')
-  await page.getByLabel('Tank type and cleaning requirements for Tank cleaning').fill('Clean the rooftop tanks')
-  await page.getByLabel('Preferred delivery date for Tank cleaning').fill('2026-11-22')
-  await page.getByRole('textbox', { name: 'Delivery location for Water tanker' }).fill('MG Road, Chennai')
-  await page.getByRole('textbox', { name: 'Delivery location for Tank cleaning' }).fill('OMR, Chennai')
+  await page.getByRole('button', { name: 'Add another service' }).click()
+  await page.locator('.booking-line').nth(1).getByLabel('Service for item 2').selectOption('tank_cleaning')
+  await page.locator('.booking-line').nth(0).getByLabel('Water type').selectOption('Raw water')
+  await page.locator('.booking-line').nth(0).getByLabel('Capacity').selectOption('6 KL')
+  await page.locator('.booking-line').nth(1).getByLabel('Tank type').selectOption('Sump')
+  await page.locator('.booking-line').nth(1).getByLabel('Number of tanks').fill('2')
+  await page.getByLabel('Required date').fill('2026-11-20')
+  await page.getByLabel('Preferred time').selectOption('10:00')
+  await page.getByRole('textbox', { name: 'Customer / company name' }).fill('Test Customer')
+  await page.getByRole('textbox', { name: 'Full address' }).fill('MG Road, Chennai')
   await page.getByRole('textbox', { name: /Mobile number/ }).fill('9876543210')
   await page.getByRole('button', { name: 'Send code' }).click()
   await page.getByRole('textbox', { name: 'Mobile verification code' }).fill('123456')
   await page.getByRole('button', { name: 'Verify' }).click()
-  await page.getByRole('button', { name: 'Review request' }).click()
+  await page.getByRole('button', { name: /Review combined booking/ }).click()
+  await page.getByRole('checkbox', { name: /I confirm these requirements/ }).check()
   await page.getByRole('button', { name: /Continue to payment/ }).click()
   await page.getByRole('radio', { name: /Cash on delivery/ }).check()
   await page.getByRole('button', { name: /Confirm booking/ }).click()
 
-  await expect(page.getByRole('heading', { name: 'Request received.' })).toBeVisible()
-  await expect(page.getByRole('banner').getByRole('button', { name: 'My account', exact: true })).toBeVisible()
-  await page.getByRole('banner').getByRole('button', { name: 'My account', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Your combined booking is ready.' })).toBeVisible()
+  await expect(page.getByRole('banner').getByRole('button', { name: 'My Account', exact: true })).toBeVisible()
+  await page.getByRole('banner').getByRole('button', { name: 'My Account', exact: true }).click()
   await page.getByRole('dialog', { name: 'Leave booking?' }).getByRole('button', { name: 'Leave booking' }).click()
   await expect(page.getByRole('button', { name: 'My Bookings' })).toBeVisible()
   expect(bookingPayloads).toHaveLength(1)
   expect(bookingPayloads[0].serviceId).toBe('water_tanker')
   expect(bookingPayloads[0].phone).toBe('9876543210')
   expect(bookingPayloads[0].phoneVerificationChallengeId).toBe('00000000-0000-4000-8000-000000000001')
-  expect(bookingPayloads[0].services).toEqual([
-    { serviceId: 'water_tanker', capacity: '5,000 litres', details: 'Potable water for the building', deliveryDate: '2026-11-20', location: 'MG Road, Chennai' },
-    { serviceId: 'tank_cleaning', capacity: '2 tanks', details: 'Clean the rooftop tanks', deliveryDate: '2026-11-22', location: 'OMR, Chennai' },
+  const submittedServices = bookingPayloads[0].services as Record<string, unknown>[]
+  expect(submittedServices).toHaveLength(2)
+  expect(submittedServices.map((service) => service.serviceId)).toEqual(['water_tanker', 'tank_cleaning'])
+  expect(submittedServices.map((service) => service.deliveryDate)).toEqual(['2026-11-20', '2026-11-20'])
+  expect(submittedServices.map((service) => service.location)).toEqual([
+    'MG Road, Chennai, South Chennai',
+    'MG Road, Chennai, South Chennai',
   ])
+  expect(submittedServices[0].waterType).toBe('Raw water')
+  expect(submittedServices[1].serviceType).toBe('Sump')
+  expect(submittedServices[1].quantity).toBe('2')
+  expect(bookingPayloads[0].preferredTime).toBe('10:00')
 })
 
 test('booking blocks invalid mobile numbers before review', async ({ page }) => {
@@ -271,17 +317,14 @@ test('booking blocks invalid mobile numbers before review', async ({ page }) => 
   await mockBookingApi(page, true)
   await page.goto('/')
   await page.getByRole('button', { name: /Book now|Start a new booking/ }).first().click()
-  await page.getByRole('checkbox', { name: /Water tanker/ }).check()
-  await page.getByRole('button', { name: 'Water tanker details' }).click()
-  await page.getByLabel('Preferred delivery date for Water tanker').fill(futureDateInputValue())
-  await page.getByLabel('Water type and delivery requirements for Water tanker').fill('Potable water for the building')
-  await page.getByRole('textbox', { name: 'Delivery location for Water tanker' }).fill('MG Road, Chennai')
+  await page.getByRole('textbox', { name: 'Full address' }).fill('MG Road, Chennai')
+  await page.getByRole('textbox', { name: 'Required date' }).fill(futureDateInputValue())
   const mobileInput = page.getByRole('textbox', { name: 'Mobile number' })
   await expect(mobileInput).toHaveValue('9876543210')
   await mobileInput.fill('123')
-  await expect(page.getByRole('button', { name: 'Review request' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: /Review combined booking/ })).toBeDisabled()
   await expect(page.getByRole('textbox', { name: 'Mobile verification code' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Tell us what you need.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'One booking. Every service you need.' })).toBeVisible()
 })
 
 test('customer profile loads saved name, email, and phone values', async ({ page }) => {
@@ -380,10 +423,10 @@ test('customer can view booking details and repeat a multi-service booking', asy
   await expect(page.getByRole('banner').getByRole('button', { name: 'Book now', exact: true })).toHaveCount(0)
   await page.getByRole('button', { name: 'My Bookings' }).click()
   await expect(page.getByRole('button', { name: 'New booking', exact: true })).toHaveCount(0)
-  await expect(page.getByRole('heading', { name: 'Tell us what you need.' })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'One booking. Every service you need.' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Book now', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Tell us what you need.' })).toBeVisible()
-  await page.getByRole('banner').getByRole('button', { name: 'My account', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'One booking. Every service you need.' })).toBeVisible()
+  await page.getByRole('banner').getByRole('button', { name: 'My Account', exact: true }).click()
   await page.getByRole('dialog', { name: 'Leave booking?' }).getByRole('button', { name: 'Leave booking' }).click()
   await page.getByRole('button', { name: 'My Bookings' }).click()
 
@@ -404,19 +447,14 @@ test('customer can view booking details and repeat a multi-service booking', asy
 
   await page.getByRole('button', { name: 'Actions for booking booking-42' }).click()
   await page.getByRole('menuitem', { name: 'Book again' }).click()
-  await expect(page.getByRole('heading', { name: 'Tell us what you need.' })).toBeVisible()
-  await expect(page.getByRole('checkbox', { name: /Water tanker/ })).toBeChecked()
-  await expect(page.getByRole('checkbox', { name: /Tank cleaning/ })).toBeChecked()
-  await page.getByRole('button', { name: 'Water tanker details' }).click()
-  await page.getByRole('button', { name: 'Tank cleaning details' }).click()
-  await expect(page.getByLabel('Delivery capacity (litres)')).toHaveValue('5,000 litres')
-  await expect(page.getByLabel('Preferred delivery date for Water tanker')).toHaveValue('2026-11-20')
-  await expect(page.getByLabel('Preferred delivery date for Tank cleaning')).toHaveValue('2026-11-22')
-  await expect(page.getByLabel('Tank type and cleaning requirements for Tank cleaning')).toHaveValue('Clean the rooftop tanks')
-  await expect(page.getByRole('textbox', { name: 'Delivery location for Water tanker' })).toHaveValue('MG Road, Chennai')
-  await expect(page.getByRole('textbox', { name: 'Delivery location for Tank cleaning' })).toHaveValue('OMR, Chennai')
+  await expect(page.getByRole('heading', { name: 'One booking. Every service you need.' })).toBeVisible()
+  await expect(page.locator('.booking-line')).toHaveCount(2)
+  await expect(page.getByRole('textbox', { name: 'Full address' })).toHaveValue('MG Road, Chennai')
+  await expect(page.getByRole('textbox', { name: 'Required date' })).toHaveValue('2026-11-20')
+  await expect(page.locator('.booking-line').nth(0).getByLabel('Capacity')).toHaveValue('5,000 litres')
+  await expect(page.locator('.booking-line').nth(1).getByLabel('Tank type')).toHaveValue('Overhead tank')
   await expect(page.getByRole('textbox', { name: /Mobile number/ })).toHaveValue('9876543210')
-  await expect(page.getByLabel('Delivery access notes')).toHaveValue('Use the north entrance')
+  await expect(page.getByRole('textbox', { name: 'Additional requirements' })).toHaveValue('Use the north entrance')
 })
 
 test('signed-in customer stays on booking and confirms before leaving selected services', async ({ page }) => {
@@ -432,24 +470,22 @@ test('signed-in customer stays on booking and confirms before leaving selected s
   await page.getByRole('button', { name: 'My Bookings' }).click()
   await page.getByRole('button', { name: 'Book now', exact: true }).click()
 
-  const waterService = page.getByRole('checkbox', { name: /Water tanker/ })
-  await waterService.check()
-  await expect(page.getByRole('heading', { name: 'Tell us what you need.' })).toBeVisible()
-  await expect(waterService).toBeChecked()
+  await expect(page.locator('.booking-line')).toHaveCount(1)
+  await expect(page.getByRole('heading', { name: 'One booking. Every service you need.' })).toBeVisible()
 
-  await page.getByRole('button', { name: 'Urban Tanker home' }).click()
+  await page.getByRole('banner').getByRole('button', { name: 'Urban Tanker home' }).click()
   const navigationDialog = page.getByRole('dialog', { name: 'Leave booking?' })
   await expect(navigationDialog).toContainText('Are you sure you want to leave the booking screen?')
   await navigationDialog.getByRole('button', { name: 'Stay on this page' }).click()
 
-  await expect(page.getByRole('heading', { name: 'Tell us what you need.' })).toBeVisible()
-  await expect(waterService).toBeChecked()
-  await page.getByRole('button', { name: 'Urban Tanker home' }).click()
+  await expect(page.getByRole('heading', { name: 'One booking. Every service you need.' })).toBeVisible()
+  await expect(page.locator('.booking-line')).toHaveCount(1)
+  await page.getByRole('banner').getByRole('button', { name: 'Urban Tanker home' }).click()
   await page.getByRole('dialog', { name: 'Leave booking?' }).getByRole('button', { name: 'Leave booking' }).click()
   await expect(page.getByRole('navigation', { name: 'customer workspace pages' })).toBeVisible()
 })
 
-test('signed-in customer is asked before leaving or refreshing an empty booking screen', async ({ page }) => {
+test('signed-in customer is asked before leaving or refreshing the initial booking screen', async ({ page }) => {
   await page.addInitScript(() => {
     sessionStorage.setItem('urban-tanker-auth', JSON.stringify({
       state: { user: { username: 'customer@example.com', name: 'Test Customer', role: 'customer' } },
@@ -461,13 +497,13 @@ test('signed-in customer is asked before leaving or refreshing an empty booking 
   await page.goto('/')
   await page.getByRole('button', { name: 'My Bookings' }).click()
   await page.getByRole('button', { name: 'Book now', exact: true }).click()
-  await expect(page.getByRole('heading', { name: '0 services' })).toBeVisible()
+  await expect(page.locator('.booking-line')).toHaveCount(1)
 
-  await page.getByRole('button', { name: 'Urban Tanker home' }).click()
+  await page.getByRole('banner').getByRole('button', { name: 'Urban Tanker home' }).click()
   const navigationDialog = page.getByRole('dialog', { name: 'Leave booking?' })
   await expect(navigationDialog).toBeVisible()
   await navigationDialog.getByRole('button', { name: 'Stay on this page' }).click()
-  await expect(page.getByRole('heading', { name: 'Tell us what you need.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'One booking. Every service you need.' })).toBeVisible()
 
   let refreshPrompt = ''
   page.once('dialog', (dialog) => {

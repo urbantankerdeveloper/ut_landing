@@ -1,4 +1,4 @@
-const CACHE = 'urban-tanker-shell-v2'
+const CACHE = 'urban-tanker-shell-v3'
 const PRECACHE = ['/', '/manifest.json', '/robots.txt', '/sitemap.xml', '/assets/urban-tanker-hero.jpg']
 
 self.addEventListener('install', (event) => {
@@ -15,10 +15,22 @@ self.addEventListener('fetch', (event) => {
   if (requestUrl.origin !== self.location.origin) return
   if (requestUrl.pathname.startsWith('/api/')) return
   if (event.request.mode === 'navigate') {
-    event.respondWith(fetch(event.request).then((response) => { const copy = response.clone(); caches.open(CACHE).then((cache) => cache.put('/', copy)); return response }).catch(() => caches.match('/')))
+    const networkResponse = fetch(event.request)
+    event.waitUntil(networkResponse.then((response) => response.ok ? caches.open(CACHE).then((cache) => cache.put('/', response.clone())) : undefined).catch(() => undefined))
+    event.respondWith(networkResponse.catch(async () => (await caches.match(event.request)) ?? (await caches.match('/')) ?? Response.error()))
     return
   }
-  event.respondWith(caches.match(event.request).then((cached) => cached ?? fetch(event.request).then((response) => { const copy = response.clone(); caches.open(CACHE).then((cache) => cache.put(event.request, copy)); return response })))
+  const fileName = requestUrl.pathname.split('/').at(-1) ?? ''
+  const immutableAsset = requestUrl.pathname.startsWith('/assets/') && /[-.][a-zA-Z0-9_-]{8,}\./.test(fileName)
+  if (immutableAsset) {
+    const networkResponse = fetch(event.request)
+    event.waitUntil(networkResponse.then((response) => response.ok ? caches.open(CACHE).then((cache) => cache.put(event.request, response.clone())) : undefined).catch(() => undefined))
+    event.respondWith(caches.match(event.request).then((cached) => cached ?? networkResponse))
+    return
+  }
+  const networkResponse = fetch(event.request)
+  event.waitUntil(networkResponse.then((response) => response.ok ? caches.open(CACHE).then((cache) => cache.put(event.request, response.clone())) : undefined).catch(() => undefined))
+  event.respondWith(networkResponse.catch(async () => (await caches.match(event.request)) ?? Response.error()))
 })
 
 self.addEventListener('push', (event) => {

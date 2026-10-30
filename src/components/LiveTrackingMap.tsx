@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { CircleMarker, MapContainer, Polyline, TileLayer, useMap } from 'react-leaflet'
 import type { LatLngExpression, LatLngLiteral } from 'leaflet'
-import { VendorRealtimeClient } from '../services/realtime'
+import { subscribeToRealtime } from '../services/realtime'
 import type { TrackingSnapshot } from '../api/customer'
 import 'leaflet/dist/leaflet.css'
 
@@ -21,17 +21,14 @@ export function LiveTrackingMap({ bookingId, snapshot }: Props) {
   const customerPoint = snapshot.customerLatitude !== undefined && snapshot.customerLongitude !== undefined ? { latitude: snapshot.customerLatitude, longitude: snapshot.customerLongitude } : null
   useEffect(() => {
     const realtimeUrl = import.meta.env.VITE_REALTIME_URL ?? (import.meta.env.PROD ? window.location.origin : 'http://localhost:8080')
-    const client = new VendorRealtimeClient(realtimeUrl, (message) => {
+    return subscribeToRealtime(realtimeUrl, (message) => {
       if (message.type !== 'booking.location.updated' || !message.payload || typeof message.payload !== 'object') return
       const payload = message.payload as { bookingId?: string; latitude?: number; longitude?: number }
       if (payload.bookingId !== bookingId || typeof payload.latitude !== 'number' || typeof payload.longitude !== 'number') return
       const point = { latitude: payload.latitude, longitude: payload.longitude }
       setFleetPoint(point)
       setTrail((current) => [...current.slice(-19), point])
-    })
-    client.connect()
-    client.joinBooking(bookingId)
-    return () => client.disconnect()
+    }, bookingId)
   }, [bookingId])
   if (!fleetPoint) return <div className="tracking-map-empty">Waiting for the fleet to start sharing its live location.</div>
   const fleet = { lat: fleetPoint.latitude, lng: fleetPoint.longitude }

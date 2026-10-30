@@ -16,11 +16,12 @@ create type public.user_role as enum ('customer','vendor','dispatcher','admin');
 create type public.booking_status as enum ('pending_vendor','vendor_assigned','accepted','en_route','arrived','delivered','cancelled');
 
 create table if not exists public.profiles (id uuid primary key references auth.users(id) on delete cascade, full_name text not null, phone_e164 text unique, role public.user_role not null default 'customer', created_at timestamptz not null default now());
-create table if not exists public.vendors (id uuid primary key default gen_random_uuid(), owner_profile_id uuid references public.profiles(id), business_name text not null, phone_e164 text not null, service_zone text not null, is_online boolean not null default false, verification text not null default 'pending', created_at timestamptz not null default now());
+create table if not exists public.vendors (id uuid primary key default gen_random_uuid(), owner_profile_id uuid references public.profiles(id), business_name text not null, phone_e164 text not null, service_zone text not null, latitude numeric(9,6), longitude numeric(9,6), is_online boolean not null default false, verification text not null default 'pending', created_at timestamptz not null default now(), constraint vendors_coordinates_pair_check check ((latitude is null) = (longitude is null) and (latitude is null or latitude between -90 and 90) and (longitude is null or longitude between -180 and 180)));
 create table if not exists public.vehicles (id uuid primary key default gen_random_uuid(), vendor_id uuid not null references public.vendors(id) on delete cascade, registration_number text not null unique, capacity_litres integer, supported_services text[] not null default '{}', is_active boolean not null default true, metadata jsonb not null default '{}');
 create table if not exists public.drivers (id uuid primary key default gen_random_uuid(), vendor_id uuid not null references public.vendors(id) on delete cascade, name text not null, mobile_e164 text not null, licence_number text not null, is_active boolean not null default false, verification text not null default 'pending', metadata jsonb not null default '{}');
 create table if not exists public.service_catalog (id uuid primary key default gen_random_uuid(), code text unique not null, name text not null, description text, base_price_paise integer not null default 0, is_active boolean not null default true, config jsonb not null default '{}');
-create table if not exists public.bookings (id uuid primary key default gen_random_uuid(), reference text unique not null, customer_id uuid not null references public.profiles(id), vendor_id uuid references public.vendors(id), vehicle_id uuid references public.vehicles(id), service_code text not null references public.service_catalog(code), capacity_litres integer, scheduled_for timestamptz, address_text text not null, latitude numeric(9,6), longitude numeric(9,6), access_notes text, cancellation_reason text, service_details jsonb not null default '[]'::jsonb, quoted_amount_paise integer not null default 0, status public.booking_status not null default 'pending_vendor', delivery_otp_hash text, delivery_otp_expires_at timestamptz, tracking_token_hash text unique, tracking_token_expires_at timestamptz, created_at timestamptz not null default now(), updated_at timestamptz not null default now());
+create table if not exists public.bookings (id uuid primary key default gen_random_uuid(), reference text unique not null, customer_id uuid not null references public.profiles(id), idempotency_key uuid, vendor_id uuid references public.vendors(id), vehicle_id uuid references public.vehicles(id), service_code text not null references public.service_catalog(code), capacity_litres integer, scheduled_for timestamptz, address_text text not null, latitude numeric(9,6), longitude numeric(9,6), access_notes text, cancellation_reason text, service_details jsonb not null default '[]'::jsonb, quoted_amount_paise integer not null default 0, status public.booking_status not null default 'pending_vendor', delivery_otp_hash text, delivery_otp_expires_at timestamptz, tracking_token_hash text unique, tracking_token_expires_at timestamptz, created_at timestamptz not null default now(), updated_at timestamptz not null default now());
+create unique index if not exists bookings_customer_idempotency_key_idx on public.bookings(customer_id, idempotency_key) where idempotency_key is not null;
 alter table public.bookings add column if not exists cancellation_reason text;
 alter table public.bookings add column if not exists service_details jsonb not null default '[]'::jsonb;
 alter table public.bookings add column if not exists tracking_token_hash text unique;
@@ -669,6 +670,56 @@ alter table public.bookings
 alter table public.bookings
   add constraint bookings_payment_method_check
   check (payment_method in ('wallet', 'gateway', 'cod'));
+
+create or replace function public.create_customer_booking(p_booking jsonb, p_notifications jsonb, p_payment jsonb default null)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_booking public.bookings;
+  v_created boolean;
+begin
+  insert into public.bookings (reference, customer_id, idempotency_key, vendor_id, service_code,
+    capacity_litres, scheduled_for, address_text, latitude, longitude, access_notes,
+    service_details, quoted_amount_paise, payment_method)
+  values (p_booking->>'reference', (p_booking->>'customer_id')::uuid,
+    nullif(p_booking->>'idempotency_key', '')::uuid, nullif(p_booking->>'vendor_id', '')::uuid,
+    p_booking->>'service_code', nullif(p_booking->>'capacity_litres', '')::integer,
+    nullif(p_booking->>'scheduled_for', '')::timestamptz, p_booking->>'address_text',
+    nullif(p_booking->>'latitude', '')::numeric, nullif(p_booking->>'longitude', '')::numeric,
+    p_booking->>'access_notes', coalesce(p_booking->'service_details', '[]'::jsonb),
+    coalesce(nullif(p_booking->>'quoted_amount_paise', '')::integer, 0),
+    coalesce(p_booking->>'payment_method', 'wallet'))
+  on conflict (customer_id, idempotency_key) where idempotency_key is not null do nothing
+  returning * into v_booking;
+  v_created := found;
+
+  if not v_created then
+    select * into v_booking
+    from public.bookings
+    where customer_id = (p_booking->>'customer_id')::uuid
+      and idempotency_key = (p_booking->>'idempotency_key')::uuid;
+  else
+    if p_payment is not null then
+      insert into public.payments (booking_id, provider, amount_paise, currency, status)
+      values (v_booking.id, p_payment->>'provider', (p_payment->>'amount_paise')::integer,
+        coalesce(p_payment->>'currency', 'INR'), coalesce(p_payment->>'status', 'pending'));
+    end if;
+
+    insert into public.notifications (recipient_id, event_type, title, payload)
+    select n.recipient_id, n.event_type, n.title,
+      coalesce(n.payload, '{}'::jsonb) || jsonb_build_object('bookingId', v_booking.id, 'reference', v_booking.reference)
+    from jsonb_to_recordset(coalesce(p_notifications, '[]'::jsonb))
+      as n(recipient_id uuid, event_type text, title text, payload jsonb);
+  end if;
+
+  return jsonb_build_object('booking', to_jsonb(v_booking), 'created', v_created);
+end;
+$$;
+revoke all on function public.create_customer_booking(jsonb, jsonb, jsonb) from public, anon, authenticated;
+grant execute on function public.create_customer_booking(jsonb, jsonb, jsonb) to service_role;
 
 
 create table if not exists public.partner_applications (

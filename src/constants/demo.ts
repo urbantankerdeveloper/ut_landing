@@ -1,4 +1,3 @@
-const configuredValue = import.meta.env.VITE_ENABLE_DEMO_DATA
-
-export const demoDataEnabled = configuredValue === 'true'
+// Workspace screens must always show API-backed records, loading states, or empty states.
+export const demoDataEnabled = false
 export const customerDemoDataEnabled = false

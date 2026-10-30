@@ -105,4 +105,15 @@
       padding: 11px 0;
     }
   }
+
+  .workspace-nav-group {
+    gap: 5px;
+  }
+
+  .workspace-nav-group:first-of-type,
+  .workspace-nav-group + .workspace-nav-group {
+    padding-top: 8px;
+    margin-top: 4px;
+    border-top: 1px solid rgba(201, 222, 219, .2);
+  }
 }

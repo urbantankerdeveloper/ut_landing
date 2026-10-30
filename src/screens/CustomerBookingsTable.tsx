@@ -139,8 +139,8 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
         {!sortedRows.length && <div className="admin-empty-state"><p>No bookings match the selected filter.</p></div>}
       </div>
       <div className="booking-table-pagination">
-        <span>{sortedRows.length ? `Showing ${(currentPage - 1) * pageSize + 1}-${Math.min(currentPage * pageSize, sortedRows.length)} of ${sortedRows.length}` : 'No bookings to display'}</span>
-        <div><button className="button button-quiet" disabled={currentPage <= 1} onClick={() => setPage((value) => value - 1)}>Previous</button><button className="button button-quiet" disabled={currentPage >= pageCount} onClick={() => setPage((value) => value + 1)}>Next</button></div>
+        <span>{sortedRows.length ? `Showing ${(currentPage - 1) * pageSize + 1}-${Math.min(currentPage * pageSize, sortedRows.length)} of ${sortedRows.length} loaded` : 'No bookings to display'}</span>
+        <div>{query.hasNextPage && <button className="button button-quiet" disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>{query.isFetchingNextPage ? 'Loading…' : 'Load older'}</button>}<button className="button button-quiet" disabled={currentPage <= 1} onClick={() => setPage((value) => value - 1)}>Previous</button><button className="button button-quiet" disabled={currentPage >= pageCount} onClick={() => setPage((value) => value + 1)}>Next</button></div>
       </div>
     </section>
     {openActionsBookingId && actionMenuPosition && createPortal(
