@@ -207,7 +207,8 @@ function calculateDiscount(coupon: CouponRecord, subtotal: number) {
   return Math.min(isPercentage ? Math.round(subtotal * value / 100) : Math.round(value), subtotal)
 }
 
-function estimatedServiceAmount(item: BookingServiceDetails, basePrice: number) {
+function estimatedServiceAmount(item: BookingServiceDetails, service: { price: number; optionSurchargesPaise?: Record<string, Record<string, number>> } | undefined) {
+  const basePrice = service?.price ?? 0
   const capacityMatch = item.capacity?.match(/^\s*([\d,.]+)\s*(kl|k l|litres?|l)?\s*$/i)
   const capacityValue = capacityMatch ? Number(capacityMatch[1].replace(/,/g, '')) : 0
   const capacityUnit = capacityMatch?.[2]?.toLowerCase().replace(/\s/g, '')
@@ -218,8 +219,16 @@ function estimatedServiceAmount(item: BookingServiceDetails, basePrice: number) 
     : 1
   const depth = Number(item.depth)
   const depthFactor = item.serviceId === 'borewell_service' && Number.isFinite(depth) && depth > 0 ? depth / 100 : 1
-  const units = Number(item.tankerCount || item.quantity) || 1
-  return Math.round(basePrice * capacityFactor * depthFactor * units)
+  const tankerServices = ['water_tanker', 'sewage_tanker', 'emergency_water', 'empty_tanker']
+  const quantityServices = ['drinking_water', 'tank_cleaning', 'rmc_mix']
+  const units = Number(tankerServices.includes(item.serviceId) ? item.tankerCount : quantityServices.includes(item.serviceId) ? item.quantity : 1) || 1
+  const optionSurchargesPaise = service?.optionSurchargesPaise ?? {}
+  const surchargePaise = (['capacity', 'waterType', 'serviceType', 'grade', 'pump', 'materialType'] as const).reduce((sum, field) => {
+    const selected = item[field]
+    const surcharge = selected ? Number(optionSurchargesPaise[field]?.[selected] ?? 0) : 0
+    return sum + (Number.isFinite(surcharge) && surcharge > 0 ? surcharge / 100 : 0)
+  }, 0)
+  return Math.round((basePrice * capacityFactor * depthFactor + surchargePaise) * units)
 }
 
 function formatOfferDiscount(offer: CouponRecord) {
@@ -273,7 +282,7 @@ export default function BookingScreen() {
   const signIn = useAuthStore((state) => state.signIn)
   const offersQuery = useCustomerOffers()
   const serviceCatalog = useMemo(() => servicesQuery.data ?? [], [servicesQuery.data])
-  const options = useMemo(() => serviceCatalog.map((service) => ({ code: service.code, label: service.name, price: service.base_price_paise / 100 })), [serviceCatalog])
+  const options = useMemo(() => serviceCatalog.map((service) => ({ code: service.code, label: service.name, price: service.base_price_paise / 100, optionSurchargesPaise: service.config?.optionSurchargesPaise })), [serviceCatalog])
   const { control, register, handleSubmit, setValue, getValues, watch, formState: { errors } } = useForm<BookingFormValues>({
     resolver: zodResolver(bookingFormSchema),
     mode: 'onChange',
@@ -330,6 +339,11 @@ export default function BookingScreen() {
   const [idempotencyKey] = useState(draft.idempotencyKey ?? crypto.randomUUID())
   const selectedServices = useMemo(() => serviceEntries.map((entry) => entry.serviceId), [serviceEntries])
   const activeServiceEntries = useMemo(() => serviceEntries.filter((entry) => options.some((option) => option.code === entry.serviceId)), [serviceEntries, options])
+  const availableServiceOptions = useMemo(() => options.filter((option) => !activeServiceEntries.some((entry) => entry.serviceId === option.code)), [activeServiceEntries, options])
+  const addServiceLabel = activeServiceEntries.length ? 'Add another service' : 'Add service'
+  const selectedServiceToAdd = availableServiceOptions.some((option) => option.code === serviceToAdd)
+    ? serviceToAdd
+    : availableServiceOptions[0]?.code ?? ''
   const activeServices = activeServiceEntries.map((entry) => entry.serviceId)
   const servicesForQuote = activeServices.length ? activeServices : [options[0]?.code].filter((code): code is string => Boolean(code))
   const sharedDeliveryAddress = uniqueAddressParts([sharedLocation, region, addressCity, addressPincode])
@@ -354,8 +368,8 @@ export default function BookingScreen() {
   }))
 
   const subtotal = serviceItems.reduce((sum, item) => {
-    const unitPrice = options.find((option) => option.code === item.serviceId)?.price ?? 0
-    return sum + estimatedServiceAmount(item, unitPrice)
+    const serviceOption = options.find((option) => option.code === item.serviceId)
+    return sum + estimatedServiceAmount(item, serviceOption)
   }, 0)
   const gst = Math.round(subtotal * GST_RATE)
   const total = Math.max(0, subtotal + gst - couponDiscount)
@@ -424,8 +438,8 @@ export default function BookingScreen() {
     }
   }, [phone, phoneVerificationQuery.data, setValue])
 
-  function addServiceEntry(serviceId = serviceToAdd || options[0]?.code) {
-    if (!serviceId || !options.some((option) => option.code === serviceId)) return
+  function addServiceEntry(serviceId = selectedServiceToAdd) {
+    if (!serviceId || !availableServiceOptions.some((option) => option.code === serviceId)) return
     const entry = { id: createServiceEntryId(), serviceId }
     pendingServiceFocusId.current = entry.id
     setServiceEntries((current) => [...current, entry])
@@ -677,9 +691,10 @@ export default function BookingScreen() {
     const serviceName = options.find((option) => option.code === item.serviceId)?.label ?? item.serviceId
     const duplicateCount = serviceItems.slice(0, index).filter((other) => other.serviceId === item.serviceId).length
     const details = [item.serviceType, item.waterType, item.capacity, item.tankerCount ? `${item.tankerCount} tankers` : '', item.quantity, item.depth ? `${item.depth} ft` : '', item.grade].filter(Boolean).join(' · ') || 'Site review'
-    const unitPrice = options.find((option) => option.code === item.serviceId)?.price ?? 0
+    const serviceOption = options.find((option) => option.code === item.serviceId)
+    const unitPrice = serviceOption?.price ?? 0
     const estimatePending = unitPrice <= 0
-    return { id: activeServiceEntries[index]?.id ?? `${item.serviceId}-${index}`, label: duplicateCount ? `${serviceName} ${duplicateCount + 1}` : serviceName, detail: details, amount: estimatedServiceAmount(item, unitPrice), estimatePending }
+    return { id: activeServiceEntries[index]?.id ?? `${item.serviceId}-${index}`, label: duplicateCount ? `${serviceName} ${duplicateCount + 1}` : serviceName, detail: details, amount: estimatedServiceAmount(item, serviceOption), estimatePending }
   })
 
   if (step === 'success') return <section className="booking-screen"><BookingHero onBack={() => navigate('home')} /><div className="booking-new-shell"><div className="surface booking-success"><span className="success-mark">✓</span><p className="eyebrow">REQUEST CREATED</p><h2>Your combined booking is ready.</h2><p>Reference <strong>{bookingId ?? 'confirmed'}</strong> contains all selected service requests.</p><div className="action-row"><button className="button button-primary" type="button" onClick={() => navigate('home')}>Return home <ArrowRight size={15} /></button></div></div></div></section>
@@ -695,7 +710,7 @@ export default function BookingScreen() {
             const duplicateCount = serviceItems.slice(0, index).filter((other) => other.serviceId === item.serviceId).length
             const unitPrice = options.find((option) => option.code === item.serviceId)?.price ?? 0
             const estimatePending = unitPrice <= 0
-            return <div className="review-item" key={activeServiceEntries[index]?.id ?? index}><h3>{duplicateCount ? `${name} ${duplicateCount + 1}` : name}</h3><p>{[item.serviceType, item.waterType, item.capacity, item.tankerCount ? `${item.tankerCount} tankers` : '', item.depth ? `${item.depth} ft` : '', item.quantity, item.grade, item.pump, item.pickupLocation, item.materialType, item.details].filter(Boolean).join(' · ')}</p><p>{estimatePending ? 'Quote pending' : `Estimated ${estimatedServiceAmount(item, unitPrice).toLocaleString('en-IN')} INR · ${sharedDate} · ${sharedLocation}`}</p></div>
+            return <div className="review-item" key={activeServiceEntries[index]?.id ?? index}><h3>{duplicateCount ? `${name} ${duplicateCount + 1}` : name}</h3><p>{[item.serviceType, item.waterType, item.capacity, item.tankerCount ? `${item.tankerCount} tankers` : '', item.depth ? `${item.depth} ft` : '', item.quantity, item.grade, item.pump, item.pickupLocation, item.materialType, item.details].filter(Boolean).join(' · ')}</p><p>{estimatePending ? 'Quote pending' : `Estimated ${estimatedServiceAmount(item, options.find((option) => option.code === item.serviceId)).toLocaleString('en-IN')} INR · ${sharedDate} · ${sharedLocation}`}</p></div>
           })}
           {step === 'review' && <>
             <label className="check-line booking-consent"><input type="checkbox" checked={reviewConsent} onChange={(event) => setReviewConsent(event.target.checked)} /> I confirm these requirements. Final vehicle availability, compatibility and project estimates may require vendor or admin review.</label>
@@ -728,7 +743,7 @@ export default function BookingScreen() {
           <BookingSection number="01" title="Select your services" description="Add one or more requirements to the same booking slot.">
             {activeServiceEntries.map((entry, index) => <BookingServiceItem key={entry.id} entry={entry} index={index} options={options} value={serviceDetails[entry.id] ?? serviceDraftFor(entry.serviceId)} errors={serviceFieldErrors[entry.id]} onServiceChange={changeServiceEntry} onFieldChange={updateServiceDetails} onRemove={removeServiceEntry} />)}
             {!activeServiceEntries.length && <p className="booking-no-services" role="status">Select at least one service to enter delivery and contact details.</p>}
-            <div className="booking-add-service"><label className="field">Add another service<select value={serviceToAdd || options[0]?.code || ''} onChange={(event) => setServiceToAdd(event.target.value)}>{options.map((option) => <option value={option.code} key={option.code}>{option.label}</option>)}</select></label><button className="button button-quiet" type="button" disabled={!options.length} onClick={() => addServiceEntry()}><Plus size={16} /> Add another service</button>{serviceEntries.length > 0 && <button className="button button-quiet booking-remove-all" type="button" onClick={() => setConfirmRemoveAll(true)}><Trash2 size={15} /> Remove all services</button>}</div>
+            <div className="booking-add-service"><label className="field">{addServiceLabel}<select value={selectedServiceToAdd} onChange={(event) => setServiceToAdd(event.target.value)} disabled={!availableServiceOptions.length}><option value="" disabled>{options.length ? 'All services are already added' : 'No services available'}</option>{availableServiceOptions.map((option) => <option value={option.code} key={option.code}>{option.label}</option>)}</select></label><button className="button button-quiet" type="button" disabled={!availableServiceOptions.length} onClick={() => addServiceEntry()}><Plus size={16} /> {addServiceLabel}</button>{serviceEntries.length > 0 && <button className="button button-quiet booking-remove-all" type="button" onClick={() => setConfirmRemoveAll(true)}><Trash2 size={15} /> Remove all services</button>}</div>
             {confirmRemoveAll && <div className="booking-remove-all-confirm" role="group" aria-label="Confirm removing all services"><span>Remove all {serviceEntries.length} service items?</span><button className="button button-quiet" type="button" onClick={() => setConfirmRemoveAll(false)}>Keep items</button><button className="button button-danger" type="button" onClick={removeAllServiceEntries}>Remove all</button></div>}
           </BookingSection>
 

@@ -23,7 +23,7 @@ export type CreateSupportRequestPayload = { subject: string; message: string; or
 export type WalletTransaction = { id: string; amount: number; type: string; status: string; createdAt?: string }
 export type CustomerContract = { id: string; property_type: string; service_plan: Record<string, unknown>; address: string; estimate: number; status: string; created_at: string }
 export type CustomerOffer = { id: string; code: string; title: string; discount_type: string; discount_value: number; valid_until?: string }
-export type CustomerService = { code: string; name: string; description?: string; base_price_paise: number; is_active: boolean; config?: { capacityOptions?: string[]; detailOptions?: string[]; waterTypeOptions?: string[]; tankerCountOptions?: string[] } }
+export type CustomerService = { code: string; name: string; description?: string; base_price_paise: number; is_active: boolean; config?: { capacityOptions?: string[]; detailOptions?: string[]; waterTypeOptions?: string[]; tankerCountOptions?: string[]; optionSurchargesPaise?: Record<string, Record<string, number>> } }
 export type CustomerPhoneVerification = { phone: string; verified: boolean }
 export type PublicTracking = {
   bookingReference: string
