@@ -161,17 +161,16 @@
 }
 
 .booking-coupon-list {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
     gap: 9px;
     padding: 2px 1px 5px;
-    overflow-x: auto;
-    scroll-snap-type: x proximity;
-    scrollbar-width: thin;
+    min-width: 0;
 }
 
 .booking-coupon-card {
     display: grid;
-    flex: 0 0 190px;
+    min-width: 0;
     gap: 4px;
     min-height: 92px;
     padding: 11px;
@@ -180,7 +179,7 @@
     background: #f4fbf9;
     border: 1px solid #d2e7e0;
     border-radius: 10px;
-    scroll-snap-align: start;
+    overflow-wrap: anywhere;
 }
 
 .booking-coupon-card:hover,
@@ -268,6 +267,15 @@
 .booking-screen .booking-progress-line { flex: 1; min-width: 28px; height: 2px; margin: 0 14px; background: #dce8ec; }
 .booking-screen .booking-new-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(340px,380px); gap: clamp(24px, 3vw, 48px); align-items: start; }
 .booking-screen .booking-form { display: grid; min-width: 0; gap: 16px; }
+.booking-screen button:has(> svg) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+.booking-screen button > svg { display: block; flex: 0 0 auto; align-self: center; }
+.booking-screen .field .input-with-icon { display: flex; align-items: center; }
+.booking-screen .field .input-with-icon > svg { display: block; flex: 0 0 auto; align-self: center; }
 .booking-screen .booking-surface,.booking-screen .booking-summary { margin: 0; border: 1px solid #dbe8ed; border-radius: 12px; box-shadow: 0 10px 32px rgba(9,47,70,.06); }
 .booking-screen .booking-surface { padding: 26px; background: #fff; }
 .booking-screen .booking-section-heading { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 22px; }
@@ -358,10 +366,162 @@
     .booking-screen .booking-add-service,.booking-screen .booking-coupon-row { grid-template-columns: 1fr; }
     .booking-screen .booking-add-service .button,.booking-screen .booking-coupon-row .button { width: 100%; }
     .booking-screen .booking-location-tools { flex-direction: column; }
+    .booking-screen .guest-otp-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 44px 44px;
+        width: 100%;
+        min-width: 0;
+        align-items: center;
+    }
+    .booking-screen .guest-otp-row input { box-sizing: border-box; width: 100%; min-width: 0; }
+    .booking-screen .guest-otp-row .button {
+        display: grid;
+        width: 44px;
+        min-width: 44px;
+        height: 44px;
+        min-height: 44px;
+        place-items: center;
+        padding: 0;
+        font-size: 0;
+    }
+    .booking-screen .guest-otp-row .button svg { width: 17px; height: 17px; }
+    .booking-screen .guest-otp-row .button > span { display: none; }
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 900px) {
     .booking-screen .booking-new-grid { grid-template-columns: minmax(0,1fr); }
     .booking-screen .booking-form,.booking-screen .booking-summary { grid-column: 1; width: 100%; min-width: 0; }
     .booking-screen .booking-summary { position: static; width: 100%; margin-left: 0; }
+}
+
+@media (min-width: 621px) and (max-width: 900px) {
+    .booking-page-header { min-height: 74px; padding-right: 24px; padding-left: 24px; }
+    .booking-screen .booking-hero { padding: 42px 28px 36px; }
+    .booking-screen .booking-hero h1 { font-size: clamp(44px, 6.5vw, 52px); }
+    .booking-screen .booking-hero-copy > p:last-child { max-width: 680px; }
+    .booking-screen .booking-hero-promise span { min-width: 0; gap: 10px; padding: 14px 13px; font-size: 12px; }
+    .booking-screen .booking-new-shell { padding: 0 28px 48px; }
+    .booking-screen .booking-progress { width: min(100%, 760px); }
+    .booking-screen .booking-new-grid { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+    .booking-screen .booking-form, .booking-screen .booking-summary { grid-column: 1; width: 100%; min-width: 0; }
+    .booking-screen .booking-surface { padding: 24px; }
+    .booking-screen .booking-summary { position: static; padding: 24px; }
+}
+
+@media (min-width: 901px) and (max-width: 1100px) {
+    .booking-page-header { gap: 18px; padding-right: 26px; padding-left: 26px; }
+    .booking-page-nav { display: none; }
+    .booking-screen .booking-hero { grid-template-columns: minmax(0, 1fr); gap: 24px; padding: 44px 30px 38px; }
+    .booking-screen .booking-hero h1 { font-size: clamp(48px, 5.7vw, 60px); }
+    .booking-screen .booking-hero-promise { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .booking-screen .booking-hero-promise span { min-width: 0; gap: 10px; padding: 15px; }
+    .booking-screen .booking-new-shell { padding-right: 30px; padding-left: 30px; }
+}
+
+@media (min-width: 621px) and (max-width: 1100px) {
+    .booking-screen .booking-form > .booking-surface .field,
+    .booking-screen .booking-line .field,
+    .booking-screen .booking-manual-location > .field,
+    .booking-screen .booking-manual-location > .split-fields,
+    .booking-screen .booking-coupon-row,
+    .booking-screen .guest-otp-row {
+        max-width: 760px;
+    }
+
+    .booking-screen .booking-location-tools {
+        flex-direction: row;
+        gap: 8px;
+    }
+
+    .booking-screen .booking-location-tools .button {
+        display: grid;
+        flex: 0 0 44px;
+        width: 44px;
+        min-width: 44px;
+        height: 44px;
+        min-height: 44px;
+        place-items: center;
+        padding: 0;
+        font-size: 0;
+    }
+
+    .booking-screen .booking-location-tools .button svg {
+        width: 18px;
+        height: 18px;
+    }
+
+    .booking-screen .booking-location-tools .button > span {
+        display: none;
+    }
+
+    .booking-screen .guest-otp-row {
+        width: 100%;
+        align-items: center;
+    }
+
+    .booking-screen .guest-otp-row input {
+        box-sizing: border-box;
+        min-width: 0;
+    }
+
+    .booking-screen .guest-otp-row .button {
+        display: grid;
+        flex: 0 0 44px;
+        width: 44px;
+        min-width: 44px;
+        height: 44px;
+        min-height: 44px;
+        place-items: center;
+        padding: 0;
+        font-size: 0;
+    }
+
+    .booking-screen .guest-otp-row .button svg {
+        width: 17px;
+        height: 17px;
+    }
+
+    .booking-screen .guest-otp-row .button > span {
+        display: none;
+    }
+}
+
+@media (min-width: 621px) and (max-width: 1100px) {
+    .booking-screen .booking-new-grid {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 20px;
+    }
+
+    .booking-screen .booking-form,
+    .booking-screen .booking-summary {
+        grid-column: 1;
+        width: 100%;
+        max-width: 900px;
+        min-width: 0;
+        margin-right: auto;
+        margin-left: auto;
+    }
+
+    .booking-screen .booking-summary {
+        position: static;
+    }
+
+    .booking-screen .split-fields,
+    .booking-screen .line-fields {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+@media (max-width: 620px) {
+    .booking-screen .booking-progress { width: 100%; min-width: 0; }
+    .booking-screen .booking-progress > div { flex: 1 1 0; min-width: 0; gap: 6px; white-space: normal; }
+    .booking-screen .booking-progress > div > span { min-width: 0; }
+    .booking-screen .booking-progress i { flex-basis: 30px; width: 30px; height: 30px; }
+    .booking-screen .booking-progress b { font-size: 10px; line-height: 1.2; overflow-wrap: anywhere; }
+    .booking-screen .booking-progress-line { flex: 0 1 20px; min-width: 8px; margin: 0 4px; }
+    .booking-screen .booking-surface, .booking-screen .booking-summary { box-sizing: border-box; min-width: 0; }
+    .booking-screen .field input, .booking-screen .field select, .booking-screen .field textarea { box-sizing: border-box; min-width: 0; font-size: 16px; }
+    .booking-screen .field .input-with-icon { box-sizing: border-box; min-width: 0; }
+    .booking-screen .field .input-with-icon input { min-height: 47px; padding: 11px 0; margin-top: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+    .booking-screen .booking-summary .summary-line > div, .booking-screen .booking-summary .summary-line > strong { min-width: 0; overflow-wrap: anywhere; }
 }
