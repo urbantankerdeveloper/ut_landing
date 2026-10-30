@@ -6,7 +6,7 @@ export const GST_RATE = 0.18
 export async function quoteServices(items: PriceableServiceItem[], couponCode?: string) {
   const serviceItems = items.map((item) => typeof item === 'string' ? { serviceId: item } : item)
   const codes = serviceItems.map((item) => item.serviceId.trim()).filter(Boolean)
-  const { data: services, error: servicesError } = await supabase.from('service_catalog').select('code,base_price_paise').in('code', codes).eq('is_active', true)
+  const { data: services, error: servicesError } = await supabase.from('service_catalog').select('code,base_price_paise,config').in('code', codes).eq('is_active', true)
   if (servicesError) throw new Error(servicesError.message)
   if (!services || services.length !== new Set(codes).size) throw new Error('One or more selected services are unavailable')
   const subtotalPaise = sumServiceItemPrices(serviceItems, services)
