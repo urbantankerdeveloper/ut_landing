@@ -345,6 +345,20 @@ create policy "actor owns offline mutations" on public.offline_mutations for all
 alter table public.profiles add column if not exists username text;
 create unique index if not exists profiles_username_lower_idx on public.profiles(lower(username)) where username is not null;
 
+-- Registration channel (null = created before this was captured) and the user's saved theme.
+alter table public.profiles
+  add column if not exists signup_platform text,
+  add column if not exists theme_mode text not null default 'system';
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'profiles_signup_platform_check' and conrelid = 'public.profiles'::regclass) then
+    alter table public.profiles add constraint profiles_signup_platform_check check (signup_platform is null or signup_platform in ('web', 'mobile'));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'profiles_theme_mode_check' and conrelid = 'public.profiles'::regclass) then
+    alter table public.profiles add constraint profiles_theme_mode_check check (theme_mode in ('light', 'dark', 'system'));
+  end if;
+end $$;
+
 -- Rebuild public profiles for Supabase accounts retained across a schema reset.
 with account_profiles as (
   select

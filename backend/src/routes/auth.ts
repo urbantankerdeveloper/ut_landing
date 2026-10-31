@@ -3,7 +3,7 @@ import crypto from 'node:crypto'
 import { z } from 'zod'
 import { authSupabase, supabase } from '../supabase.js'
 import { requireAuth } from '../middleware/auth.js'
-import { credentialsSchema } from '../lib/schemas.js'
+import { clientPlatformSchema, credentialsSchema, themeModeSchema } from '../lib/schemas.js'
 import { isEmailConfigured, sendEmail, sendSms } from '../services/providers.js'
 import { passwordResetEmail, signupConfirmationEmail } from '../services/signupEmail.js'
 import { config } from '../config.js'
@@ -87,7 +87,7 @@ router.post('/login', loginLimit, async (request, response) => {
   }
   const { data, error } = await authSupabase.auth.signInWithPassword({ email, password: parsed.data.password })
   if (error || !data.session || !data.user) return response.status(401).json({ error: 'Invalid credentials' })
-  const { data: profile, error: profileError } = await supabase.from('profiles').select('id,role,full_name,username,phone_e164').eq('id', data.user.id).single()
+  const { data: profile, error: profileError } = await supabase.from('profiles').select('id,role,full_name,username,phone_e164,theme_mode').eq('id', data.user.id).single()
   if (profileError || !profile) return response.status(403).json({ error: 'Account profile is unavailable.' })
   if (profile.role === 'vendor') {
     const { data: vendor, error: vendorLookupError } = await supabase.from('vendors').select('id').eq('owner_profile_id', profile.id).maybeSingle()
@@ -108,7 +108,7 @@ router.post('/login', loginLimit, async (request, response) => {
     }
   }
   setRefreshCookie(response, data.session.refresh_token)
-  const user = { id: data.user.id, email: data.user.email, username: profile.username ?? username ?? data.user.email, name: profile.full_name ?? data.user.email, role: profile.role ?? 'customer' }
+  const user = { id: data.user.id, email: data.user.email, username: profile.username ?? username ?? data.user.email, name: profile.full_name ?? data.user.email, role: profile.role ?? 'customer', themeMode: profile.theme_mode ?? 'system' }
   return response.json({ accessToken: data.session.access_token, refreshToken: data.session.refresh_token, user })
 })
 router.post('/signup', signupLimit, async (request, response) => {
@@ -120,11 +120,14 @@ router.post('/signup', signupLimit, async (request, response) => {
     phone: phoneSchema,
     role: z.enum(['customer', 'vendor', 'admin']).optional(),
     adminKey: z.string().optional(),
+    themeMode: themeModeSchema.optional(),
   }).safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Invalid registration', details: parsed.error.flatten() })
   if (parsed.data.role && parsed.data.role !== 'customer') return response.status(403).json({ error: 'Public signup creates customer accounts only.' })
   if (!isEmailConfigured()) return response.status(503).json({ error: 'Email confirmation is unavailable. Configure Gmail SMTP_USER, SMTP_PASSWORD, and MAIL_FROM on the backend, then try again.' })
 
+  const signupPlatform = clientPlatformSchema.parse(request.header('x-client-platform')?.trim().toLowerCase())
+  const themeMode = parsed.data.themeMode ?? 'system'
   const username = parsed.data.username?.toLowerCase() ?? parsed.data.email.split('@')[0]?.toLowerCase() ?? 'user'
   const { data, error } = await authSupabase.auth.admin.generateLink({
     type: 'signup',
@@ -143,6 +146,8 @@ router.post('/signup', signupLimit, async (request, response) => {
     phone_e164: parsed.data.phone,
     username,
     role: 'customer',
+    signup_platform: signupPlatform,
+    theme_mode: themeMode,
   })
   if (profileError) {
     const { error: deleteError } = await authSupabase.auth.admin.deleteUser(userId)
@@ -185,7 +190,7 @@ router.post('/signup', signupLimit, async (request, response) => {
     return response.status(502).json({ error: 'The confirmation email could not be sent. Please try again in a few minutes.' })
   }
 
-  response.status(201).json({ requiresEmailVerification: true, emailSent: true, userId })
+  response.status(201).json({ requiresEmailVerification: true, emailSent: true, userId, signupPlatform, themeMode })
 })
 router.post('/password-reset', passwordResetLimit, async (request, response) => {
   const parsed = z.object({ email: z.string().email() }).safeParse(request.body)
@@ -241,6 +246,18 @@ router.post('/password-update', passwordUpdateLimit, async (request, response) =
   return response.json({ updated: true })
 })
 router.post('/refresh', async (request, response) => { const cookies = parseCookies(request.headers.cookie); const refreshToken = request.body?.refreshToken ?? cookies.refresh_token; if (!refreshToken) return response.status(401).json({ error: 'Refresh token required' }); const { data, error } = await authSupabase.auth.refreshSession({ refresh_token: refreshToken }); if (error || !data.session) return response.status(401).json({ error: 'Session expired' }); setRefreshCookie(response, data.session.refresh_token); return response.json({ accessToken: data.session.access_token, refreshToken: data.session.refresh_token }) })
-router.post('/mobile-refresh', async (request, response) => { const parsed = z.object({ refreshToken: z.string().min(20).max(4096) }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Refresh token required' }); const { data, error } = await authSupabase.auth.refreshSession({ refresh_token: parsed.data.refreshToken }); if (error || !data.session || !data.user) return response.status(401).json({ error: 'Session expired' }); const { data: profile } = await supabase.from('profiles').select('id,role,full_name,username').eq('id', data.user.id).single(); return response.json({ accessToken: data.session.access_token, refreshToken: data.session.refresh_token, user: { id: data.user.id, email: data.user.email, username: profile?.username ?? data.user.email, name: profile?.full_name ?? data.user.email, role: profile?.role ?? 'customer' } }) })
+router.post('/mobile-refresh', async (request, response) => { const parsed = z.object({ refreshToken: z.string().min(20).max(4096) }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Refresh token required' }); const { data, error } = await authSupabase.auth.refreshSession({ refresh_token: parsed.data.refreshToken }); if (error || !data.session || !data.user) return response.status(401).json({ error: 'Session expired' }); const { data: profile } = await supabase.from('profiles').select('id,role,full_name,username,theme_mode').eq('id', data.user.id).single(); return response.json({ accessToken: data.session.access_token, refreshToken: data.session.refresh_token, user: { id: data.user.id, email: data.user.email, username: profile?.username ?? data.user.email, name: profile?.full_name ?? data.user.email, role: profile?.role ?? 'customer', themeMode: profile?.theme_mode ?? 'system' } }) })
+router.get('/preferences', requireAuth, async (request, response) => {
+  const { data, error } = await supabase.from('profiles').select('theme_mode').eq('id', request.authUser!.id).single()
+  if (error || !data) return response.status(404).json({ error: 'Profile not found' })
+  return response.json({ themeMode: data.theme_mode ?? 'system' })
+})
+router.patch('/preferences', requireAuth, async (request, response) => {
+  const parsed = z.object({ themeMode: themeModeSchema }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Invalid preferences' })
+  const { data, error } = await supabase.from('profiles').update({ theme_mode: parsed.data.themeMode }).eq('id', request.authUser!.id).select('theme_mode').single()
+  if (error || !data) return response.status(400).json({ error: 'Preferences could not be saved' })
+  return response.json({ themeMode: data.theme_mode })
+})
 router.post('/logout', (_request, response) => { clearRefreshCookie(response); return response.status(204).send() })
 export default router

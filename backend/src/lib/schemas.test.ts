@@ -1,8 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { bookingSchema, coordinatesSchema, credentialsSchema } from './schemas.js'
+import { bookingSchema, clientPlatformSchema, coordinatesSchema, credentialsSchema, themeModeSchema } from './schemas.js'
 
 describe('request schemas', () => {
+  it('accepts only light, dark, or system theme modes', () => {
+    expect(themeModeSchema.safeParse('dark').success).toBe(true)
+    expect(themeModeSchema.safeParse('light').success).toBe(true)
+    expect(themeModeSchema.safeParse('system').success).toBe(true)
+    expect(themeModeSchema.safeParse('purple').success).toBe(false)
+  })
+  it('normalises unknown client platforms to web', () => {
+    expect(clientPlatformSchema.parse('mobile')).toBe('mobile')
+    expect(clientPlatformSchema.parse('web')).toBe('web')
+    expect(clientPlatformSchema.parse(undefined)).toBe('web')
+    expect(clientPlatformSchema.parse('desktop')).toBe('web')
+  })
   it('accepts a valid login payload', () => { expect(credentialsSchema.safeParse({ email: 'user@example.com', password: 'password123' }).success).toBe(true) })
   it('rejects a short password', () => { expect(credentialsSchema.safeParse({ email: 'user@example.com', password: 'short' }).success).toBe(false) })
   it('requires booking location and date', () => { expect(bookingSchema.safeParse({ serviceId: 'water', location: 'ECR', deliveryDate: '2026-10-20' }).success).toBe(true); expect(bookingSchema.safeParse({ serviceId: 'water' }).success).toBe(false) })

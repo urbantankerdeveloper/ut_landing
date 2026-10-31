@@ -1,5 +1,7 @@
 import { z } from 'zod'
 export const credentialsSchema = z.object({ email: z.string().email().optional(), username: z.string().min(3).optional(), password: z.string().min(8) }).refine((value) => value.email || value.username, { message: 'Email or username is required' })
+export const themeModeSchema = z.enum(['light', 'dark', 'system'])
+export const clientPlatformSchema = z.enum(['web', 'mobile']).catch('web')
 export const coordinatesSchema = {
   latitude: z.number().finite().min(-90).max(90),
   longitude: z.number().finite().min(-180).max(180),
