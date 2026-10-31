@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { bookingSchema, clientPlatformSchema, coordinatesSchema, credentialsSchema, themeModeSchema } from './schemas.js'
+import { bookingSchema, clientPlatformFromHeader, clientPlatformSchema, coordinatesSchema, credentialsSchema, themeModeSchema } from './schemas.js'
 
 describe('request schemas', () => {
   it('accepts only light, dark, or system theme modes', () => {
@@ -14,6 +14,10 @@ describe('request schemas', () => {
     expect(clientPlatformSchema.parse('web')).toBe('web')
     expect(clientPlatformSchema.parse(undefined)).toBe('web')
     expect(clientPlatformSchema.parse('desktop')).toBe('web')
+  })
+  it('reads the client platform header case-insensitively', () => {
+    expect(clientPlatformFromHeader(' Mobile ')).toBe('mobile')
+    expect(clientPlatformFromHeader(undefined)).toBe('web')
   })
   it('accepts a valid login payload', () => { expect(credentialsSchema.safeParse({ email: 'user@example.com', password: 'password123' }).success).toBe(true) })
   it('rejects a short password', () => { expect(credentialsSchema.safeParse({ email: 'user@example.com', password: 'short' }).success).toBe(false) })

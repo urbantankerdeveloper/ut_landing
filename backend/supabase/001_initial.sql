@@ -652,6 +652,75 @@ create table if not exists public.guest_otp_challenges (
 create index if not exists guest_otp_challenges_phone_created_idx
   on public.guest_otp_challenges(phone_e164, created_at desc);
 
+-- BEGIN incremental update: sms templates (idempotent, run with npm run db:update)
+create table if not exists public.sms_templates (
+  template_key text primary key,
+  body text not null,
+  variables text[] not null default '{}',
+  is_active boolean not null default true,
+  updated_at timestamptz not null default now()
+);
+alter table public.sms_templates add column if not exists msg91_template_id text;
+alter table public.sms_templates enable row level security;
+
+insert into public.sms_templates (template_key, body, variables) values
+  ('user_registration_otp', 'Your Urban Tanker verification code is {{otp}}. It expires in 10 minutes. Do not share this code.', '{otp}'),
+  ('booking_verification_otp', 'Your Urban Tanker booking verification code is {{otp}}. It expires in 10 minutes. Do not share this code.', '{otp}'),
+  ('guest_booking_confirmation', 'Urban Tanker: Your booking {{reference}} is received. We will confirm once a vendor accepts it.', '{reference}'),
+  ('vendor_acceptance', 'Urban Tanker: Vendor accepted booking {{reference}}. Vehicle {{vehicle}}, driver {{driver}}. Track: {{trackingUrl}}', '{reference,vehicle,driver,trackingUrl}'),
+  ('delivery_confirmation', 'Urban Tanker: Delivery for booking {{reference}} is complete. Thank you for choosing Urban Tanker.', '{reference}'),
+  ('delivery_otp', 'Urban Tanker: Your delivery OTP for booking {{reference}} is {{otp}}. It expires in 15 minutes. Share it only with the driver.', '{reference,otp}')
+on conflict (template_key) do nothing;
+
+-- BEGIN incremental update: booking customer type (idempotent, run with npm run db:update)
+alter table public.bookings
+  add column if not exists customer_type text not null default 'registered';
+
+alter table public.bookings drop constraint if exists bookings_customer_type_check;
+alter table public.bookings
+  add constraint bookings_customer_type_check
+  check (customer_type in ('registered', 'guest'));
+
+-- Guest accounts are created with a username starting "guest_" (see auth guest/verify-otp).
+update public.bookings b
+set customer_type = 'guest'
+from public.profiles p
+where p.id = b.customer_id
+  and p.username like 'guest\_%'
+  and b.customer_type <> 'guest';
+
+create or replace function public.set_booking_customer_type()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  new.customer_type := case
+    when exists (select 1 from public.profiles p where p.id = new.customer_id and p.username like 'guest\_%') then 'guest'
+    else 'registered'
+  end;
+  return new;
+end;
+$$;
+
+drop trigger if exists bookings_set_customer_type on public.bookings;
+create trigger bookings_set_customer_type before insert on public.bookings
+  for each row execute function public.set_booking_customer_type();
+
+create index if not exists bookings_customer_type_created_idx on public.bookings(customer_type, created_at desc);
+-- END incremental update
+
+-- BEGIN incremental update: customer selfie (idempotent, run with npm run db:update)
+alter table public.profiles
+  add column if not exists selfie_path text,
+  add column if not exists selfie_required boolean not null default false,
+  add column if not exists selfie_captured_at timestamptz;
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('customer-selfies', 'customer-selfies', false, 3145728, array['image/jpeg'])
+on conflict (id) do update set public = excluded.public, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+-- END incremental update
+
 
 
 -- ===== Consolidated from 018_seed_customer_coupons.sql =====

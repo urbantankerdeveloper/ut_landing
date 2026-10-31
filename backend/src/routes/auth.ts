@@ -3,8 +3,10 @@ import crypto from 'node:crypto'
 import { z } from 'zod'
 import { authSupabase, supabase } from '../supabase.js'
 import { requireAuth } from '../middleware/auth.js'
-import { clientPlatformSchema, credentialsSchema, themeModeSchema } from '../lib/schemas.js'
-import { isEmailConfigured, sendEmail, sendSms } from '../services/providers.js'
+import { clientPlatformFromHeader, credentialsSchema, themeModeSchema } from '../lib/schemas.js'
+import { decodeSelfieJpeg, selfieBucket, selfieObjectPath } from '../services/selfie.js'
+import { isEmailConfigured, sendEmail } from '../services/providers.js'
+import { sendTemplateSms } from '../services/sms.js'
 import { passwordResetEmail, signupConfirmationEmail } from '../services/signupEmail.js'
 import { config } from '../config.js'
 import rateLimit from 'express-rate-limit'
@@ -14,6 +16,7 @@ const loginLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHead
 const signupLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many registration attempts. Try again later.' } })
 const passwordResetLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many password reset requests. Try again later.' } })
 const passwordUpdateLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many password update attempts. Try again later.' } })
+const phoneOtpVerifyLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many verification attempts. Try again later.' } })
 function parseCookies(header: string | undefined) { return Object.fromEntries((header ?? '').split(';').map((part) => part.trim().split('=').map(decodeURIComponent)).filter(([key, value]) => key && value)) }
 const refreshCookieSecurity = config.NODE_ENV === 'production' ? '; Secure' : ''
 const refreshCookieSameSite = config.NODE_ENV === 'production' ? 'None' : 'Lax'
@@ -28,7 +31,7 @@ router.post('/guest/request-otp', otpRequestLimit, async (request, response) => 
   if (error || !challenge) return response.status(500).json({ error: error?.message ?? 'OTP could not be created.' })
   if (!config.USE_DEFAULT_VERIFICATION_CODE) {
     try {
-      const delivery = await sendSms(`+91${parsed.data.phone}`, `Your Urban Tanker verification code is ${otp}. It expires in 10 minutes.`)
+      const delivery = await sendTemplateSms('booking_verification_otp', `+91${parsed.data.phone}`, { otp })
       if (!delivery.queued) return response.status(503).json({ error: 'Mobile verification is not configured yet.' })
     } catch (error) {
       return response.status(502).json({ error: error instanceof Error ? error.message : 'OTP delivery failed.' })
@@ -72,6 +75,223 @@ router.post('/guest/verify-phone', requireAuth, async (request, response) => {
   if (verifiedError) return response.status(500).json({ error: verifiedError.message })
   response.json({ verified: true })
 })
+router.post('/phone/request-otp', otpRequestLimit, async (request, response) => {
+  const parsed = z.object({ phone: phoneSchema }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
+
+  const phone = `+91${parsed.data.phone}`
+  const otp = config.USE_DEFAULT_VERIFICATION_CODE
+    ? config.DEFAULT_VERIFICATION_CODE
+    : crypto.randomInt(100000, 1000000).toString()
+  const { data: challenge, error } = await supabase
+    .from('guest_otp_challenges')
+    .insert({
+      phone_e164: phone,
+      otp_hash: crypto.createHash('sha256').update(otp).digest('hex'),
+      expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+    })
+    .select('id')
+    .single()
+
+  if (error || !challenge) {
+    return response.status(500).json({ error: error?.message ?? 'OTP could not be created.' })
+  }
+  if (!config.USE_DEFAULT_VERIFICATION_CODE) {
+    try {
+      const delivery = await sendTemplateSms('user_registration_otp', phone, { otp })
+      if (!delivery.queued) {
+        await supabase.from('guest_otp_challenges').delete().eq('id', challenge.id)
+        return response.status(503).json({ error: 'Mobile verification is not configured yet.' })
+      }
+    } catch (error) {
+      await supabase.from('guest_otp_challenges').delete().eq('id', challenge.id)
+      return response.status(502).json({ error: error instanceof Error ? error.message : 'OTP delivery failed.' })
+    }
+  }
+
+  return response.status(202).json({ challengeId: challenge.id, expiresInSeconds: 600 })
+})
+
+router.post('/phone/verify-otp', phoneOtpVerifyLimit, async (request, response) => {
+  const parsed = z.object({
+    challengeId: z.string().uuid(),
+    phone: phoneSchema,
+    otp: z.string().regex(/^\d{6}$/),
+    name: z.string().trim().min(2).max(60).optional(),
+  }).safeParse(request.body)
+  if (!parsed.success) {
+    return response.status(400).json({ error: 'Enter the verification code sent to this mobile number.' })
+  }
+
+  const phone = `+91${parsed.data.phone}`
+  const { data: challenge, error: challengeError } = await supabase
+    .from('guest_otp_challenges')
+    .select('id,otp_hash,expires_at,attempts,verified_at')
+    .eq('id', parsed.data.challengeId)
+    .eq('phone_e164', phone)
+    .maybeSingle()
+  if (challengeError) return response.status(500).json({ error: challengeError.message })
+  if (
+    !challenge ||
+    challenge.verified_at ||
+    challenge.attempts >= 5 ||
+    new Date(challenge.expires_at).getTime() <= Date.now()
+  ) {
+    return response.status(400).json({ error: 'This verification code is invalid or expired.' })
+  }
+
+  const expected = Buffer.from(challenge.otp_hash, 'hex')
+  const received = crypto.createHash('sha256').update(parsed.data.otp).digest()
+  if (expected.length !== received.length || !crypto.timingSafeEqual(expected, received)) {
+    const { error: attemptError } = await supabase
+      .from('guest_otp_challenges')
+      .update({ attempts: challenge.attempts + 1 })
+      .eq('id', challenge.id)
+      .eq('attempts', challenge.attempts)
+      .is('verified_at', null)
+    if (attemptError) return response.status(500).json({ error: attemptError.message })
+    return response.status(400).json({ error: 'The verification code is incorrect.' })
+  }
+
+  let profile: {
+    id: string
+    role: string
+    full_name: string
+    username: string | null
+    phone_e164: string | null
+    theme_mode: string | null
+    selfie_required: boolean | null
+  } | null = null
+  for (const phoneValue of [phone, parsed.data.phone]) {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id,role,full_name,username,phone_e164,theme_mode,selfie_required')
+      .eq('phone_e164', phoneValue)
+      .maybeSingle()
+    if (error) return response.status(500).json({ error: 'The phone account could not be checked.' })
+    if (data) {
+      profile = data
+      break
+    }
+  }
+
+  if (!profile && !parsed.data.name) {
+    return response.status(400).json({ error: 'Enter your name to create a new customer account.' })
+  }
+
+  const { data: consumed, error: consumeError } = await supabase
+    .from('guest_otp_challenges')
+    .update({ verified_at: new Date().toISOString() })
+    .eq('id', challenge.id)
+    .eq('attempts', challenge.attempts)
+    .is('verified_at', null)
+    .gt('expires_at', new Date().toISOString())
+    .select('id')
+    .maybeSingle()
+  if (consumeError) return response.status(500).json({ error: consumeError.message })
+  if (!consumed) {
+    return response.status(400).json({ error: 'This verification code is invalid or expired.' })
+  }
+
+  let session: { access_token: string; refresh_token: string }
+  let authUser: { id: string; email?: string | null }
+  if (profile) {
+    const { data: existingUser, error: userError } = await authSupabase.auth.admin.getUserById(profile.id)
+    if (userError || !existingUser.user?.email) {
+      return response.status(403).json({ error: 'The phone account is unavailable.' })
+    }
+    const { data: link, error: linkError } = await authSupabase.auth.admin.generateLink({
+      type: 'magiclink',
+      email: existingUser.user.email,
+    })
+    const tokenHash = link?.properties?.hashed_token
+    if (linkError || !tokenHash) {
+      return response.status(500).json({ error: 'A phone sign-in session could not be created.' })
+    }
+    const { data: verified, error: verifyError } = await authSupabase.auth.verifyOtp({
+      token_hash: tokenHash,
+      type: 'magiclink',
+    })
+    if (verifyError || !verified.session || !verified.user) {
+      return response.status(500).json({ error: 'A phone sign-in session could not be created.' })
+    }
+    session = {
+      access_token: verified.session.access_token,
+      refresh_token: verified.session.refresh_token,
+    }
+    authUser = { id: verified.user.id, email: verified.user.email }
+  } else {
+    const username = `phone_${parsed.data.phone}_${crypto.randomBytes(3).toString('hex')}`
+    const email = `phone-${parsed.data.phone}@phone.urbantanker.local`
+    const password = crypto.randomBytes(32).toString('base64url')
+    const { data: created, error: createError } = await authSupabase.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: {
+        full_name: parsed.data.name,
+        phone,
+        role: 'customer',
+        username,
+      },
+    })
+    if (createError || !created.user) {
+      return response.status(409).json({ error: 'The phone account could not be created. Try signing in again.' })
+    }
+
+    const signupPlatform = clientPlatformFromHeader(request.header('x-client-platform'))
+    const { data: createdProfile, error: profileError } = await supabase
+      .from('profiles')
+      .upsert({
+        id: created.user.id,
+        full_name: parsed.data.name,
+        phone_e164: phone,
+        username,
+        role: 'customer',
+        signup_platform: signupPlatform,
+        selfie_required: signupPlatform === 'mobile',
+      })
+      .select('id,role,full_name,username,phone_e164,theme_mode,selfie_required')
+      .single()
+    if (profileError || !createdProfile) {
+      const { error: rollbackError } = await authSupabase.auth.admin.deleteUser(created.user.id)
+      if (rollbackError) {
+        console.error(JSON.stringify({ event: 'phone_signup.rollback_failed', userId: created.user.id, error: rollbackError.message }))
+      }
+      return response.status(500).json({ error: 'The customer account could not be created.' })
+    }
+    profile = createdProfile
+
+    const { data: signedIn, error: signInError } = await authSupabase.auth.signInWithPassword({
+      email,
+      password,
+    })
+    if (signInError || !signedIn.session) {
+      return response.status(500).json({ error: 'The customer account was created but could not be signed in.' })
+    }
+    session = {
+      access_token: signedIn.session.access_token,
+      refresh_token: signedIn.session.refresh_token,
+    }
+    authUser = { id: signedIn.user.id, email: signedIn.user.email }
+  }
+
+  setRefreshCookie(response, session.refresh_token)
+  return response.json({
+    accessToken: session.access_token,
+    refreshToken: session.refresh_token,
+    user: {
+      id: authUser.id,
+      email: authUser.email,
+      username: profile.username ?? authUser.email ?? parsed.data.phone,
+      name: profile.full_name,
+      role: profile.role,
+      themeMode: profile.theme_mode ?? 'system',
+      selfieRequired: profile.selfie_required === true,
+    },
+  })
+})
+
 router.post('/login', loginLimit, async (request, response) => {
   const parsed = credentialsSchema.safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Invalid credentials', details: parsed.error.flatten() })
@@ -87,7 +307,7 @@ router.post('/login', loginLimit, async (request, response) => {
   }
   const { data, error } = await authSupabase.auth.signInWithPassword({ email, password: parsed.data.password })
   if (error || !data.session || !data.user) return response.status(401).json({ error: 'Invalid credentials' })
-  const { data: profile, error: profileError } = await supabase.from('profiles').select('id,role,full_name,username,phone_e164,theme_mode').eq('id', data.user.id).single()
+  const { data: profile, error: profileError } = await supabase.from('profiles').select('id,role,full_name,username,phone_e164,theme_mode,selfie_required').eq('id', data.user.id).single()
   if (profileError || !profile) return response.status(403).json({ error: 'Account profile is unavailable.' })
   if (profile.role === 'vendor') {
     const { data: vendor, error: vendorLookupError } = await supabase.from('vendors').select('id').eq('owner_profile_id', profile.id).maybeSingle()
@@ -108,7 +328,7 @@ router.post('/login', loginLimit, async (request, response) => {
     }
   }
   setRefreshCookie(response, data.session.refresh_token)
-  const user = { id: data.user.id, email: data.user.email, username: profile.username ?? username ?? data.user.email, name: profile.full_name ?? data.user.email, role: profile.role ?? 'customer', themeMode: profile.theme_mode ?? 'system' }
+  const user = { id: data.user.id, email: data.user.email, username: profile.username ?? username ?? data.user.email, name: profile.full_name ?? data.user.email, role: profile.role ?? 'customer', themeMode: profile.theme_mode ?? 'system', selfieRequired: profile.selfie_required === true }
   return response.json({ accessToken: data.session.access_token, refreshToken: data.session.refresh_token, user })
 })
 router.post('/signup', signupLimit, async (request, response) => {
@@ -121,12 +341,15 @@ router.post('/signup', signupLimit, async (request, response) => {
     role: z.enum(['customer', 'vendor', 'admin']).optional(),
     adminKey: z.string().optional(),
     themeMode: themeModeSchema.optional(),
+    selfieJpegBase64: z.string().min(1).max(2_000_000).optional(),
   }).safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Invalid registration', details: parsed.error.flatten() })
   if (parsed.data.role && parsed.data.role !== 'customer') return response.status(403).json({ error: 'Public signup creates customer accounts only.' })
+  const selfie = parsed.data.selfieJpegBase64 === undefined ? null : decodeSelfieJpeg(parsed.data.selfieJpegBase64)
+  if (parsed.data.selfieJpegBase64 !== undefined && !selfie) return response.status(400).json({ error: 'Choose a JPEG photo.' })
   if (!isEmailConfigured()) return response.status(503).json({ error: 'Email confirmation is unavailable. Configure Gmail SMTP_USER, SMTP_PASSWORD, and MAIL_FROM on the backend, then try again.' })
 
-  const signupPlatform = clientPlatformSchema.parse(request.header('x-client-platform')?.trim().toLowerCase())
+  const signupPlatform = clientPlatformFromHeader(request.header('x-client-platform'))
   const themeMode = parsed.data.themeMode ?? 'system'
   const username = parsed.data.username?.toLowerCase() ?? parsed.data.email.split('@')[0]?.toLowerCase() ?? 'user'
   const { data, error } = await authSupabase.auth.admin.generateLink({
@@ -156,14 +379,35 @@ router.post('/signup', signupLimit, async (request, response) => {
   }
 
   const cleanupUnconfirmedAccount = async () => {
+    const { error: removePhotoError } = await supabase.storage.from(selfieBucket).remove([selfieObjectPath(userId)])
     const { error: deleteProfileError } = await supabase.from('profiles').delete().eq('id', userId)
     const { error: deleteUserError } = await authSupabase.auth.admin.deleteUser(userId)
-    if (deleteProfileError || deleteUserError) {
-      const errors = [deleteProfileError?.message, deleteUserError?.message].filter(Boolean).join('; ')
+    if (removePhotoError || deleteProfileError || deleteUserError) {
+      const errors = [removePhotoError?.message, deleteProfileError?.message, deleteUserError?.message].filter(Boolean).join('; ')
       console.error(JSON.stringify({ event: 'signup.rollback_failed', userId, error: errors }))
       return false
     }
     return true
+  }
+
+  if (selfie) {
+    const path = selfieObjectPath(userId)
+    let photoError: string | null = null
+    const { error: uploadError } = await supabase.storage.from(selfieBucket).upload(path, selfie, { contentType: 'image/jpeg', upsert: true })
+    if (uploadError) {
+      photoError = uploadError.message
+    } else {
+      const { error: recordError } = await supabase.from('profiles').update({ selfie_path: path, selfie_captured_at: new Date().toISOString() }).eq('id', userId)
+      if (recordError) {
+        photoError = recordError.message
+        await supabase.storage.from(selfieBucket).remove([path])
+      }
+    }
+    if (photoError) {
+      console.error(JSON.stringify({ event: 'signup.selfie_failed', userId, error: photoError }))
+      await cleanupUnconfirmedAccount()
+      return response.status(500).json({ error: 'Your photo could not be saved. Please try again.' })
+    }
   }
 
   try {

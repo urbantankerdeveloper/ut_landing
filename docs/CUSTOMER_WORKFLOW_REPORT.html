@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Urban Tanker - Customer Workflow (Login to Delivery)</title>
+<style>
+  :root {
+    --ink: #1d2433; --muted: #5b6474; --line: #d9dee8; --bg: #f6f8fb;
+    --brand: #0b6e99; --brand-soft: #e3f1f7; --ok: #1f7a4d; --warn: #9a5b00; --bad: #a12a2a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--bg); line-height: 1.5; }
+  header { background: var(--brand); color: #fff; padding: 32px 40px; }
+  header h1 { margin: 0 0 6px; font-size: 26px; }
+  header p { margin: 0; opacity: .9; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 40px 60px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 22px 26px; margin: 20px 0; }
+  h2 { margin: 0 0 12px; font-size: 20px; color: var(--brand); }
+  h3 { margin: 18px 0 8px; font-size: 16px; }
+  p, li { font-size: 14.5px; }
+  code { background: #eef2f7; padding: 1px 6px; border-radius: 4px; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin-top: 8px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: #f0f4f9; font-weight: 600; }
+  .flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; margin: 10px 0; }
+  .step { flex: 1 1 150px; border: 1px solid var(--brand); border-radius: 8px; padding: 10px; background: var(--brand-soft); font-size: 13px; }
+  .step b { display: block; color: var(--brand); margin-bottom: 4px; font-size: 13.5px; }
+  .arrow { align-self: center; color: var(--brand); font-weight: bold; }
+  .status { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; margin: 2px; }
+  .s-open { background: #e8eef7; color: #2d4a7a; }
+  .s-ok { background: #e2f3ea; color: var(--ok); }
+  .s-warn { background: #fff1d9; color: var(--warn); }
+  .s-bad { background: #f8e1e1; color: var(--bad); }
+  .note { border-left: 4px solid var(--warn); background: #fff9ef; padding: 10px 14px; border-radius: 4px; font-size: 13.5px; margin-top: 12px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  ol.flat li { margin-bottom: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Customer Workflow: Login to Delivery (End to End)</h1>
+  <p>Urban Tanker customer journey across the Flutter mobile app, the Express backend, and the vendor/dispatch side it hands off to.</p>
+</header>
+<main>
+
+<section>
+  <h2>1. Overview</h2>
+  <p>A customer signs in on the mobile app, requests a water tanker delivery, pays (wallet, online, or cash on delivery), and the booking then moves through vendor acceptance, travel, arrival, and delivery confirmed by an OTP. The customer can track the order live, reschedule or cancel it early, and rate it afterwards.</p>
+  <div class="flow">
+    <div class="step"><b>1. Login</b>Phone OTP or password</div><div class="arrow">&rarr;</div>
+    <div class="step"><b>2. Home</b>Overview and services</div><div class="arrow">&rarr;</div>
+    <div class="step"><b>3. Book</b>Services, address, date</div><div class="arrow">&rarr;</div>
+    <div class="step"><b>4. Pay</b>Wallet, online, or COD</div><div class="arrow">&rarr;</div>
+    <div class="step"><b>5. Track</b>Vendor assigned to arrival</div><div class="arrow">&rarr;</div>
+    <div class="step"><b>6. Deliver</b>Share OTP, confirm</div><div class="arrow">&rarr;</div>
+    <div class="step"><b>7. Rate</b>1 to 5 stars</div>
+  </div>
+  <p>The mobile app is for registered customers only. Guest checkout, where a booking is made without an account, is available on the web.</p>
+</section>
+
+<section>
+  <h2>2. Login and Session</h2>
+  <h3>Sign-in options</h3>
+  <table>
+    <tr><th>Option</th><th>How it works</th><th>Backend</th></tr>
+    <tr><td><b>Phone OTP</b> (signup and login)</td><td>Enter phone, press <i>Send verification code</i>, enter the code, then <i>Verify code and create account</i> (new user) or <i>Verify code and sign in</i> (existing user).</td><td><code>POST /auth/phone/request-otp</code>, then <code>POST /auth/phone/verify-otp</code>. New accounts record the signup channel. The OTP is sent by SMS (see Section 11).</td></tr>
+    <tr><td><b>Password</b></td><td>Username or phone plus password. <i>Sign in</i>.</td><td><code>POST /auth/login</code>; returns session and <code>user</code> including <code>themeMode</code>.</td></tr>
+    <tr><td><b>Biometric unlock</b></td><td>After a first login the app offers biometric unlock. The lock screen runs on resume.</td><td>Local only (<code>BiometricAuthService</code>); no server call.</td></tr>
+  </table>
+  <h3>After sign-in</h3>
+  <ul>
+    <li>The session is restored, and the saved theme (<code>light</code>, <code>dark</code>, or <code>system</code>) is applied from the server.</li>
+    <li>The customer sees three tabs: <b>Overview</b>, <b>Bookings</b>, and <b>Account</b>.</li>
+    <li>Every app request carries <code>X-Client-Platform: mobile</code>. The backend reads it at signup, whether by email or by phone OTP, and stores it as the signup channel (<code>signup_platform</code>). Accounts created before this change have no channel recorded.</li>
+    <li>New mobile customers take a selfie with the front camera, or choose a JPEG from the phone's gallery, before the home screen opens. The app sends the JPEG to <code>POST /customer/profile/selfie</code>. The API stores it in the private <code>customer-selfies</code> bucket as <code>&lt;customer id&gt;/selfie.jpg</code> and records the path on the profile. Admins can open it from the customer record through a link that expires in 5 minutes, and each view is logged. Customers can fetch their own link with <code>GET /customer/profile/selfie</code>. A retake replaces the previous selfie, so no history is kept. The app asks for camera or photo access before it opens either one, and offers <i>Open settings</i> if access was turned off. On the web signup form the photo is optional. It is sent with the signup request and saved once the account is created. If the photo cannot be saved, the signup is rolled back so the customer can try again.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>3. Home (Overview)</h2>
+  <ul>
+    <li>Shows the <b>Start a booking</b> action and the <b>Available services</b> list.</li>
+    <li>Shows the <b>NEXT DELIVERY</b> card for the nearest upcoming booking.</li>
+    <li>Shows notifications (inbox), which are fed by booking events.</li>
+    <li>The <b>Account</b> tab holds the profile, saved addresses, invoices, wallet, membership and subscriptions, notification preferences, theme, and sign out.</li>
+  </ul>
+  <h3>Customer APIs used on this screen</h3>
+  <table>
+    <tr><th>Method and path</th><th>Purpose</th></tr>
+    <tr><td><code>GET /customer/services</code></td><td>Service catalogue shown as available services.</td></tr>
+    <tr><td><code>GET /customer/offers</code></td><td>Active offers and coupons.</td></tr>
+    <tr><td><code>GET /customer/orders</code></td><td>Booking list for the Bookings tab and NEXT DELIVERY.</td></tr>
+    <tr><td><code>GET /customer/notifications</code></td><td>Notification inbox.</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>4. Booking Creation</h2>
+  <h3>Steps in the app</h3>
+  <ol class="flat">
+    <li><b>Select services</b>: pick one or more services. Each has its own details (water type, tanker count, capacity).</li>
+    <li><b>Shared details</b>: booking phone number, delivery location, delivery date, access notes.</li>
+    <li><b>Delivery location</b>: choose a saved address, use current location, or use coordinates. Addresses are limited to Chennai.</li>
+    <li><b>Quote</b>: <code>POST /customer/orders/quote</code> returns the price, and the quote preview runs as the user edits.</li>
+    <li><b>Coupon</b> (optional): <code>POST /customer/coupons/validate</code>.</li>
+    <li><b>Payment method</b>: Wallet, Online payment, or Cash on delivery.</li>
+    <li><b>Review</b>, then <b>Confirm booking</b> and <b>Submit booking</b>.</li>
+  </ol>
+  <h3>Backend on submit</h3>
+  <ul>
+    <li><code>POST /customer/orders</code> validates the booking, checks phone verification for the services, and finds nearby approved vendors.</li>
+    <li>The booking is saved with status <span class="status s-open">pending_vendor</span> through the <code>create_customer_booking</code> function. It is idempotent on <code>idempotency_key</code>, so a retried submit does not create a duplicate.</li>
+    <li>For online and COD payments, a payment record is created (COD is <code>pending</code> with provider <code>cash_on_delivery</code>).</li>
+    <li>Nearby vendors are notified, and the customer gets a <code>booking.created</code> realtime event with the booking reference (for example <code>UT-12345678</code>).</li>
+    <li>The booking contact number gets a booking confirmation SMS (template <code>guest_booking_confirmation</code>, see Section 11).</li>
+    <li>The booking stores <code>customer_type</code>: <code>guest</code> when the account came from guest checkout (username starts with <code>guest_</code>), otherwise <code>registered</code>.</li>
+    <li>The app shows <b>Booking submitted</b>.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>5. Payment</h2>
+  <table>
+    <tr><th>Method</th><th>Stored as</th><th>Flow</th><th>Status</th></tr>
+    <tr><td>Wallet</td><td><code>payment_method = wallet</code></td><td>Paid from wallet balance. Wallet top-up is available under Account.</td><td><span class="status s-warn">Deduction logic not verified</span></td></tr>
+    <tr><td>Online payment</td><td><code>gateway</code></td><td>Razorpay: <code>POST /payments/razorpay/order</code>, then checkout, then <code>POST /payments/razorpay/verify</code>. The webhook confirms it server-side.</td><td><span class="status s-ok">Implemented</span></td></tr>
+    <tr><td>Cash on delivery</td><td><code>cod</code></td><td>No upfront charge. Payment record is pending until the delivery is completed.</td><td><span class="status s-ok">Implemented</span></td></tr>
+  </table>
+  <div class="note">Wallet payment deduction was not traced in this review. Confirm the wallet debit runs when a booking is created before relying on it.</div>
+</section>
+
+<section>
+  <h2>6. Booking Lifecycle</h2>
+  <p>Booking status moves only along the rules enforced by the <code>transition_booking</code> database function. Any other change is rejected with <code>INVALID_BOOKING_TRANSITION</code>.</p>
+  <div class="flow">
+    <div class="step"><b>pending_vendor</b>Waiting for a vendor to accept</div><div class="arrow">&rarr;</div>
+    <div class="step"><b>vendor_assigned</b>Vendor and vehicle assigned</div><div class="arrow">&rarr;</div>
+    <div class="step"><b>accepted</b>Vendor accepted</div><div class="arrow">&rarr;</div>
+    <div class="step"><b>en_route</b>Vendor travelling</div><div class="arrow">&rarr;</div>
+    <div class="step"><b>arrived</b>Vendor at location</div><div class="arrow">&rarr;</div>
+    <div class="step"><b>delivered</b>OTP verified, complete</div>
+  </div>
+  <p><b>Cancelled</b> is allowed from <code>pending_vendor</code>, <code>vendor_assigned</code>, or <code>accepted</code>. A cancellation reason (2 to 500 characters) is required.</p>
+  <table>
+    <tr><th>Status</th><th>Customer sees</th><th>Customer can</th></tr>
+    <tr><td><span class="status s-open">pending_vendor</span></td><td>Pending confirmation</td><td>Reschedule, cancel</td></tr>
+    <tr><td><span class="status s-open">vendor_assigned</span></td><td>Vendor assigned</td><td>Reschedule, cancel</td></tr>
+    <tr><td><span class="status s-open">accepted</span></td><td>Accepted by vendor</td><td>Reschedule, cancel</td></tr>
+    <tr><td><span class="status s-warn">en_route</span></td><td>Live tracking on, vendor location shown</td><td>Track only</td></tr>
+    <tr><td><span class="status s-warn">arrived</span></td><td>Vendor arrived</td><td>Request delivery OTP, track</td></tr>
+    <tr><td><span class="status s-ok">delivered</span></td><td>Paid successfully / completed</td><td>Rate delivery</td></tr>
+    <tr><td><span class="status s-bad">cancelled</span></td><td>Cancelled</td><td>View only</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>7. Tracking and Notifications</h2>
+  <ul>
+    <li><b>Bookings tab</b>: each booking shows reference, service, capacity, delivery date, quoted amount, payment status, and current status.</li>
+    <li><b>Live tracking</b>: <i>Live</i> badge and <i>Waiting for vendor location</i> or <i>Vendor location available</i>. Refresh with <i>Refresh tracking</i>. Realtime events (<code>booking.updated</code>, <code>booking.vendor_accepted</code>, <code>booking.delivered</code>) update the list.</li>
+    <li><b>Tracking link</b>: the vendor acceptance SMS contains a link to <code>/track/&lt;token&gt;</code>. Someone without an account can follow the booking. On a phone, the page first asks <i>Open in Urban Tanker app</i> or <i>Continue in browser</i>. The browser opens the public tracking page, which shows the current status, expected delivery, vehicle and driver (or <i>Not assigned</i>), vehicle location on a map, and the status timeline. The app opens the same details from the <code>urbantanker://track/&lt;token&gt;</code> link, with the vehicle on a map. Both refresh every 30 seconds. Desktop browsers go straight to the tracking page.</li>
+    <li><b>Notifications</b>: pushed for each status change. Read state and preferences are managed in <code>/customer/notifications</code> and <code>/customer/notification-preferences</code>.</li>
+  </ul>
+  <h3>Tracking API</h3>
+  <table>
+    <tr><th>Method and path</th><th>Purpose</th></tr>
+    <tr><td><code>GET /customer/orders/:orderId/tracking</code></td><td>Live status and vendor location for the customer's own booking.</td></tr>
+    <tr><td><code>GET /api/public/tracking/:token</code></td><td>Public tracking data, used by the web page and the app. No login needed.</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>8. Managing an Order</h2>
+  <table>
+    <tr><th>Action</th><th>Allowed when</th><th>Endpoint</th></tr>
+    <tr><td><b>Reschedule</b></td><td>Status is <code>pending_vendor</code>, <code>vendor_assigned</code>, or <code>accepted</code>. New time must be in the future.</td><td><code>PATCH /customer/orders/:orderId/reschedule</code></td></tr>
+    <tr><td><b>Cancel</b></td><td>Status is <code>pending_vendor</code>, <code>vendor_assigned</code>, or <code>accepted</code>.</td><td><code>PATCH /customer/orders/:orderId/status</code> with <code>cancelled</code></td></tr>
+    <tr><td><b>Request delivery OTP</b></td><td>Status is <code>arrived</code>. Generates a 6-digit code with an expiry.</td><td><code>POST /customer/orders/:orderId/delivery-otp</code></td></tr>
+    <tr><td><b>Rate delivery</b></td><td>After delivery. Score 1 to 5, optional review.</td><td><code>POST /customer/orders/:orderId/rating</code></td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>9. Delivery Completion</h2>
+  <ol class="flat">
+    <li>The vendor reaches the location and the booking moves to <code>arrived</code>.</li>
+    <li>The customer taps <b>Request delivery OTP</b>. A 6-digit code is generated with an expiry, and it is sent by SMS to the customer's profile phone (see Section 11). If the SMS cannot be queued, the request fails and the customer can retry.</li>
+    <li>The customer gives the OTP to the driver. The vendor enters it through <code>POST /vendor/orders/:id/delivery/verify</code>.</li>
+    <li>On a valid OTP the booking moves to <code>delivered</code>, the payment is settled (COD collected), and the customer gets a <code>booking.delivered</code> notification and a delivery confirmation SMS (see Section 11).</li>
+    <li>The customer is prompted to <b>Rate delivery</b>. The app shows <i>Thank you for rating the delivery.</i></li>
+  </ol>
+  <div class="note">Verify the COD settlement step against the vendor delivery code before release. This review confirmed the OTP check and the delivered transition, not the exact settlement code.</div>
+</section>
+
+<section>
+  <h2>10. Failure and Edge Cases</h2>
+  <table>
+    <tr><th>Situation</th><th>Behaviour</th></tr>
+    <tr><td>Submit retried (network drop)</td><td>Same <code>idempotency_key</code> returns the existing booking. No duplicate.</td></tr>
+    <tr><td>Another vendor accepts first</td><td>The remaining offers are updated to <i>Already accepted by another vendor</i>. Returns 409.</td></tr>
+    <tr><td>Cancel after vendor is en route</td><td>Rejected by the transition rules. Customer sees the error.</td></tr>
+    <tr><td>Wrong OTP</td><td>Vendor verification is rejected, so the booking does not move to <code>delivered</code> (the retry behaviour was not traced).</td></tr>
+    <tr><td>Address outside Chennai</td><td>The picker is labelled <i>Chennai addresses only</i>. The server-side check was not traced.</td></tr>
+    <tr><td>Realtime connection down</td><td><i>Realtime connection unavailable.</i> is shown on the Bookings screen.</td></tr>
+    <tr><td>Phone not verified for a service</td><td>Booking rejected by <code>validateServicePhoneVerification</code>.</td></tr>
+    <tr><td>OTP SMS cannot be sent at sign-in or on a booking contact check</td><td>The request returns 503 <i>Mobile verification is not configured yet.</i> (502 when the send throws an error). The app shows the message, and the user can request a new code.</td></tr>
+    <tr><td>Delivery OTP SMS cannot be sent</td><td>The request returns 503 <i>Delivery OTP could not be sent. Please try again.</i> The customer can request again, and the new code replaces the old one.</td></tr>
+    <tr><td>Login with a profile missing the new columns</td><td>403 <i>Account profile is unavailable</i> until the database update is applied.</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>11. SMS Notifications (MSG91)</h2>
+  <p>SMS goes through MSG91 by default. Set <code>SMS_PROVIDER=twilio</code> to send the same messages through the existing Twilio setup instead. Each message is a DLT-approved template, keyed by the variables shown.</p>
+  <table>
+    <tr><th>Message</th><th>Trigger in the customer workflow</th><th>Sent to</th><th>Variables</th><th>Status</th></tr>
+    <tr><td><b>User registration OTP</b></td><td>Phone sign-in or signup requests a code (<code>/auth/phone/request-otp</code>, Section 2)</td><td>Customer phone</td><td><code>otp</code></td><td><span class="status s-warn">Template text is a placeholder</span></td></tr>
+    <tr><td><b>Booking verification OTP</b></td><td>Booking contact check when a phone number is used in a booking (<code>/auth/guest/request-otp</code>, Section 4)</td><td>Phone being verified</td><td><code>otp</code></td><td><span class="status s-warn">Template text is a placeholder</span></td></tr>
+    <tr><td><b>Booking confirmation</b></td><td>Booking created (Section 4), sent to the booking contact (template <code>guest_booking_confirmation</code>)</td><td>Booking contact phone</td><td><code>reference</code></td><td><span class="status s-warn">Template text is a placeholder</span></td></tr>
+    <tr><td><b>Vendor acceptance</b></td><td>Vendor accepts the booking (Section 6, <code>vendor_assigned</code> to <code>accepted</code>)</td><td>Customer phone</td><td><code>reference</code>, <code>vehicle</code>, <code>driver</code>, <code>trackingUrl</code></td><td><span class="status s-warn">Template text is a placeholder</span></td></tr>
+    <tr><td><b>Delivery confirmation</b></td><td>Delivery OTP verified, booking <code>delivered</code> (Section 9)</td><td>Customer profile phone</td><td><code>reference</code></td><td><span class="status s-warn">Template text is a placeholder</span></td></tr>
+    <tr><td><b>Delivery OTP</b></td><td>Customer requests the delivery code once the vendor has arrived (Section 8)</td><td>Customer profile phone</td><td><code>reference</code>, <code>otp</code></td><td><span class="status s-warn">Template text is a placeholder</span></td></tr>
+  </table>
+  <div class="note">For booking confirmation, vendor acceptance, and delivery confirmation, a failed send is logged and does not block the booking or the delivery. The delivery OTP request returns an error if its SMS cannot be queued, so the customer can retry. With <code>SMS_PROVIDER=msg91</code>, a missing template ID means the message is not sent. There is no automatic Twilio fallback.</div>
+  <h3>Template storage and admin management</h3>
+  <p>Each message above is stored as a row in the <code>sms_templates</code> table. The backend reads templates from the database and caches them for 5 minutes. Each row has a body with <code>{{variable}}</code> placeholders, an active flag, and an optional MSG91 template ID. For the six built-in messages, a blank MSG91 template ID falls back to the <code>MSG91_TEMPLATE_ID_*</code> value in the environment config.</p>
+  <p>Admins manage templates on the new <b>SMS templates</b> screen in the admin workspace. The screen lists every template. Its add/edit dialog changes the body, the active flag, and the MSG91 template ID. The admin API is <code>GET</code>, <code>POST</code>, and <code>PATCH</code> under <code>/api/admin/sms-templates</code>, and every change is written to the audit log. The API rejects a body that uses a placeholder the built-in message does not allow. Saving a change clears the cache on the instance that handled it. Other instances pick up the change within 5 minutes.</p>
+  <h3>Custom templates</h3>
+  <p>Admins can add a new template with its own key and MSG91 template ID. The backend can send it with <code>sendTemplateSms(key, phone, variables)</code>. The send is refused if the template is inactive or missing, if the MSG91 ID is blank, or if a placeholder has no value. It returns a result and does not throw. A custom template is sent only where the code calls it with that key. No screen in the customer workflow sends custom templates yet.</p>
+  <h3>Not yet covered</h3>
+  <ul>
+    <li>No gaps remain in the six SMS touchpoints. The delivery OTP now goes through the MSG91 template, like the other messages.</li>
+    <li>The admin screen has no test-send button, so a template can only be checked by triggering the real flow.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>12. Open Items</h2>
+  <ul>
+    <li>Confirm the wallet debit runs at booking creation (Section 5).</li>
+    <li>Confirm the COD settlement step on delivery (Section 9).</li>
+    <li>Replace the SMS template text with the DLT-approved text registered in MSG91. Set each template's MSG91 template ID on the SMS templates screen, or use the <code>MSG91_TEMPLATE_ID_*</code> env values for the built-in messages (Section 11).</li>
+    <li>Set <code>MSG91_AUTH_KEY</code> and <code>MSG91_SENDER_ID</code> in the environment. Both are blank today.</li>
+    <li>Confirm the MSG91 Flow API call against the account with a live test send. It has not been run yet.</li>
+    <li>Optional: HTTPS app links would let the SMS link open the app directly, without the chooser. This needs domain verification files on the web host, and it is not done.</li>
+    <li>The web app has no theme setting. The mobile theme is stored per user on the server.</li>
+    <li>Signup channel (<code>signup_platform</code>) is recorded but not yet shown in the admin views.</li>
+    <li><code>customer_type</code> is set from the <code>guest_</code> username prefix. A guest account that later becomes a full account stays <code>guest</code>.</li>
+    <li>The selfie consent wording and the retention period are not set. Confirm both before launch.</li>
+  </ul>
+</section>
+
+<p class="meta">Generated from the codebase: Flutter <code>urban_tanker_app/lib/screens/home_shell.dart</code>, <code>bookings_screen.dart</code>, <code>auth_screen.dart</code>, <code>public_tracking_screen.dart</code>; backend <code>ut_landing/backend/src/routes/customer.ts</code>, <code>customerExtended.ts</code>, <code>payments.ts</code>, <code>vendorExtended.ts</code>, <code>publicTracking.ts</code>; database <code>transition_booking</code> and <code>create_customer_booking</code> in <code>supabase/001_initial.sql</code>.</p>
+</main>
+</body>
+</html>

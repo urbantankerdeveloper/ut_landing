@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
-import { MapPin, RefreshCw, Truck } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { MapPin, RefreshCw, Smartphone, Truck } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
 import { customerApi, type PublicTracking } from '../api/customer'
 import { LiveTrackingMap } from '../components/PublicTrackingMap'
+import { appTrackingLink, isMobileUserAgent } from '../utils/trackingLink'
 
 const statusLabels: Record<string, string> = {
   pending_vendor: 'Request received',
@@ -16,10 +17,22 @@ const statusLabels: Record<string, string> = {
 const statuses = ['pending_vendor', 'vendor_assigned', 'accepted', 'en_route', 'arrived', 'delivered']
 
 export default function PublicTrackingScreen({ token }: { token: string }) {
-  const query = useQuery({ queryKey: ['public-tracking', token], queryFn: () => customerApi.publicTracking(token), refetchInterval: 30_000 })
+  const [inBrowser, setInBrowser] = useState(() => !isMobileUserAgent(navigator.userAgent))
+  const query = useQuery({ queryKey: ['public-tracking', token], queryFn: () => customerApi.publicTracking(token), refetchInterval: 30_000, enabled: inBrowser })
+  if (!inBrowser) return <TrackingChooser token={token} onBrowser={() => setInBrowser(true)} />
   if (query.isLoading) return <TrackingShell><p role="status">Loading live tracking…</p></TrackingShell>
   if (query.isError || !query.data) return <TrackingShell><h1>Tracking link unavailable</h1><p>This tracking link is invalid, expired, or no longer active.</p></TrackingShell>
   return <TrackingDetails tracking={query.data} onRefresh={() => { void query.refetch() }} refreshing={query.isFetching} />
+}
+
+function TrackingChooser({ token, onBrowser }: { token: string; onBrowser: () => void }) {
+  return <TrackingShell>
+    <div className="section-intro"><p className="eyebrow">URBAN TANKER LIVE TRACKING</p><h1>Track your delivery</h1><p>Open the live map in the Urban Tanker app, or continue in your browser.</p></div>
+    <section className="reference-copy-card public-tracking-card">
+      <div className="tracking-chooser-actions"><a className="button button-primary" href={appTrackingLink(token)}><Smartphone size={14} /> Open in Urban Tanker app</a><button className="button button-quiet" type="button" onClick={onBrowser}>Continue in browser</button></div>
+      <p>If the app does not open, continue in your browser.</p>
+    </section>
+  </TrackingShell>
 }
 
 function TrackingDetails({ tracking, onRefresh, refreshing }: { tracking: PublicTracking; onRefresh: () => void; refreshing: boolean }) {

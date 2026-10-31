@@ -2,6 +2,7 @@ import { config } from '../config.js'
 import { supabase } from '../supabase.js'
 import { notifyCustomer } from './customerNotifications.js'
 import { notifyUser } from './providers.js'
+import { sendTemplateSms, type SmsTemplateKey } from './sms.js'
 import { getOrCreateTrackingToken } from './trackingTokens.js'
 
 type AssignedBooking = {
@@ -45,6 +46,31 @@ export async function notifyCustomerOfAssignment(booking: AssignedBooking) {
   })
 
   const message = `Urban Tanker ${booking.reference ?? booking.id}: ${detail}${customerMapUrl ? ` Delivery location: ${customerMapUrl}` : ''}`
-  const providerResults = await notifyUser({ email: authUser.user.email ?? undefined, phone: profileResult.data?.phone_e164 ?? undefined }, 'Your Urban Tanker fleet is assigned', message)
-  return { vehicle, driver, trackingUrl, providerResults }
+  const providerResults = await notifyUser({ email: authUser.user.email ?? undefined }, 'Your Urban Tanker fleet is assigned', message)
+  const sms = await notifyCustomerSms(profileResult.data?.phone_e164, 'vendor_acceptance', {
+    reference: booking.reference ?? booking.id,
+    vehicle,
+    driver,
+    trackingUrl,
+  })
+  return { vehicle, driver, trackingUrl, providerResults, sms }
+}
+
+export async function notifyCustomerSms(phoneE164: string | null | undefined, key: SmsTemplateKey, vars: Record<string, string>) {
+  if (!phoneE164) return { queued: false, reason: 'No phone' }
+  try {
+    return await sendTemplateSms(key, phoneE164, vars)
+  } catch (error) {
+    console.warn(JSON.stringify({ event: 'sms_failed', template: key, error: error instanceof Error ? error.message : 'unknown' }))
+    return { queued: false, reason: 'SMS failed' }
+  }
+}
+
+export async function notifyCustomerSmsById(customerId: string, key: SmsTemplateKey, vars: Record<string, string>) {
+  const { data, error } = await supabase.from('profiles').select('phone_e164').eq('id', customerId).maybeSingle()
+  if (error) {
+    console.warn(JSON.stringify({ event: 'sms_lookup_failed', template: key, error: error.message }))
+    return { queued: false, reason: 'Profile lookup failed' }
+  }
+  return notifyCustomerSms(data?.phone_e164, key, vars)
 }

@@ -18,6 +18,7 @@ import { AdminBookingOperationsScreen } from './AdminBookingOperationsScreen'
 import { AdminProgramsScreen } from './AdminProgramsScreen'
 import { AdminPricingScreen } from './AdminPricingScreen'
 import { AdminNotificationsPanel } from './AdminNotificationsPanel'
+import { AdminSmsTemplatesScreen } from './AdminSmsTemplatesScreen'
 import { useAdminAnalyticsSummary } from '../hooks/useAdminData'
 import { adminApi } from '../api/admin'
 
@@ -34,6 +35,7 @@ export function AdminWorkspaceContent({ item, onNotice }: Props) {
   if (item === 'notifications') return <AdminNotificationsPanel onNotice={onNotice} />
   if (item === 'analytics' && !demoDataEnabled) return <AdminAnalyticsScreen />
   if (item === 'system-health') return <AdminSystemHealthScreen />
+  if (item === 'sms-templates') return <AdminSmsTemplatesScreen onNotice={onNotice} />
   if (item === 'bookings' && !demoDataEnabled) return <AdminBookingOperationsScreen onNotice={onNotice} />
   if (item === 'pricing' && !demoDataEnabled) return <AdminPricingScreen onNotice={onNotice} />
   if (['subscriptions', 'contracts', 'enquiries'].includes(item) && !demoDataEnabled) return <AdminProgramsScreen kind={item as 'subscriptions' | 'contracts' | 'enquiries'} onNotice={onNotice} />

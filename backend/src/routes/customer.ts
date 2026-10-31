@@ -1,4 +1,4 @@
-import { Router } from 'express'
+import express, { Router } from 'express'
 import { z } from 'zod'
 import { requireAuth } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
@@ -6,6 +6,8 @@ import { bookingSchema } from '../lib/schemas.js'
 import { quoteServices } from '../services/pricing.js'
 import { emitRealtimeToUser, emitRealtimeToVendor } from '../services/realtime.js'
 import { sendPushNotification } from '../services/pushNotifications.js'
+import { isJpeg, selfieBucket, selfieMaxBytes, selfieObjectPath } from '../services/selfie.js'
+import { notifyCustomerSms } from '../services/bookingNotifications.js'
 const router = Router()
 function pushVendorOrder(ownerId: string, bookingId: string, reference: string) {
   void sendPushNotification({
@@ -193,6 +195,9 @@ async function createBookingAndNotifications(input: {
   if (error) throw new Error(`Booking could not be saved: ${error.message}`)
   const result = data as { booking: { id: string; reference: string; vendor_id: string | null; quoted_amount_paise?: number; payment_method?: string }; created: boolean }
   if (result?.booking?.id) notifyNearbyVendors(input.vendors, result.booking, result.created)
+  if (result?.created && input.booking.customer_phone_e164) {
+    void notifyCustomerSms(input.booking.customer_phone_e164, 'guest_booking_confirmation', { reference: input.reference })
+  }
   return result
 }
 router.post('/orders', async (request, response) => {
@@ -257,6 +262,26 @@ router.patch('/addresses/:id', async (request, response) => { const parsed = z.o
 router.delete('/addresses/:id', async (request, response) => { const { error } = await supabase.from('saved_addresses').delete().eq('id', request.params.id).eq('user_id', request.authUser!.id); if (error) return response.status(400).json({ error: error.message }); response.status(204).send() })
 router.get('/subscriptions', async (request, response) => { const { data, error } = await supabase.from('subscriptions').select('*').eq('customer_id', request.authUser!.id).order('created_at', { ascending: false }); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
 router.get('/profile', async (request, response) => { const { data, error } = await supabase.from('profiles').select('full_name, phone_e164').eq('id', request.authUser!.id).single(); if (error) return response.status(500).json({ error: error.message }); response.json({ name: data.full_name, email: request.authUser!.email ?? '', phone: String(data.phone_e164 ?? '').replace(/\D/g, '').slice(-10) }) })
+router.post('/profile/selfie', express.raw({ type: 'image/jpeg', limit: selfieMaxBytes }), async (request, response) => {
+  const customerId = request.authUser!.id
+  const image = request.body
+  if (!Buffer.isBuffer(image) || !isJpeg(image)) return response.status(400).json({ error: 'Upload a JPEG selfie.' })
+  const path = selfieObjectPath(customerId)
+  const { error: uploadError } = await supabase.storage.from(selfieBucket).upload(path, image, { contentType: 'image/jpeg', upsert: true })
+  if (uploadError) return response.status(500).json({ error: 'The selfie could not be saved. Please try again.' })
+  const capturedAt = new Date().toISOString()
+  const { error } = await supabase.from('profiles').update({ selfie_path: path, selfie_required: false, selfie_captured_at: capturedAt }).eq('id', customerId)
+  if (error) return response.status(500).json({ error: error.message })
+  response.status(201).json({ capturedAt, selfieRequired: false })
+})
+router.get('/profile/selfie', async (request, response) => {
+  const { data: profile, error } = await supabase.from('profiles').select('selfie_path,selfie_captured_at').eq('id', request.authUser!.id).maybeSingle()
+  if (error) return response.status(500).json({ error: error.message })
+  if (!profile?.selfie_path) return response.status(404).json({ error: 'Selfie not found' })
+  const { data: signed, error: signError } = await supabase.storage.from(selfieBucket).createSignedUrl(profile.selfie_path, 300)
+  if (signError || !signed) return response.status(500).json({ error: 'Selfie link could not be created' })
+  response.json({ url: signed.signedUrl, expiresInSeconds: 300, capturedAt: profile.selfie_captured_at })
+})
 router.patch('/profile', async (request, response) => {
   const parsed = z.object({
     name: z.string().min(2).max(60),
