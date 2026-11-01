@@ -98,3 +98,24 @@
     .location-chip strong { overflow-wrap: anywhere; }
     .location-chip:disabled { cursor: default; opacity: 1; }
 }
+
+@media (max-width: 400px) {
+    .site-header {
+        gap: 8px;
+        padding-right: 12px;
+        padding-left: 12px;
+    }
+
+    .site-header .brand-wordmark {
+        width: clamp(96px, 30vw, 116px);
+        height: auto;
+    }
+
+    .site-header .header-actions {
+        gap: 6px;
+    }
+
+    .site-header .header-actions .button {
+        padding: 0 10px;
+    }
+}

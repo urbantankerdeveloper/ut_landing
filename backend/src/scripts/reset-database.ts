@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { databasePool } from '../database.js'
 
 if (!databasePool) throw new Error('SUPABASE_DB_URL is required to reset the database.')
+if (process.env.NODE_ENV === 'production') throw new Error('Database reset is disabled in production. Use npm run db:update for incremental changes.')
 if (process.env.CONFIRM_DATABASE_RESET !== 'URBAN_TANKER_RESET') {
   throw new Error('Database reset refused. Set CONFIRM_DATABASE_RESET=URBAN_TANKER_RESET explicitly.')
 }

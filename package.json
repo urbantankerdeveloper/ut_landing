@@ -3,12 +3,17 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "vite",
     "dev:all": "concurrently -n FE,BE -c blue,green \"npm run dev\" \"npm run dev --prefix backend\"",
     "start": "npm run start --prefix backend",
     "db:check": "npm run db:check --prefix backend",
-    "build:hostinger": "npm run build && npm run build --prefix backend",
+    "build:hostinger": "npm run build",
+    "build:backend": "npm run build --prefix backend",
+    "build:all": "npm run build && npm run build:backend",
     "test": "vitest run",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
@@ -23,7 +28,7 @@
     "@tanstack/react-query": "^5.90.16",
     "@vis.gl/react-google-maps": "^1.10.2",
     "core-js": "^3.51.0",
-    "jspdf": "^2.5.2",
+    "jspdf": "^4.2.1",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.545.0",
     "react": "^19.2.8",
@@ -50,7 +55,7 @@
     "eslint-plugin-react-refresh": "^0.5.6",
     "globals": "^17.12.0",
     "typescript": "~6.0.2",
-    "typescript-eslint": "^8.69.0",
+    "typescript-eslint": "^8.72.1",
     "vite": "^8.3.0",
     "vitest": "^5.0.4"
   }

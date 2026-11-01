@@ -57,7 +57,11 @@
 }
 
 .site-header .header-actions .button {
+    min-height: 38px;
+    padding: 0 14px;
     font-size: 12px;
+    line-height: 1;
+    white-space: nowrap;
 }
 .brand {
     display: inline-flex;
@@ -291,6 +295,63 @@
         border-color: #cfe2e1;
         transform: translateY(-2px);
         text-decoration: none;
+}
+
+.social-links a.social-instagram:hover,
+.social-links a.social-instagram:focus-visible {
+    border-color: #d62976;
+}
+
+.social-links a.social-instagram:hover svg,
+.social-links a.social-instagram:focus-visible svg {
+    stroke: url(#instagram-gradient);
+}
+
+.social-links a.social-facebook:hover,
+.social-links a.social-facebook:focus-visible {
+    color: #1877f2;
+    border-color: #1877f2;
+}
+
+.social-links a.social-x:hover,
+.social-links a.social-x:focus-visible {
+    color: #000;
+    border-color: #000;
+}
+
+.social-links a.social-linkedin:hover,
+.social-links a.social-linkedin:focus-visible {
+    color: #0a66c2;
+    border-color: #0a66c2;
+}
+
+.social-links a.social-play-store svg path {
+    fill: currentColor;
+}
+
+.social-links a.social-play-store:hover .play-blue,
+.social-links a.social-play-store:focus-visible .play-blue {
+    fill: #00d7fe;
+}
+
+.social-links a.social-play-store:hover .play-green,
+.social-links a.social-play-store:focus-visible .play-green {
+    fill: #00f076;
+}
+
+.social-links a.social-play-store:hover .play-yellow,
+.social-links a.social-play-store:focus-visible .play-yellow {
+    fill: #ffce00;
+}
+
+.social-links a.social-play-store:hover .play-red,
+.social-links a.social-play-store:focus-visible .play-red {
+    fill: #ff3a44;
+}
+
+.social-links a.social-play-store:hover,
+.social-links a.social-play-store:focus-visible {
+    border-color: #00f076;
 }
 
 .qr-block {

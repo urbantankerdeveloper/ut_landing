@@ -31,18 +31,11 @@ import { requestObservability } from './middleware/observability.js'
 import { checkDatabaseConnection } from './database.js'
 const app = express(); const httpServer = createServer(app)
 const frontendDist = resolve(dirname(fileURLToPath(import.meta.url)), '../../dist')
-const allowedOrigins = [
-  config.FRONTEND_ORIGIN,
-  'https://urbantanker.in',
-  'https://urban-tanker-backend.onrender.com',
-  'http://localhost:5173',
-  'http://localhost:5174',
-  'http://localhost:8080',
-]
+const allowedOrigins = [config.FRONTEND_ORIGIN, ...config.CORS_ORIGINS]
 const isAllowedOrigin = (origin: string | undefined) =>
   !origin ||
   allowedOrigins.includes(origin) ||
-  /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+  (config.NODE_ENV !== 'production' && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin))
 const corsOptions = {
   origin: (
     origin: string | undefined,
@@ -57,7 +50,21 @@ const corsOptions = {
   credentials: true,
 }
 app.set('trust proxy', 1)
-app.use(helmet()); app.use(cors(corsOptions)); app.use(compression()); app.use(express.json({ limit: '2mb', verify: (request, _response, buffer) => { (request as typeof request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer) } })); app.use(rateLimit({ windowMs: 60_000, limit: 120 }))
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", 'https://checkout.razorpay.com'],
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
+      imgSrc: ["'self'", 'data:', 'blob:', 'https://*.tile.openstreetmap.org', 'https://*.razorpay.com'],
+      connectSrc: ["'self'", 'https://nominatim.openstreetmap.org', 'https://*.razorpay.com'],
+      frameSrc: ['https://*.razorpay.com'],
+      objectSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+    },
+  },
+})); app.use(cors(corsOptions)); app.use(compression()); app.use(express.json({ limit: '2mb', verify: (request, _response, buffer) => { (request as typeof request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer) } })); app.use(rateLimit({ windowMs: 60_000, limit: 120 }))
 app.use(requestObservability)
 app.get('/health', (_request, response) => response.json({ ok: true, service: 'urban-tanker-api' }))
 app.get('/health/ready', async (_request, response) => {

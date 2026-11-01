@@ -13,10 +13,12 @@ const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(8080),
   FRONTEND_ORIGIN: z.string().default('http://localhost:5173'),
+  CORS_ORIGINS: z.string().optional(),
   SUPABASE_URL: z.string().url(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   SUPABASE_SECRET_KEY: z.string().min(1).optional(),
   SUPABASE_DB_URL: z.string().url().optional(),
+  DB_SSL_CA: optionalSecret,
   DB_POOL_MAX: z.coerce.number().int().positive().default(10),
   ADMIN_REGISTRATION_KEY: z.string().min(1).optional(),
   JWT_EXPIRES_IN: z.string().default('15m'),
@@ -44,6 +46,7 @@ const schema = z.object({
   DEFAULT_VERIFICATION_CODE: z.string().regex(/^\d{6}$/, 'DEFAULT_VERIFICATION_CODE must be a 6-digit code').default('123456'),
   RAZORPAY_KEY_ID: optionalSecret,
   RAZORPAY_KEY_SECRET: optionalSecret,
+  RAZORPAY_WEBHOOK_SECRET: optionalSecret,
   VAPID_PUBLIC_KEY: optionalSecret,
   VAPID_PRIVATE_KEY: optionalSecret,
   ONESIGNAL_APP_ID: optionalSecret,
@@ -57,8 +60,16 @@ if (!serviceRoleKey) throw new Error('SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SECR
 if (parsed.NODE_ENV === 'production' && !parsed.FRONTEND_ORIGIN.startsWith('https://')) {
   throw new Error('FRONTEND_ORIGIN must use HTTPS in production')
 }
+if (parsed.NODE_ENV === 'production' && parsed.USE_DEFAULT_VERIFICATION_CODE) {
+  throw new Error('USE_DEFAULT_VERIFICATION_CODE must be false in production')
+}
+if (parsed.NODE_ENV === 'production' && parsed.SUPABASE_DB_URL && !parsed.DB_SSL_CA) {
+  throw new Error('DB_SSL_CA is required in production so the database TLS certificate is verified')
+}
 export const config = {
   ...parsed,
   SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey,
   MAIL_FROM: parsed.MAIL_FROM ?? parsed.SMTP_USER,
+  DB_SSL_CA: parsed.DB_SSL_CA?.replace(/\\n/g, '\n'),
+  CORS_ORIGINS: (parsed.CORS_ORIGINS ?? '').split(',').map((origin) => origin.trim()).filter(Boolean),
 }

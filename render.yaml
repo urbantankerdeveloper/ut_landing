@@ -1,0 +1,83 @@
+# Render blueprint for the Urban Tanker API. The frontend is deployed separately to Hostinger (public_html).
+# Secrets are marked sync: false and must be entered in the Render dashboard; they are never stored in this file.
+services:
+  - type: web
+    name: urban-tanker-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    # Keep a single instance: Socket.io and the in-memory rate limiter are per process.
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: USE_DEFAULT_VERIFICATION_CODE
+        value: "false"
+      - key: SMS_PROVIDER
+        value: msg91
+      - key: DB_POOL_MAX
+        value: "10"
+      - key: ANALYTICS_RETENTION_DAYS
+        value: "90"
+      - key: ANALYTICS_ANONYMIZE_AFTER_DAYS
+        value: "7"
+      # Hostinger origin(s) allowed to call the API, e.g. https://urbantanker.com
+      - key: FRONTEND_ORIGIN
+        sync: false
+      # Optional extra origins, comma-separated (e.g. the www host).
+      - key: CORS_ORIGINS
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_DB_URL
+        sync: false
+      # Supabase CA certificate (PEM); required in production when SUPABASE_DB_URL is set. Use \n for line breaks.
+      - key: DB_SSL_CA
+        sync: false
+      - key: JWT_EXPIRES_IN
+        value: 15m
+      - key: REFRESH_TOKEN_EXPIRES_IN
+        value: 30d
+      - key: ADMIN_REGISTRATION_KEY
+        sync: false
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: MSG91_AUTH_KEY
+        sync: false
+      - key: MSG91_SENDER_ID
+        sync: false
+      - key: MSG91_TEMPLATE_ID_USER_REGISTRATION_OTP
+        sync: false
+      - key: MSG91_TEMPLATE_ID_BOOKING_VERIFICATION_OTP
+        sync: false
+      - key: MSG91_TEMPLATE_ID_GUEST_BOOKING_CONFIRMATION
+        sync: false
+      - key: MSG91_TEMPLATE_ID_VENDOR_ACCEPTANCE
+        sync: false
+      - key: MSG91_TEMPLATE_ID_DELIVERY_CONFIRMATION
+        sync: false
+      - key: MSG91_TEMPLATE_ID_DELIVERY_OTP
+        sync: false
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: ONESIGNAL_APP_ID
+        sync: false
+      - key: ONESIGNAL_REST_API_KEY
+        sync: false

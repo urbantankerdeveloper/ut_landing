@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ArrowRight, Check, Construction, Droplets, LocateFixed, ShieldCheck, Truck, Waves } from 'lucide-react'
 import { useNavigationStore } from '../stores/navigationStore'
 import { reverseGeocodeApproximate } from '../services/geocoding'
@@ -8,6 +8,12 @@ export default function HomeScreen() {
   const supportsGeolocation = typeof navigator !== 'undefined' && Boolean(navigator.geolocation)
   const [locationLabel, setLocationLabel] = useState('Choose a delivery area when booking')
   const [locationState, setLocationState] = useState<'idle' | 'loading' | 'ready' | 'unavailable'>('idle')
+
+  useEffect(() => {
+    // Detect the visitor's area once on load; the chip stays clickable to retry.
+    detectLocation()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   function detectLocation() {
     if (!supportsGeolocation || locationState === 'loading') return

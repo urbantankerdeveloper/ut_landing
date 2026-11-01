@@ -19,7 +19,9 @@
 .home-screen .service-showcase-card:first-child > p, .home-screen .service-showcase-card:nth-child(2) > p { min-height: 0; margin-bottom: 12px; }
 .home-screen .service-showcase-card:first-child .service-facts, .home-screen .service-showcase-card:nth-child(2) .service-facts { margin-bottom: 12px; }
 .home-screen .service-showcase-card:first-child .service-disclosure, .home-screen .service-showcase-card:nth-child(2) .service-disclosure { padding-top: 12px; }
-.home-screen .service-showcase-card .service-card-top { display: flex; width: 100%; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.home-screen .service-showcase-card .service-card-top { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 18px; }
+.home-screen .service-showcase-card .service-card-top .service-category { margin: 0; }
+.home-screen .service-showcase-card .service-card-top .service-icon { margin: 0; }
 .home-screen .service-showcase-card .service-icon { display: grid; width: 44px; height: 44px; flex: 0 0 44px; place-items: center; color: colors.$aqua; background: transparent; border: 1px solid currentColor; border-radius: 50%; }
 .home-screen .service-showcase-card h3 { margin: 28px 0 10px; font-size: 28px; }
 .home-screen .service-showcase-card > p { min-height: 48px; margin-bottom: 18px; }

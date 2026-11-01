@@ -7,7 +7,7 @@ export const databasePool = config.SUPABASE_DB_URL
       max: config.DB_POOL_MAX,
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 10_000,
-      ssl: { rejectUnauthorized: false },
+      ssl: config.DB_SSL_CA ? { ca: config.DB_SSL_CA, rejectUnauthorized: true } : { rejectUnauthorized: false },
     })
   : null
 
