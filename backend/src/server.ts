@@ -1,4 +1,5 @@
 import express from 'express'
+import { existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import cors from 'cors'
@@ -34,6 +35,8 @@ import { checkDatabaseConnection } from './database.js'
 const redis = await createRedisPair()
 const app = express(); const httpServer = createServer(app)
 const frontendDist = resolve(dirname(fileURLToPath(import.meta.url)), '../../dist')
+// The frontend is deployed to Hostinger, so on Render there is no build here. Serve it only when one is present.
+const serveFrontend = existsSync(resolve(frontendDist, 'index.html'))
 const allowedOrigins = [config.FRONTEND_ORIGIN, ...config.CORS_ORIGINS]
 const corsOptions = {
   origin: (
@@ -67,7 +70,7 @@ app.get('/health/ready', async (_request, response) => {
   response.status(databaseReady ? 200 : 503).json({ ok: databaseReady, service: 'urban-tanker-api', database: databaseReady ? 'ready' : 'unavailable' })
 })
 app.use('/api/auth', authRoutes); app.use('/api/devices', deviceRoutes); app.use('/api/public', publicTrackingRoutes); app.use('/api/customer', customerRoutes); app.use('/api/customer', customerExtendedRoutes); app.use('/api/vendor', vendorRoutes); app.use('/api/vendor', vendorExtendedRoutes); app.use('/api/admin', adminRoutes); app.use('/api/admin', adminExtendedRoutes); app.use('/api/admin', adminSmsTemplateRoutes); app.use('/api/payment', paymentRoutes); app.use('/api/uploads', uploadRoutes); app.use('/api/support', supportRoutes); app.use('/api/analytics', analyticsRoutes); app.use('/api/partner', partnerRoutes); app.use(errorHandler)
-app.use(express.static(frontendDist, { index: 'index.html', setHeaders: (response, filePath) => {
+if (serveFrontend) app.use(express.static(frontendDist, { index: 'index.html', setHeaders: (response, filePath) => {
   if (filePath.endsWith('index.html')) {
     response.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
   } else if (filePath.includes('/assets/')) {
@@ -76,7 +79,7 @@ app.use(express.static(frontendDist, { index: 'index.html', setHeaders: (respons
     response.setHeader('Cache-Control', 'public, max-age=86400')
   }
 } }))
-app.use((request, response, next) => { if (request.method !== 'GET' || request.path.startsWith('/api') || request.path.startsWith('/health') || request.path.startsWith('/socket.io')) return next(); response.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate'); response.sendFile(resolve(frontendDist, 'index.html')) })
+if (serveFrontend) app.use((request, response, next) => { if (request.method !== 'GET' || request.path.startsWith('/api') || request.path.startsWith('/health') || request.path.startsWith('/socket.io')) return next(); response.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate'); response.sendFile(resolve(frontendDist, 'index.html')) })
 const io = new Server(httpServer, { cors: corsOptions, adapter: socketAdapterFor(redis) })
 io.use(async (socket, next) => {
   try {

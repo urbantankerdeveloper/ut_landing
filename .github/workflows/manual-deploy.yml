@@ -1,0 +1,141 @@
+# Manual deploy: runs only from the Actions tab (Run workflow). Choose which parts to deploy.
+#
+# Frontend: built here, uploaded to Hostinger's public_html over FTP(S).
+# Backend:  Render deploys the backend from its deploy hook (the API is not built here).
+#
+# One-time setup in GitHub (Settings):
+#   Variables (Actions):   SUPABASE_REF             Supabase project ref, e.g. qlotsoputalbqkbkezlt
+#                          HOSTINGER_FTP_PROTOCOL   optional: ftps (default) or ftp, as shown in hPanel
+#   Secrets (Actions):     HOSTINGER_FTP_SERVER     FTP host from hPanel → Files → FTP Accounts
+#                          HOSTINGER_FTP_USERNAME   FTP username
+#                          HOSTINGER_FTP_PASSWORD   FTP password
+#                          HOSTINGER_FTP_SERVER_DIR upload folder, e.g. public_html/
+#                          RENDER_DEPLOY_HOOK_URL   Render → urban-tanker-backend → Settings → Deploy Hook
+#   Environment:           production               add required reviewers to approve each deploy
+
+name: Manual deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_frontend:
+        description: Deploy the frontend to Hostinger (public_html)
+        type: boolean
+        default: true
+      deploy_backend:
+        description: Trigger the backend deploy on Render
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+# One deploy at a time, so two runs never upload over each other.
+concurrency:
+  group: manual-deploy
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install backend dependencies
+        run: npm ci --prefix backend
+
+      - name: Frontend lint
+        run: npm run lint
+
+      - name: Frontend tests
+        run: npm test
+
+      - name: Backend typecheck
+        run: npm run lint --prefix backend
+
+      - name: Backend tests
+        run: npm test --prefix backend
+
+      - name: Build backend
+        run: npm run build --prefix backend
+
+      - name: Build frontend
+        if: inputs.deploy_frontend
+        env:
+          SUPABASE_REF: ${{ vars.SUPABASE_REF }}
+        run: npm run build
+
+      # include-hidden-files keeps dist/.htaccess, which holds the security headers and the SPA fallback.
+      - name: Upload frontend build
+        if: inputs.deploy_frontend
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist
+          include-hidden-files: true
+          retention-days: 7
+
+  deploy-frontend:
+    name: Deploy frontend to Hostinger
+    needs: verify
+    if: inputs.deploy_frontend
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist
+
+      - name: Check the build before uploading
+        run: |
+          test -f dist/.htaccess
+          if grep -q "<SUPABASE_REF>" dist/.htaccess; then echo "SUPABASE_REF was not substituted" >&2; exit 1; fi
+
+      # Uploads over existing files and leaves other files in public_html alone (dangerous-clean-slate stays false).
+      - name: Upload to public_html
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.HOSTINGER_FTP_SERVER }}
+          username: ${{ secrets.HOSTINGER_FTP_USERNAME }}
+          password: ${{ secrets.HOSTINGER_FTP_PASSWORD }}
+          protocol: ${{ vars.HOSTINGER_FTP_PROTOCOL || 'ftps' }}
+          local-dir: dist/
+          server-dir: ${{ secrets.HOSTINGER_FTP_SERVER_DIR }}
+          dangerous-clean-slate: false
+
+  deploy-backend:
+    name: Deploy backend to Render
+    needs: verify
+    if: inputs.deploy_backend
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Trigger Render deploy
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: curl --fail --silent --show-error -X POST "$RENDER_DEPLOY_HOOK_URL"
+
+      # Render keeps serving the old instance until the new one is live, so this check can pass early. Check the Render dashboard for the final status.
+      - name: Check backend health
+        env:
+          BACKEND_HEALTH_URL: https://urban-tanker-backend.onrender.com/health
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error "$BACKEND_HEALTH_URL"; then echo; exit 0; fi
+            sleep 20
+          done
+          echo "Backend health check did not pass within 10 minutes" >&2
+          exit 1
