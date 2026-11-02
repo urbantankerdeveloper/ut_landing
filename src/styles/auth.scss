@@ -185,3 +185,6 @@
         padding: 34px 0 20px;
     }
 }
+.selfie-camera { display: grid; gap: 10px; }
+.selfie-camera-video { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 12px; background: #0b424b; transform: scaleX(-1); }
+.selfie-toast { margin: 0; padding: 10px 12px; border-radius: 8px; color: #7a4b00; background: #fff0c7; font-size: 13px; }
