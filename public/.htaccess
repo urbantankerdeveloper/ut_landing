@@ -19,7 +19,7 @@ RewriteRule ^ index.html [L]
   Header always set Referrer-Policy "strict-origin-when-cross-origin"
   Header always set X-Frame-Options "DENY"
   Header always set Permissions-Policy "camera=(self), microphone=(), geolocation=(self)"
-  Header always set Strict-Transport-Security "max-age=31536000"
+  Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
   # Placeholders are filled at build time by scripts/prepare-deploy-config.mjs from VITE_API_BASE_URL, VITE_REALTIME_URL and the SUPABASE_REF environment variable.
   Header always set Content-Security-Policy "default-src 'self'; script-src 'self' https://checkout.razorpay.com; style-src 'self'; font-src 'self'; img-src 'self' data: blob: https://*.tile.openstreetmap.org https://*.razorpay.com https://<SUPABASE_REF>.supabase.co; connect-src 'self' __API_ORIGIN__ __REALTIME_WS_ORIGIN__ https://nominatim.openstreetmap.org https://*.razorpay.com https://<SUPABASE_REF>.supabase.co; frame-src https://*.razorpay.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 </IfModule>

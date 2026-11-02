@@ -1,0 +1,16 @@
+// Accessibility overrides. Loaded last in app.scss so they win over per-screen rules.
+// 1) Keep a visible focus ring on form fields whose own resets set outline:0 (for example .field input, .auth-form input).
+// 2) Touch targets for coarse pointers (phones and tablets): WCAG 2.5.8 (AA) needs 24x24 CSS px; this sets 44x44 for buttons, links and fields.
+@use "../theme/colors";
+input::placeholder, textarea::placeholder { color: colors.$muted; opacity: 1; }
+
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid colors.$aqua-dark !important; outline-offset: 3px; }
+
+@media (pointer: coarse) {
+  button, [role="button"], summary, a[href] { min-height: 44px !important; }
+  button, .menu-toggle, .icon-button, .icon-action, a[class*="social-"] { min-width: 44px !important; }
+  a[class*="social-"] { min-height: 44px !important; }
+  input:not([type="checkbox"]):not([type="radio"]), select, textarea { min-height: 44px !important; }
+  input[type="checkbox"], input[type="radio"] { width: 24px !important; height: 24px !important; }
+  label:has(> input[type="checkbox"]), label:has(> input[type="radio"]) { min-height: 44px; }
+}
