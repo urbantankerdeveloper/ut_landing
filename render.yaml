@@ -8,7 +8,7 @@ services:
     buildCommand: npm ci && npm run build
     startCommand: npm start
     healthCheckPath: /health
-    # Keep a single instance: Socket.io and the in-memory rate limiter are per process.
+    # Scale out by adding instances when load needs it. Every instance must share REDIS_URL (realtime and rate limits).
     envVars:
       - key: NODE_VERSION
         value: "22"
@@ -79,5 +79,10 @@ services:
         sync: false
       - key: ONESIGNAL_APP_ID
         sync: false
+      # Redis for shared realtime and rate limits. Required before running more than one instance; leave unset for a single instance.
+      - key: REDIS_URL
+        sync: false
       - key: ONESIGNAL_REST_API_KEY
+        sync: false
+      - key: OTP_HMAC_SECRET
         sync: false

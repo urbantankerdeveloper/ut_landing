@@ -1,4 +1,7 @@
-import express, { Router } from 'express'
+import crypto from 'node:crypto'
+import { createClient } from '@supabase/supabase-js'
+import express, { Router, type Request, type Response } from 'express'
+import rateLimit from 'express-rate-limit'
 import { z } from 'zod'
 import { requireAuth } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
@@ -8,7 +11,25 @@ import { emitRealtimeToUser, emitRealtimeToVendor } from '../services/realtime.j
 import { sendPushNotification } from '../services/pushNotifications.js'
 import { isJpeg, selfieBucket, selfieMaxBytes, selfieObjectPath } from '../services/selfie.js'
 import { notifyCustomerSms } from '../services/bookingNotifications.js'
+import { config } from '../config.js'
+import { toE164IndianMobile } from '../lib/phone.js'
+import { databaseFailure, failure } from '../lib/httpErrors.js'
+import { PricingError } from '../services/pricingMath.js'
 const router = Router()
+const quoteLimit = rateLimit({ windowMs: 10 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false, keyGenerator: (request) => request.authUser!.id, message: { error: 'Too many quote requests. Try again later.' } })
+const phoneVerificationWindowMs = 15 * 60 * 1000
+function recentVerificationCutoff() { return new Date(Date.now() - phoneVerificationWindowMs).toISOString() }
+function bookingReference() { return `UT-${crypto.randomBytes(5).toString('hex').toUpperCase()}` }
+async function recentPhoneVerification(challengeId: string | undefined, phoneE164: string) {
+  if (!challengeId) return { verified: false, error: null }
+  const { data, error } = await supabase.from('guest_otp_challenges').select('id').eq('id', challengeId).eq('phone_e164', phoneE164).not('verified_at', 'is', null).gte('verified_at', recentVerificationCutoff()).maybeSingle()
+  return { verified: Boolean(data), error }
+}
+async function passwordIsCorrect(email: string, password: string) {
+  const verifier = createClient(config.SUPABASE_URL, config.SUPABASE_SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } })
+  const { error } = await verifier.auth.signInWithPassword({ email, password })
+  return !error
+}
 function pushVendorOrder(ownerId: string, bookingId: string, reference: string) {
   void sendPushNotification({
     recipientId: ownerId,
@@ -61,20 +82,20 @@ function notifyNearbyVendors(vendors: Awaited<ReturnType<typeof findNearbyVendor
     emitRealtimeToVendor(vendor.id, 'vendor.order.created', { vendorId: vendor.id, bookingId: booking.id, reference: booking.reference, distanceKm: vendor.distance_km })
   }
 }
-router.get('/services', async (_request, response) => { const { data, error } = await supabase.from('service_catalog').select('code,name,description,base_price_paise,is_active,config').eq('is_active', true).order('name'); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
-router.get('/offers', async (_request, response) => { const { data, error } = await supabase.from('coupons').select('id,code,title,discount_type,discount_value,valid_until').eq('is_active', true).or('valid_until.is.null,valid_until.gte.' + new Date().toISOString()).order('created_at', { ascending: false }); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
-router.post('/coupons/validate', async (request, response) => { const parsed = z.object({ code: z.string().min(2).max(80), serviceCode: z.string().optional(), amount: z.number().nonnegative() }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid coupon request' }); const { data, error } = await supabase.from('coupons').select('*').eq('code', parsed.data.code.toUpperCase()).eq('is_active', true).or('valid_until.is.null,valid_until.gte.' + new Date().toISOString()).maybeSingle(); if (error || !data) return response.status(404).json({ error: 'Coupon is not available' }); response.json({ valid: true, coupon: data }) })
+router.get('/services', async (_request, response) => { const { data, error } = await supabase.from('service_catalog').select('code,name,description,base_price_paise,is_active,config').eq('is_active', true).order('name'); if (error) return databaseFailure(response, 'customer.database_error', error, 500); response.json(data ?? []) })
+router.get('/offers', async (_request, response) => { const { data, error } = await supabase.from('coupons').select('id,code,title,discount_type,discount_value,valid_until').eq('is_active', true).or('valid_until.is.null,valid_until.gte.' + new Date().toISOString()).order('created_at', { ascending: false }); if (error) return databaseFailure(response, 'customer.database_error', error, 500); response.json(data ?? []) })
+router.post('/coupons/validate', async (request, response) => { const parsed = z.object({ code: z.string().min(2).max(80), serviceCode: z.string().optional(), amount: z.number().nonnegative() }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid coupon request' }); const { data, error } = await supabase.from('coupons').select('id').eq('code', parsed.data.code.toUpperCase()).eq('is_active', true).or('valid_until.is.null,valid_until.gte.' + new Date().toISOString()).maybeSingle(); if (error) return failure(response, 500, 'Coupon could not be checked.', 'customer.coupon_validate_failed', error); if (!data) return response.status(404).json({ error: 'Coupon is not available' }); response.json({ valid: true }) })
 router.use(requireAuth)
 router.get('/phone-verification', async (request, response) => {
   const { data: profile, error: profileError } = await supabase.from('profiles').select('phone_e164').eq('id', request.authUser!.id).single()
-  if (profileError) return response.status(500).json({ error: profileError.message })
-  const phone = String(profile.phone_e164 ?? '').replace(/\D/g, '').slice(-10)
-  if (!/^\d{10}$/.test(phone)) return response.json({ phone: '', verified: false })
-  const { data: challenge, error } = await supabase.from('guest_otp_challenges').select('id').eq('phone_e164', `+91${phone}`).not('verified_at', 'is', null).order('verified_at', { ascending: false }).limit(1).maybeSingle()
-  if (error) return response.status(500).json({ error: error.message })
-  response.json({ phone, verified: Boolean(challenge) })
+  if (profileError) return databaseFailure(response, 'customer.phone_verification_failed', profileError, 500)
+  const phoneE164 = toE164IndianMobile(String(profile.phone_e164 ?? ''))
+  if (!phoneE164) return response.json({ phone: '', verified: false })
+  const { data: challenge, error } = await supabase.from('guest_otp_challenges').select('id').eq('phone_e164', phoneE164).not('verified_at', 'is', null).gte('verified_at', recentVerificationCutoff()).order('verified_at', { ascending: false }).limit(1).maybeSingle()
+  if (error) return databaseFailure(response, 'customer.phone_verification_failed', error, 500)
+  response.json({ phone: phoneE164.slice(-10), verified: Boolean(challenge) })
 })
-router.get('/usage', async (request, response) => { const { data, error } = await supabase.from('bookings').select('quoted_amount_paise,status').eq('customer_id', request.authUser!.id); if (error) return response.status(500).json({ error: error.message }); const delivered = (data ?? []).filter((item) => item.status === 'delivered'); const totalSpend = delivered.reduce((sum, item) => sum + Number(item.quoted_amount_paise ?? 0) / 100, 0); response.json({ deliveries: delivered.length, totalSpend, averageAmount: delivered.length ? Math.round(totalSpend / delivered.length) : 0 }) })
+router.get('/usage', async (request, response) => { const { data, error } = await supabase.from('bookings').select('quoted_amount_paise,status').eq('customer_id', request.authUser!.id); if (error) return databaseFailure(response, 'customer.database_error', error, 500); const delivered = (data ?? []).filter((item) => item.status === 'delivered'); const totalSpend = delivered.reduce((sum, item) => sum + Number(item.quoted_amount_paise ?? 0) / 100, 0); response.json({ deliveries: delivered.length, totalSpend, averageAmount: delivered.length ? Math.round(totalSpend / delivered.length) : 0 }) })
 router.get('/orders', async (request, response) => {
   const offset = Number(request.query.offset ?? 0)
   const pageSize = Number(request.query.pageSize ?? 100)
@@ -82,7 +103,7 @@ router.get('/orders', async (request, response) => {
   const { data, error } = await supabase.from('bookings')
     .select('id,reference,service_code,service_details,address_text,latitude,longitude,quoted_amount_paise,status,scheduled_for,customer_phone_e164,access_notes,payment_method,created_at')
     .eq('customer_id', request.authUser!.id).order('created_at', { ascending: false }).range(offset, offset + pageSize)
-  if (error) return response.status(500).json({ error: error.message })
+  if (error) return databaseFailure(response, 'customer.database_error', error, 500)
   const rows = data ?? []
   response.json({ rows: rows.slice(0, pageSize), nextOffset: rows.length > pageSize ? offset + pageSize : null })
 })
@@ -132,17 +153,17 @@ function getBookingServices(data: z.infer<typeof bookingSchema>) {
   })).filter((item) => item.serviceId)
 }
 async function validateServicePhoneVerification(data: z.infer<typeof bookingSchema>, services: ReturnType<typeof getBookingServices>) {
-  const contactChallenges = new Map<string, { phone: string; challengeId?: string; serviceId: string }>()
+  const contactChallenges = new Map<string, { challengeId?: string; serviceId: string }>()
   for (const service of services) {
-    if (service.phone) contactChallenges.set(service.phone, { phone: service.phone, challengeId: service.phoneVerificationChallengeId, serviceId: service.serviceId })
+    if (service.phone) contactChallenges.set(service.phone, { challengeId: service.phoneVerificationChallengeId, serviceId: service.serviceId })
   }
-  if (data.phone) contactChallenges.set(data.phone, { phone: data.phone, challengeId: data.phoneVerificationChallengeId, serviceId: 'booking contact' })
-  for (const service of contactChallenges.values()) {
-    let verificationQuery = supabase.from('guest_otp_challenges').select('id').eq('phone_e164', `+91${service.phone}`).not('verified_at', 'is', null)
-    if (service.challengeId) verificationQuery = verificationQuery.eq('id', service.challengeId)
-    const { data, error } = await verificationQuery.order('verified_at', { ascending: false }).limit(1).maybeSingle()
+  if (data.phone) contactChallenges.set(data.phone, { challengeId: data.phoneVerificationChallengeId ?? contactChallenges.get(data.phone)?.challengeId, serviceId: 'booking contact' })
+  for (const [phone, contact] of contactChallenges) {
+    const phoneE164 = toE164IndianMobile(phone)
+    if (!phoneE164) return { status: 400, message: 'Enter a valid 10-digit mobile number.' }
+    const { verified, error } = await recentPhoneVerification(contact.challengeId, phoneE164)
     if (error) return { status: 500, message: 'Phone verification could not be confirmed.' }
-    if (!data) return { status: 400, message: `Verify the contact number for ${service.serviceId} before booking.` }
+    if (!verified) return { status: 400, message: `Verify the contact number for ${contact.serviceId} before booking.` }
   }
   return null
 }
@@ -158,7 +179,7 @@ function bookingInsert(data: z.infer<typeof bookingSchema>, services: ReturnType
     return persisted
   })
   return {
-    customer_phone_e164: data.phone ? `+91${data.phone}` : primaryService.phone ? `+91${primaryService.phone}` : null,
+    customer_phone_e164: toE164IndianMobile(data.phone ?? primaryService.phone ?? ''),
     payment_method: data.paymentMethod,
     vendor_id: vendorId,
     service_code: primaryService.serviceId,
@@ -192,7 +213,7 @@ async function createBookingAndNotifications(input: {
     p_notifications: vendorNotifications(input.vendors, { id: '', reference: input.reference, payment_method: input.booking.payment_method }),
     p_payment: input.payment ?? null,
   })
-  if (error) throw new Error(`Booking could not be saved: ${error.message}`)
+  if (error) throw error
   const result = data as { booking: { id: string; reference: string; vendor_id: string | null; quoted_amount_paise?: number; payment_method?: string }; created: boolean }
   if (result?.booking?.id) notifyNearbyVendors(input.vendors, result.booking, result.created)
   if (result?.created && input.booking.customer_phone_e164) {
@@ -200,68 +221,69 @@ async function createBookingAndNotifications(input: {
   }
   return result
 }
-router.post('/orders', async (request, response) => {
+function quoteFailure(response: Response, error: unknown) {
+  if (error instanceof PricingError) return response.status(400).json({ error: error.message })
+  return failure(response, 500, 'Booking quote could not be calculated. Please try again.', 'customer.quote_failed', error)
+}
+async function placeQuotedBooking(request: Request, response: Response, includeQuote: boolean) {
   const parsed = bookingSchema.safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Invalid booking', details: parsed.error.flatten() })
   const services = getBookingServices(parsed.data)
   if (!services.length) return response.status(400).json({ error: 'At least one service is required' })
   const verificationError = await validateServicePhoneVerification(parsed.data, services)
   if (verificationError) return response.status(verificationError.status).json({ error: verificationError.message })
+  const customerId = request.authUser!.id
+  let quote: Awaited<ReturnType<typeof quoteServices>>
   try {
-    const reference = `UT-${Date.now().toString().slice(-8)}`
-    const vendors = await findNearbyVendors(parsed.data.latitude, parsed.data.longitude)
-    const result = await createBookingAndNotifications({ customerId: request.authUser!.id, reference, idempotencyKey: parsed.data.idempotencyKey, booking: bookingInsert(parsed.data, services, null, 0), vendors })
-    emitRealtimeToUser(request.authUser!.id, 'booking.created', result.booking)
-    response.status(result.created ? 201 : 200).json(result.booking)
+    quote = await quoteServices(services, parsed.data.couponCode, customerId)
   } catch (error) {
-    response.status(500).json({ error: error instanceof Error ? error.message : 'Booking could not be saved' })
+    return quoteFailure(response, error)
   }
-})
-router.post('/orders/quote', async (request, response) => {
-  const parsed = bookingSchema.safeParse(request.body)
-  if (!parsed.success) return response.status(400).json({ error: 'Invalid booking', details: parsed.error.flatten() })
+  if (quote.couponId) {
+    const { error: redemptionError } = await supabase.from('coupon_redemptions').insert({ coupon_id: quote.couponId, customer_id: customerId, redeemed_at: new Date().toISOString() })
+    if (redemptionError?.code === '23505') return response.status(409).json({ error: 'This coupon has already been used on this account.' })
+    if (redemptionError) return failure(response, 500, 'Booking could not be saved. Please try again.', 'customer.coupon_redemption_failed', redemptionError)
+  }
   try {
-    const services = getBookingServices(parsed.data)
-    if (!services.length) return response.status(400).json({ error: 'At least one service is required' })
-    const verificationError = await validateServicePhoneVerification(parsed.data, services)
-    if (verificationError) return response.status(verificationError.status).json({ error: verificationError.message })
-    const quote = await quoteServices(services, parsed.data.couponCode)
-    const reference = `UT-${Date.now().toString().slice(-8)}`
     const vendors = await findNearbyVendors(parsed.data.latitude, parsed.data.longitude)
     const result = await createBookingAndNotifications({
-      customerId: request.authUser!.id,
-      reference,
+      customerId,
+      reference: bookingReference(),
       idempotencyKey: parsed.data.idempotencyKey,
       booking: bookingInsert(parsed.data, services, null, quote.totalPaise),
       vendors,
       payment: parsed.data.paymentMethod === 'cod' ? { provider: 'cash_on_delivery', amount_paise: quote.totalPaise, currency: 'INR', status: 'pending' } : undefined,
     })
-    emitRealtimeToUser(request.authUser!.id, 'booking.created', result.booking)
-    response.status(result.created ? 201 : 200).json({ ...result.booking, quote })
+    emitRealtimeToUser(customerId, 'booking.created', result.booking)
+    return response.status(result.created ? 201 : 200).json(includeQuote ? { ...result.booking, quote } : result.booking)
   } catch (error) {
-    response.status(400).json({ error: error instanceof Error ? error.message : 'Booking quote failed' })
+    if (quote.couponId) await supabase.from('coupon_redemptions').delete().eq('coupon_id', quote.couponId).eq('customer_id', customerId)
+    return databaseFailure(response, 'customer.booking_failed', error, 500, 'Booking could not be saved. Please try again.')
   }
-})
-router.post('/orders/quote-preview', async (request, response) => {
+}
+router.post('/orders', async (request, response) => placeQuotedBooking(request, response, false))
+router.post('/orders/quote', quoteLimit, async (request, response) => placeQuotedBooking(request, response, true))
+
+router.post('/orders/quote-preview', quoteLimit, async (request, response) => {
   const parsed = bookingSchema.safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Invalid booking', details: parsed.error.flatten() })
+  const services = getBookingServices(parsed.data)
+  if (!services.length) return response.status(400).json({ error: 'At least one service is required' })
   try {
-    const services = getBookingServices(parsed.data)
-    if (!services.length) return response.status(400).json({ error: 'At least one service is required' })
-    const quote = await quoteServices(services, parsed.data.couponCode)
-    response.json({ quote, paymentMethod: parsed.data.paymentMethod ?? 'cod' })
+    const quote = await quoteServices(services, parsed.data.couponCode, request.authUser!.id)
+    return response.json({ quote, paymentMethod: parsed.data.paymentMethod ?? 'cod' })
   } catch (error) {
-    response.status(400).json({ error: error instanceof Error ? error.message : 'Booking quote failed' })
+    return quoteFailure(response, error)
   }
 })
-router.get('/invoices', async (request, response) => { const { data, error } = await supabase.from('invoices').select('*').eq('customer_id', request.authUser!.id).order('issued_at', { ascending: false }); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
+router.get('/invoices', async (request, response) => { const { data, error } = await supabase.from('invoices').select('*').eq('customer_id', request.authUser!.id).order('issued_at', { ascending: false }); if (error) return databaseFailure(response, 'customer.database_error', error, 500); response.json(data ?? []) })
 router.get('/invoices/:invoiceId/download', async (request, response) => { const { data, error } = await supabase.from('invoices').select('*').eq('id', request.params.invoiceId).eq('customer_id', request.authUser!.id).single(); if (error || !data) return response.status(404).json({ error: 'Invoice not found' }); response.json(data) })
-router.get('/addresses', async (request, response) => { const { data, error } = await supabase.from('saved_addresses').select('*').eq('user_id', request.authUser!.id).order('is_default', { ascending: false }).order('created_at', { ascending: false }); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
-router.post('/addresses', async (request, response) => { const parsed = z.object({ label: z.string().min(1).max(60), address: z.string().min(3).max(240), city: z.string().min(2).max(80), pincode: z.string().min(4).max(12), latitude: z.number().optional(), longitude: z.number().optional(), isDefault: z.boolean().default(false) }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid address' }); if (parsed.data.isDefault) await supabase.from('saved_addresses').update({ is_default: false }).eq('user_id', request.authUser!.id); const { data, error } = await supabase.from('saved_addresses').insert({ user_id: request.authUser!.id, label: parsed.data.label, address: parsed.data.address, city: parsed.data.city, pincode: parsed.data.pincode, latitude: parsed.data.latitude, longitude: parsed.data.longitude, is_default: parsed.data.isDefault }).select().single(); if (error) return response.status(400).json({ error: error.message }); response.status(201).json(data) })
-router.patch('/addresses/:id', async (request, response) => { const parsed = z.object({ label: z.string().min(1).max(60).optional(), address: z.string().min(3).max(240).optional(), city: z.string().min(2).max(80).optional(), pincode: z.string().min(4).max(12).optional(), isDefault: z.boolean().optional() }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid address update' }); if (parsed.data.isDefault === true) await supabase.from('saved_addresses').update({ is_default: false }).eq('user_id', request.authUser!.id); const update = Object.fromEntries(Object.entries({ label: parsed.data.label, address: parsed.data.address, city: parsed.data.city, pincode: parsed.data.pincode, is_default: parsed.data.isDefault }).filter(([, value]) => value !== undefined)); const { data, error } = await supabase.from('saved_addresses').update(update).eq('id', request.params.id).eq('user_id', request.authUser!.id).select().single(); if (error) return response.status(400).json({ error: error.message }); response.json(data) })
-router.delete('/addresses/:id', async (request, response) => { const { error } = await supabase.from('saved_addresses').delete().eq('id', request.params.id).eq('user_id', request.authUser!.id); if (error) return response.status(400).json({ error: error.message }); response.status(204).send() })
-router.get('/subscriptions', async (request, response) => { const { data, error } = await supabase.from('subscriptions').select('*').eq('customer_id', request.authUser!.id).order('created_at', { ascending: false }); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
-router.get('/profile', async (request, response) => { const { data, error } = await supabase.from('profiles').select('full_name, phone_e164').eq('id', request.authUser!.id).single(); if (error) return response.status(500).json({ error: error.message }); response.json({ name: data.full_name, email: request.authUser!.email ?? '', phone: String(data.phone_e164 ?? '').replace(/\D/g, '').slice(-10) }) })
+router.get('/addresses', async (request, response) => { const { data, error } = await supabase.from('saved_addresses').select('*').eq('user_id', request.authUser!.id).order('is_default', { ascending: false }).order('created_at', { ascending: false }); if (error) return databaseFailure(response, 'customer.database_error', error, 500); response.json(data ?? []) })
+router.post('/addresses', async (request, response) => { const parsed = z.object({ label: z.string().min(1).max(60), address: z.string().min(3).max(240), city: z.string().min(2).max(80), pincode: z.string().min(4).max(12), latitude: z.number().optional(), longitude: z.number().optional(), isDefault: z.boolean().default(false) }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid address' }); if (parsed.data.isDefault) await supabase.from('saved_addresses').update({ is_default: false }).eq('user_id', request.authUser!.id); const { data, error } = await supabase.from('saved_addresses').insert({ user_id: request.authUser!.id, label: parsed.data.label, address: parsed.data.address, city: parsed.data.city, pincode: parsed.data.pincode, latitude: parsed.data.latitude, longitude: parsed.data.longitude, is_default: parsed.data.isDefault }).select().single(); if (error) return databaseFailure(response, 'customer.database_error', error, 400); response.status(201).json(data) })
+router.patch('/addresses/:id', async (request, response) => { const parsed = z.object({ label: z.string().min(1).max(60).optional(), address: z.string().min(3).max(240).optional(), city: z.string().min(2).max(80).optional(), pincode: z.string().min(4).max(12).optional(), isDefault: z.boolean().optional() }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid address update' }); if (parsed.data.isDefault === true) await supabase.from('saved_addresses').update({ is_default: false }).eq('user_id', request.authUser!.id); const update = Object.fromEntries(Object.entries({ label: parsed.data.label, address: parsed.data.address, city: parsed.data.city, pincode: parsed.data.pincode, is_default: parsed.data.isDefault }).filter(([, value]) => value !== undefined)); const { data, error } = await supabase.from('saved_addresses').update(update).eq('id', request.params.id).eq('user_id', request.authUser!.id).select().single(); if (error) return databaseFailure(response, 'customer.database_error', error, 400); response.json(data) })
+router.delete('/addresses/:id', async (request, response) => { const { error } = await supabase.from('saved_addresses').delete().eq('id', request.params.id).eq('user_id', request.authUser!.id); if (error) return databaseFailure(response, 'customer.database_error', error, 400); response.status(204).send() })
+router.get('/subscriptions', async (request, response) => { const { data, error } = await supabase.from('subscriptions').select('*').eq('customer_id', request.authUser!.id).order('created_at', { ascending: false }); if (error) return databaseFailure(response, 'customer.database_error', error, 500); response.json(data ?? []) })
+router.get('/profile', async (request, response) => { const { data, error } = await supabase.from('profiles').select('full_name, phone_e164').eq('id', request.authUser!.id).single(); if (error) return databaseFailure(response, 'customer.database_error', error, 500); response.json({ name: data.full_name, email: request.authUser!.email ?? '', phone: String(data.phone_e164 ?? '').replace(/\D/g, '').slice(-10) }) })
 router.post('/profile/selfie', express.raw({ type: 'image/jpeg', limit: selfieMaxBytes }), async (request, response) => {
   const customerId = request.authUser!.id
   const image = request.body
@@ -271,12 +293,12 @@ router.post('/profile/selfie', express.raw({ type: 'image/jpeg', limit: selfieMa
   if (uploadError) return response.status(500).json({ error: 'The selfie could not be saved. Please try again.' })
   const capturedAt = new Date().toISOString()
   const { error } = await supabase.from('profiles').update({ selfie_path: path, selfie_required: false, selfie_captured_at: capturedAt }).eq('id', customerId)
-  if (error) return response.status(500).json({ error: error.message })
+  if (error) return databaseFailure(response, 'customer.database_error', error, 500)
   response.status(201).json({ capturedAt, selfieRequired: false })
 })
 router.get('/profile/selfie', async (request, response) => {
   const { data: profile, error } = await supabase.from('profiles').select('selfie_path,selfie_captured_at').eq('id', request.authUser!.id).maybeSingle()
-  if (error) return response.status(500).json({ error: error.message })
+  if (error) return databaseFailure(response, 'customer.database_error', error, 500)
   if (!profile?.selfie_path) return response.status(404).json({ error: 'Selfie not found' })
   const { data: signed, error: signError } = await supabase.storage.from(selfieBucket).createSignedUrl(profile.selfie_path, 300)
   if (signError || !signed) return response.status(500).json({ error: 'Selfie link could not be created' })
@@ -287,20 +309,35 @@ router.patch('/profile', async (request, response) => {
     name: z.string().min(2).max(60),
     email: z.string().email(),
     phone: z.string().regex(/^\d{10}$/).optional(),
+    phoneVerificationChallengeId: z.string().uuid().optional(),
+    currentPassword: z.string().min(1).max(200).optional(),
   }).safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Invalid profile' })
-  let email = request.authUser!.email ?? parsed.data.email
-  if (email !== parsed.data.email) {
-    const { data, error } = await supabase.auth.admin.updateUserById(request.authUser!.id, { email: parsed.data.email })
-    if (error) return response.status(400).json({ error: error.message })
-    email = data.user.email ?? parsed.data.email
+  const userId = request.authUser!.id
+  const currentEmail = request.authUser!.email
+  const emailChanged = currentEmail !== undefined && currentEmail !== parsed.data.email
+  const profileUpdate: Record<string, unknown> = { full_name: parsed.data.name }
+  if (parsed.data.phone !== undefined) {
+    const phoneE164 = toE164IndianMobile(parsed.data.phone)
+    if (!phoneE164) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
+    const { data: current, error: currentError } = await supabase.from('profiles').select('phone_e164').eq('id', userId).maybeSingle()
+    if (currentError) return databaseFailure(response, 'customer.profile_lookup_failed', currentError, 500)
+    if (toE164IndianMobile(String(current?.phone_e164 ?? '')) !== phoneE164) {
+      const { verified, error } = await recentPhoneVerification(parsed.data.phoneVerificationChallengeId, phoneE164)
+      if (error) return databaseFailure(response, 'customer.phone_verification_failed', error, 500)
+      if (!verified) return response.status(400).json({ error: 'Verify the new mobile number before changing it.' })
+      profileUpdate.phone_e164 = phoneE164
+      profileUpdate.phone_verified_at = new Date().toISOString()
+    }
   }
-  const profileUpdate = {
-    full_name: parsed.data.name,
-    ...(parsed.data.phone ? { phone_e164: parsed.data.phone } : {}),
+  if (emailChanged) {
+    if (!parsed.data.currentPassword) return response.status(400).json({ error: 'Enter your current password to change your email.' })
+    if (!(await passwordIsCorrect(currentEmail, parsed.data.currentPassword))) return response.status(400).json({ error: 'The current password is incorrect.' })
+    const { error } = await supabase.auth.admin.updateUserById(userId, { email: parsed.data.email })
+    if (error) return failure(response, 400, 'This email address cannot be used.', 'customer.email_update_failed', error)
   }
-  const { data, error } = await supabase.from('profiles').update(profileUpdate).eq('id', request.authUser!.id).select().single()
-  if (error) return response.status(400).json({ error: error.message })
-  response.json({ name: data.full_name, email, phone: String(data.phone_e164 ?? '').replace(/\D/g, '').slice(-10) })
+  const { data, error } = await supabase.from('profiles').update(profileUpdate).eq('id', userId).select().single()
+  if (error) return databaseFailure(response, 'customer.profile_update_failed', error, 400)
+  response.json({ name: data.full_name, email: emailChanged ? parsed.data.email : (currentEmail ?? parsed.data.email), phone: String(data.phone_e164 ?? '').replace(/\D/g, '').slice(-10) })
 })
 export default router

@@ -137,6 +137,7 @@ export const partnerContent = {
   },
   messages: {
     chooseService: 'Choose at least one service you can provide.',
+    tooManyDocuments: 'Upload up to 10 documents.',
     submitFailed: 'The partner application could not be submitted.',
     submitted: (message: string, reference: string) => `${message} Reference: ${reference}`,
   },

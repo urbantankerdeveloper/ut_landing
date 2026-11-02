@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Check, ClipboardList, MapPin, ShieldCheck, Truck, UserRound } from 'lucide-react'
 import { demoDataEnabled } from '../constants/demo'
-import { Modal } from './WorkspaceInteractive'
+import { Modal } from '../components/Modal'
 import { useVendorDeliveryVerification, useVendorDrivers, useVendorLocation, useVendorOrderMutation, useVendorOrders, useVendorVehicles } from '../hooks/useVendorData'
 import { useFileUpload } from '../hooks/useFrontendFeatures'
 import { vendorContent as c } from '../content/vendor'

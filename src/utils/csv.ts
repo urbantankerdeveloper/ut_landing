@@ -1,7 +1,8 @@
 export type CsvValue = string | number | null | undefined
 
 function escapeCsv(value: CsvValue) {
-  const text = String(value ?? '')
+  const raw = String(value ?? '')
+  const text = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw
   return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text
 }
 

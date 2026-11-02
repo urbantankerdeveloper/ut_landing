@@ -15,4 +15,18 @@ describe('placeholderError', () => {
   it('allows any placeholder on a custom template key', () => {
     expect(placeholderError('custom_promo_sms', 'Hi {{name}}')).toBeNull()
   })
+
+  it('rejects an OTP body that drops the code', () => {
+    expect(placeholderError('user_registration_otp', 'Welcome to Urban Tanker')).toContain('{{otp}}')
+    expect(placeholderError('delivery_otp', 'Ref {{reference}}')).toContain('{{otp}}')
+  })
+
+  it('requires the OTP placeholder on custom OTP keys too', () => {
+    expect(placeholderError('custom_login_otp', 'Hi there')).toContain('{{otp}}')
+    expect(placeholderError('custom_login_otp', 'Code {{otp}}')).toBeNull()
+  })
+
+  it('requires the reference on built-in confirmations', () => {
+    expect(placeholderError('guest_booking_confirmation', 'Thank you')).toContain('{{reference}}')
+  })
 })

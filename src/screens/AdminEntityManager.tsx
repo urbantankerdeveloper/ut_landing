@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { Check, Edit3, Plus, Search, Trash2, UserRound, Users } from 'lucide-react'
-import { Modal } from './WorkspaceInteractive'
+import { Modal } from '../components/Modal'
 import { demoDataEnabled } from '../constants/demo'
 import { adminEntitiesContent as c } from '../content/admin-entities'
 

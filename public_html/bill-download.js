@@ -2,8 +2,8 @@
   'use strict';
 
   var fallback = {
-    invoiceNo: 'UT-INV-2026-0928', orderNo: 'UT-260928', customer: 'Maneesh Kumar',
-    address: 'Home, Adyar, Chennai - 600020', phone: '+91 98765 43210',
+    invoiceNo: 'UT-INV-2026-0928', orderNo: 'UT-260928', customer: 'Customer name',
+    address: 'Delivery address, City - PIN', phone: '+91 00000 00000',
     service: '6 KL Water Tanker', requirement: 'Potable water', region: 'ECR / OMR',
     base: 2400, transport: 650, tax: 153, discount: 200, total: 3003,
     payment: 'Paid / UPI', date: new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
@@ -40,7 +40,7 @@
     [['Subtotal', money(subtotal)], ['GST (5%)', money(bill.tax)], ['Coupon discount', '- ' + money(bill.discount)], ['TOTAL PAID', money(bill.total)]].forEach(function (r, i) { o.push(i === 3 ? '0.063 0.204 0.227 rg' : '0.35 0.45 0.47 rg'); txt(o, 340, 435 - i * 20, i === 3 ? 11 : 9, r[0], i === 3); txt(o, 465, 435 - i * 20, i === 3 ? 11 : 9, r[1], i === 3); });
     o.push('0.78 0.86 0.86 RG'); line(o, 340, 368, 540, 368);
     o.push('0.063 0.204 0.227 rg'); txt(o, 55, 405, 10, 'PAYMENT DETAILS', true);
-    o.push('0.35 0.45 0.47 rg'); ['HDFC Bank - Current Account', 'A/C: 50200078421901  |  IFSC: HDFC0001287', 'UPI: urbantanker@hdfcbank', 'Reference: ' + bill.orderNo].forEach(function (v, i) { txt(o, 55, 386 - i * 13, 8, v); });
+    o.push('0.35 0.45 0.47 rg'); ['Reference: ' + bill.orderNo].forEach(function (v, i) { txt(o, 55, 386 - i * 13, 8, v); });
     o.push('0.063 0.204 0.227 rg'); txt(o, 55, 310, 10, 'TERMS', true);
     o.push('0.35 0.45 0.47 rg'); txt(o, 55, 292, 8, 'Payment received in full. Delivery is subject to safe site access and booked capacity.'); txt(o, 55, 279, 8, 'Share the delivery OTP only after service completion. Computer-generated tax invoice.');
     o.push('0.78 0.86 0.86 RG'); line(o, 395, 260, 525, 260); o.push('0.063 0.204 0.227 rg'); txt(o, 420, 274, 12, 'S. Maneesh'); txt(o, 405, 244, 8, 'AUTHORIZED SIGNATORY', true); txt(o, 437, 231, 8, 'Urban Tanker');

@@ -11,13 +11,28 @@ describe('analytics events', () => {
     expect(parsed.success).toBe(true)
   })
 
-  it('rejects malformed event names and oversized property sets', () => {
+  it('rejects malformed event names', () => {
     const parsed = analyticsEventSchema.safeParse({
       eventName: 'Booking Created',
       sessionId: 'short',
-      properties: Object.fromEntries(Array.from({ length: 21 }, (_, index) => [`key${index}`, true])),
+      properties: {},
     })
     expect(parsed.success).toBe(false)
+  })
+
+  it('keeps at most 20 properties, drops long keys, and cuts long values to 200 characters', () => {
+    const parsed = analyticsEventSchema.parse({
+      eventName: 'booking.created',
+      sessionId: 'session-123456',
+      properties: {
+        note: 'x'.repeat(250),
+        ['k'.repeat(65)]: 'dropped',
+        ...Object.fromEntries(Array.from({ length: 21 }, (_, index) => [`key${index}`, true])),
+      },
+    })
+    expect(Object.keys(parsed.properties)).toHaveLength(20)
+    expect(parsed.properties).not.toHaveProperty('k'.repeat(65))
+    expect(parsed.properties.note).toHaveLength(200)
   })
 
   it('summarizes event counts', () => {

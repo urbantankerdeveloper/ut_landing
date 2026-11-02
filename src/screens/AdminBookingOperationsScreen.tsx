@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, ChevronDown, RefreshCw } from 'lucide-react'
 import { adminApi, type AdminOrder } from '../api/admin'
 import { adminQueryKeys, useAdminBookings, useAdminOrderMutations, useAdminDrivers, useAdminVehicles, useAdminVendors } from '../hooks/useAdminData'
-import { Modal } from './WorkspaceInteractive'
+import { Modal } from '../components/Modal'
 import { adminOperationsContent as c } from '../content/admin-operations'
 
 type BookingServiceDetail = {

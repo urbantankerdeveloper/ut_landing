@@ -4,15 +4,16 @@ import { databasePool } from '../database.js'
 
 if (!databasePool) throw new Error('SUPABASE_DB_URL is required to apply the database update.')
 
-const schema = await readFile(join(process.cwd(), 'supabase', '001_initial.sql'), 'utf8')
-const begin = '-- BEGIN incremental update'
-const end = '-- END incremental update'
-const start = schema.indexOf(begin)
-const finish = schema.lastIndexOf(end)
-if (start === -1 || finish === -1 || finish < start) throw new Error('Incremental update block not found in supabase/001_initial.sql')
-const sql = schema.slice(start, finish + end.length)
+const sql = await readFile(join(process.cwd(), 'supabase', '002_security_hardening.sql'), 'utf8')
 try {
-  await databasePool.query(sql)
+  const client = await databasePool.connect()
+  try {
+    // The update is long-running DDL, so it runs without the pool's statement timeout.
+    await client.query('set statement_timeout = 0')
+    await client.query(sql)
+  } finally {
+    client.release()
+  }
   console.log('Database update completed successfully.')
 } finally {
   await databasePool.end()

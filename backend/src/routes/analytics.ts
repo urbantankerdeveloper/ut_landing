@@ -49,14 +49,41 @@ router.get('/export', requireAuth, requireRole('admin'), async (request, respons
   response.json({ from: from.toISOString(), to: to.toISOString(), events: data ?? [] })
 })
 
+const sweepBatchSize = 1000
+
+async function deleteEventsBefore(cutoff: string) {
+  let deleted = 0
+  for (;;) {
+    const { data, error } = await supabase.from('analytics_events').select('id').lt('created_at', cutoff).limit(sweepBatchSize)
+    if (error) throw new Error(`Analytics retention sweep failed: ${error.message}`)
+    if (!data?.length) return deleted
+    const result = await supabase.from('analytics_events').delete({ count: 'exact' }).in('id', data.map((row) => row.id))
+    if (result.error) throw new Error(`Analytics retention sweep failed: ${result.error.message}`)
+    if (!result.count) return deleted
+    deleted += result.count
+  }
+}
+
+// Clears the session and the properties, since properties can carry identifiers such as bookingId.
+async function anonymizeEventsBefore(cutoff: string) {
+  let anonymized = 0
+  for (;;) {
+    const { data, error } = await supabase.from('analytics_events').select('id').lt('created_at', cutoff).neq('session_id', 'anonymized').limit(sweepBatchSize)
+    if (error) throw new Error(`Analytics anonymization sweep failed: ${error.message}`)
+    if (!data?.length) return anonymized
+    const result = await supabase.from('analytics_events').update({ session_id: 'anonymized', properties: {} }, { count: 'exact' }).in('id', data.map((row) => row.id))
+    if (result.error) throw new Error(`Analytics anonymization sweep failed: ${result.error.message}`)
+    if (!result.count) return anonymized
+    anonymized += result.count
+  }
+}
+
 export async function runAnalyticsRetentionSweep() {
   const retentionCutoff = new Date(Date.now() - config.ANALYTICS_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString()
   const anonymizeCutoff = new Date(Date.now() - config.ANALYTICS_ANONYMIZE_AFTER_DAYS * 24 * 60 * 60 * 1000).toISOString()
-  const deleted = await supabase.from('analytics_events').delete().lt('created_at', retentionCutoff)
-  if (deleted.error) throw new Error(`Analytics retention sweep failed: ${deleted.error.message}`)
-  const anonymized = await supabase.from('analytics_events').update({ session_id: 'anonymized' }).lt('created_at', anonymizeCutoff).neq('session_id', 'anonymized')
-  if (anonymized.error) throw new Error(`Analytics anonymization sweep failed: ${anonymized.error.message}`)
-  return { deleted: deleted.count ?? 0, anonymized: anonymized.count ?? 0 }
+  const deleted = await deleteEventsBefore(retentionCutoff)
+  const anonymized = await anonymizeEventsBefore(anonymizeCutoff)
+  return { deleted, anonymized }
 }
 
 export default router

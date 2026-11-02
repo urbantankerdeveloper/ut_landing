@@ -1,115 +1,231 @@
-import { Router, type Response } from 'express'
+import { Router, type Request, type Response } from 'express'
 import crypto from 'node:crypto'
 import { z } from 'zod'
+import rateLimit from 'express-rate-limit'
 import { authSupabase, supabase } from '../supabase.js'
 import { requireAuth } from '../middleware/auth.js'
+import { toE164IndianMobile } from '../lib/phone.js'
 import { clientPlatformFromHeader, credentialsSchema, themeModeSchema } from '../lib/schemas.js'
 import { decodeSelfieJpeg, selfieBucket, selfieObjectPath } from '../services/selfie.js'
 import { isEmailConfigured, sendEmail } from '../services/providers.js'
 import { sendTemplateSms } from '../services/sms.js'
 import { passwordResetEmail, signupConfirmationEmail } from '../services/signupEmail.js'
+import { hashOtp, otpMatches } from '../services/otp.js'
 import { config } from '../config.js'
-import rateLimit from 'express-rate-limit'
+
 const router = Router()
-const otpRequestLimit = rateLimit({ windowMs: 10 * 60 * 1000, limit: 5, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many OTP requests. Try again later.' } })
-const loginLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many login attempts. Try again later.' } })
-const signupLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many registration attempts. Try again later.' } })
-const passwordResetLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many password reset requests. Try again later.' } })
-const passwordUpdateLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many password update attempts. Try again later.' } })
-const phoneOtpVerifyLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many verification attempts. Try again later.' } })
+const minute = 60 * 1000
+const bcryptPasswordMaxBytes = 72
+const unmatchedLoginEmail = 'no-account@login.urbantanker.local'
+const invalidCodeMessage = 'This verification code is invalid or expired.'
+const incorrectCodeMessage = 'The verification code is incorrect.'
+const verificationFailedMessage = 'The verification could not be completed. Try again shortly.'
+const signupFailedMessage = 'Registration could not be completed. Check your details or sign in to an existing account.'
+
+const otpRequestLimit = rateLimit({ windowMs: 10 * minute, limit: 5, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many OTP requests. Try again later.' } })
+const otpPhoneLimit = rateLimit({ windowMs: 10 * minute, limit: 3, standardHeaders: true, legacyHeaders: false, keyGenerator: (request) => `phone:${phoneLimitKey(request.body?.phone)}`, message: { error: 'Too many OTP requests for this number. Try again later.' } })
+const loginLimit = rateLimit({ windowMs: 15 * minute, limit: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many login attempts. Try again later.' } })
+const loginAccountLimit = rateLimit({ windowMs: 15 * minute, limit: 10, skipSuccessfulRequests: true, standardHeaders: true, legacyHeaders: false, keyGenerator: (request) => `account:${loginAccountKey(request.body)}`, message: { error: 'Too many login attempts for this account. Try again later.' } })
+const signupLimit = rateLimit({ windowMs: 15 * minute, limit: 5, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many registration attempts. Try again later.' } })
+const signupEmailLimit = rateLimit({ windowMs: 60 * minute, limit: 3, standardHeaders: true, legacyHeaders: false, keyGenerator: (request) => `signup:${normalizeIdentifier(request.body?.email)}`, message: { error: 'Too many registration emails for this address. Try again later.' } })
+const passwordResetLimit = rateLimit({ windowMs: 15 * minute, limit: 5, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many password reset requests. Try again later.' } })
+const passwordResetEmailLimit = rateLimit({ windowMs: 60 * minute, limit: 3, standardHeaders: true, legacyHeaders: false, keyGenerator: (request) => `reset:${normalizeIdentifier(request.body?.email)}`, handler: (_request, response) => { response.status(202).json({ accepted: true }) } })
+const passwordUpdateLimit = rateLimit({ windowMs: 15 * minute, limit: 10, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many password update attempts. Try again later.' } })
+const phoneOtpVerifyLimit = rateLimit({ windowMs: 15 * minute, limit: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many verification attempts. Try again later.' } })
+
+function normalizeIdentifier(value: unknown) {
+  return typeof value === 'string' ? value.trim().toLowerCase() : ''
+}
+function phoneLimitKey(value: unknown) {
+  const raw = typeof value === 'string' ? value : ''
+  return toE164IndianMobile(raw) ?? raw.replace(/\D/g, '')
+}
+function loginAccountKey(body: unknown) {
+  const source = (typeof body === 'object' && body ? body : {}) as { email?: unknown; username?: unknown }
+  return normalizeIdentifier(source.email) || normalizeIdentifier(source.username)
+}
+export function escapeIlike(value: string) {
+  return value.replace(/[\\%_]/g, (character) => `\\${character}`)
+}
+export function passwordWithinBcryptLimit(value: string) {
+  return Buffer.byteLength(value, 'utf8') <= bcryptPasswordMaxBytes
+}
+export function refreshTokenForClient(platform: string | undefined, refreshToken: string): { refreshToken?: string } {
+  return platform === 'mobile' ? { refreshToken } : {}
+}
+export function hasRecoveryClaim(accessToken: string) {
+  const segment = accessToken.split('.')[1]
+  if (!segment) return false
+  let claims: unknown
+  try {
+    claims = JSON.parse(Buffer.from(segment, 'base64url').toString('utf8'))
+  } catch {
+    return false
+  }
+  const amr = (claims as { amr?: unknown } | null)?.amr
+  return Array.isArray(amr) && amr.some((entry) => entry === 'recovery' || (typeof entry === 'object' && entry !== null && (entry as { method?: unknown }).method === 'recovery'))
+}
+
 function parseCookies(header: string | undefined) { return Object.fromEntries((header ?? '').split(';').map((part) => part.trim().split('=').map(decodeURIComponent)).filter(([key, value]) => key && value)) }
 const refreshCookieSecurity = config.NODE_ENV === 'production' ? '; Secure' : ''
 const refreshCookieSameSite = config.NODE_ENV === 'production' ? 'None' : 'Lax'
 function setRefreshCookie(response: Response, token: string) { response.setHeader('Set-Cookie', `refresh_token=${encodeURIComponent(token)}; HttpOnly; Path=/api/auth; SameSite=${refreshCookieSameSite}; Max-Age=2592000${refreshCookieSecurity}`) }
 function clearRefreshCookie(response: Response) { response.setHeader('Set-Cookie', `refresh_token=; HttpOnly; Path=/api/auth; SameSite=${refreshCookieSameSite}; Max-Age=0${refreshCookieSecurity}`) }
-const phoneSchema = z.string().regex(/^\d{10}$/)
-router.post('/guest/request-otp', otpRequestLimit, async (request, response) => {
-  const parsed = z.object({ phone: phoneSchema }).safeParse(request.body)
-  if (!parsed.success) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
-  const otp = config.USE_DEFAULT_VERIFICATION_CODE ? config.DEFAULT_VERIFICATION_CODE : crypto.randomInt(100000, 1000000).toString()
-  const { data: challenge, error } = await supabase.from('guest_otp_challenges').insert({ phone_e164: `+91${parsed.data.phone}`, otp_hash: crypto.createHash('sha256').update(otp).digest('hex'), expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString() }).select('id').single()
-  if (error || !challenge) return response.status(500).json({ error: error?.message ?? 'OTP could not be created.' })
-  if (!config.USE_DEFAULT_VERIFICATION_CODE) {
-    try {
-      const delivery = await sendTemplateSms('booking_verification_otp', `+91${parsed.data.phone}`, { otp })
-      if (!delivery.queued) return response.status(503).json({ error: 'Mobile verification is not configured yet.' })
-    } catch (error) {
-      return response.status(502).json({ error: error instanceof Error ? error.message : 'OTP delivery failed.' })
-    }
-  }
-  response.status(202).json({ challengeId: challenge.id, expiresInSeconds: 600 })
-})
-router.post('/guest/verify-otp', async (request, response) => {
-  const parsed = z.object({ challengeId: z.string().uuid(), phone: phoneSchema, otp: z.string().regex(/^\d{6}$/), name: z.string().min(2).max(60).optional() }).safeParse(request.body)
-  if (!parsed.success) return response.status(400).json({ error: 'Enter the verification code sent to your mobile.' })
-  const { data: challenge, error: challengeError } = await supabase.from('guest_otp_challenges').select('id,phone_e164,otp_hash,expires_at,attempts,verified_at').eq('id', parsed.data.challengeId).eq('phone_e164', `+91${parsed.data.phone}`).maybeSingle()
-  if (challengeError || !challenge || challenge.verified_at || challenge.attempts >= 5 || new Date(challenge.expires_at).getTime() <= Date.now()) return response.status(400).json({ error: 'This verification code is invalid or expired.' })
-  await supabase.from('guest_otp_challenges').update({ attempts: challenge.attempts + 1 }).eq('id', challenge.id)
-  const expected = Buffer.from(challenge.otp_hash, 'hex')
-  const received = crypto.createHash('sha256').update(parsed.data.otp).digest()
-  if (expected.length !== received.length || !crypto.timingSafeEqual(expected, received)) return response.status(400).json({ error: 'The verification code is incorrect.' })
-  const password = crypto.randomBytes(24).toString('base64url')
-  const email = `guest-${parsed.data.phone}-${crypto.randomBytes(6).toString('hex')}@guest.urbantanker.local`
-  const { data: created, error: createError } = await authSupabase.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { full_name: parsed.data.name ?? 'Guest customer', phone: `+91${parsed.data.phone}`, role: 'customer' } })
-  if (createError || !created.user) return response.status(500).json({ error: createError?.message ?? 'Guest account could not be created.' })
-  const { error: profileError } = await supabase.from('profiles').upsert({ id: created.user.id, full_name: parsed.data.name ?? 'Guest customer', phone_e164: `+91${parsed.data.phone}`, username: `guest_${parsed.data.phone}`, role: 'customer' })
-  if (profileError) return response.status(500).json({ error: profileError.message })
-  const { data: session, error: sessionError } = await authSupabase.auth.signInWithPassword({ email, password })
-  if (sessionError || !session.session) return response.status(500).json({ error: sessionError?.message ?? 'Guest session could not be created.' })
-  await supabase.from('guest_otp_challenges').update({ verified_at: new Date().toISOString() }).eq('id', challenge.id)
-  setRefreshCookie(response, session.session.refresh_token)
-  response.json({ accessToken: session.session.access_token, refreshToken: session.session.refresh_token, user: { username: `guest_${parsed.data.phone}`, name: parsed.data.name ?? 'Guest customer', role: 'customer' } })
-})
-router.post('/guest/verify-phone', requireAuth, async (request, response) => {
-  const parsed = z.object({ challengeId: z.string().uuid(), phone: phoneSchema, otp: z.string().regex(/^\d{6}$/) }).safeParse(request.body)
-  if (!parsed.success) return response.status(400).json({ error: 'Enter the verification code sent to this mobile number.' })
-  const { data: challenge, error: challengeError } = await supabase.from('guest_otp_challenges').select('id,otp_hash,expires_at,attempts,verified_at').eq('id', parsed.data.challengeId).eq('phone_e164', `+91${parsed.data.phone}`).maybeSingle()
-  if (challengeError) return response.status(500).json({ error: challengeError.message })
-  if (!challenge || challenge.verified_at || challenge.attempts >= 5 || new Date(challenge.expires_at).getTime() <= Date.now()) return response.status(400).json({ error: 'This verification code is invalid or expired.' })
-  const { error: attemptError } = await supabase.from('guest_otp_challenges').update({ attempts: challenge.attempts + 1 }).eq('id', challenge.id)
-  if (attemptError) return response.status(500).json({ error: attemptError.message })
-  const expected = Buffer.from(challenge.otp_hash, 'hex')
-  const received = crypto.createHash('sha256').update(parsed.data.otp).digest()
-  if (expected.length !== received.length || !crypto.timingSafeEqual(expected, received)) return response.status(400).json({ error: 'The verification code is incorrect.' })
-  const { error: verifiedError } = await supabase.from('guest_otp_challenges').update({ verified_at: new Date().toISOString() }).eq('id', challenge.id)
-  if (verifiedError) return response.status(500).json({ error: verifiedError.message })
-  response.json({ verified: true })
-})
-router.post('/phone/request-otp', otpRequestLimit, async (request, response) => {
-  const parsed = z.object({ phone: phoneSchema }).safeParse(request.body)
-  if (!parsed.success) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
+function originAllowed(request: Request) {
+  const origin = request.header('origin')
+  return !origin || origin === config.FRONTEND_ORIGIN || config.CORS_ORIGINS.includes(origin)
+}
+function refreshTokenFromRequest(request: Request) {
+  const bodyToken = typeof request.body?.refreshToken === 'string' ? request.body.refreshToken : undefined
+  return bodyToken || parseCookies(request.headers.cookie).refresh_token
+}
+function bearerToken(request: Request) {
+  return request.headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1]
+}
+function logFailure(event: string, requestId: unknown, detail?: string) {
+  console.error(JSON.stringify({ event, requestId, error: detail }))
+}
+function mailErrorCode(error: unknown) {
+  const code = (error as { code?: unknown } | null)?.code
+  return typeof code === 'string' ? code : 'unknown'
+}
 
-  const phone = `+91${parsed.data.phone}`
-  const otp = config.USE_DEFAULT_VERIFICATION_CODE
-    ? config.DEFAULT_VERIFICATION_CODE
-    : crypto.randomInt(100000, 1000000).toString()
+const phoneSchema = z.string().regex(/^\d{10}$/)
+
+async function issueOtpChallenge(response: Response, phone: string, template: 'booking_verification_otp' | 'user_registration_otp') {
+  const otp = config.USE_DEFAULT_VERIFICATION_CODE ? config.DEFAULT_VERIFICATION_CODE : crypto.randomInt(100000, 1000000).toString()
   const { data: challenge, error } = await supabase
     .from('guest_otp_challenges')
-    .insert({
-      phone_e164: phone,
-      otp_hash: crypto.createHash('sha256').update(otp).digest('hex'),
-      expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-    })
+    .insert({ phone_e164: phone, otp_hash: hashOtp(otp), expires_at: new Date(Date.now() + 10 * minute).toISOString() })
     .select('id')
     .single()
-
   if (error || !challenge) {
-    return response.status(500).json({ error: error?.message ?? 'OTP could not be created.' })
+    logFailure('otp.challenge_create_failed', response.locals.requestId, error?.message)
+    return response.status(500).json({ error: 'OTP could not be created.' })
   }
   if (!config.USE_DEFAULT_VERIFICATION_CODE) {
     try {
-      const delivery = await sendTemplateSms('user_registration_otp', phone, { otp })
+      const delivery = await sendTemplateSms(template, phone, { otp })
       if (!delivery.queued) {
         await supabase.from('guest_otp_challenges').delete().eq('id', challenge.id)
         return response.status(503).json({ error: 'Mobile verification is not configured yet.' })
       }
-    } catch (error) {
+    } catch (deliveryError) {
+      logFailure('otp.delivery_failed', response.locals.requestId, deliveryError instanceof Error ? deliveryError.message : undefined)
       await supabase.from('guest_otp_challenges').delete().eq('id', challenge.id)
-      return response.status(502).json({ error: error instanceof Error ? error.message : 'OTP delivery failed.' })
+      return response.status(502).json({ error: 'OTP delivery failed.' })
     }
   }
-
   return response.status(202).json({ challengeId: challenge.id, expiresInSeconds: 600 })
+}
+
+// The attempt counter is incremented atomically in SQL before the code is compared, so guesses cannot race past the limit.
+async function passesChallengeAttempt(response: Response, challengeId: string, phone: string, otp: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc('consume_guest_otp_attempt', { p_challenge_id: challengeId, p_phone: phone })
+  if (error) {
+    logFailure('otp.attempt_failed', response.locals.requestId, error.message)
+    response.status(500).json({ error: verificationFailedMessage })
+    return false
+  }
+  const row = (data as Array<{ otp_hash: string }> | null)?.[0]
+  if (!row) {
+    response.status(400).json({ error: invalidCodeMessage })
+    return false
+  }
+  if (!otpMatches(row.otp_hash, otp)) {
+    response.status(400).json({ error: incorrectCodeMessage })
+    return false
+  }
+  return true
+}
+
+async function markChallengeVerified(response: Response, challengeId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('guest_otp_challenges')
+    .update({ verified_at: new Date().toISOString() })
+    .eq('id', challengeId)
+    .is('verified_at', null)
+    .gt('expires_at', new Date().toISOString())
+    .select('id')
+    .maybeSingle()
+  if (error) {
+    logFailure('otp.consume_failed', response.locals.requestId, error.message)
+    response.status(500).json({ error: verificationFailedMessage })
+    return false
+  }
+  if (!data) {
+    response.status(400).json({ error: invalidCodeMessage })
+    return false
+  }
+  return true
+}
+
+type ProfileRow = {
+  id: string
+  role: string
+  full_name: string
+  username: string | null
+  phone_e164: string | null
+  theme_mode: string | null
+  selfie_required: boolean | null
+}
+
+router.post('/guest/request-otp', otpRequestLimit, otpPhoneLimit, async (request, response) => {
+  const parsed = z.object({ phone: phoneSchema }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
+  const phone = toE164IndianMobile(parsed.data.phone)
+  if (!phone) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
+  return issueOtpChallenge(response, phone, 'booking_verification_otp')
+})
+
+router.post('/guest/verify-otp', async (request, response) => {
+  const parsed = z.object({ challengeId: z.string().uuid(), phone: phoneSchema, otp: z.string().regex(/^\d{6}$/), name: z.string().min(2).max(60).optional() }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Enter the verification code sent to your mobile.' })
+  const phone = toE164IndianMobile(parsed.data.phone)
+  if (!phone) return response.status(400).json({ error: 'Enter the verification code sent to your mobile.' })
+  if (!(await passesChallengeAttempt(response, parsed.data.challengeId, phone, parsed.data.otp))) return
+  if (!(await markChallengeVerified(response, parsed.data.challengeId))) return
+
+  const password = crypto.randomBytes(24).toString('base64url')
+  const email = `guest-${parsed.data.phone}-${crypto.randomBytes(6).toString('hex')}@guest.urbantanker.local`
+  const name = parsed.data.name ?? 'Guest customer'
+  const { data: created, error: createError } = await authSupabase.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { full_name: name, phone }, app_metadata: { role: 'customer' } })
+  if (createError || !created.user) {
+    logFailure('guest.user_create_failed', response.locals.requestId, createError?.message)
+    return response.status(500).json({ error: 'Guest account could not be created.' })
+  }
+  const { error: profileError } = await supabase.from('profiles').upsert({ id: created.user.id, full_name: name, phone_e164: phone, phone_verified_at: new Date().toISOString(), username: `guest_${parsed.data.phone}`, role: 'customer' })
+  if (profileError) {
+    logFailure('guest.profile_failed', response.locals.requestId, profileError.message)
+    const { error: rollbackError } = await authSupabase.auth.admin.deleteUser(created.user.id)
+    if (rollbackError) logFailure('guest.rollback_failed', response.locals.requestId, rollbackError.message)
+    return response.status(500).json({ error: 'Guest account could not be created.' })
+  }
+  const { data: session, error: sessionError } = await authSupabase.auth.signInWithPassword({ email, password })
+  if (sessionError || !session.session) {
+    logFailure('guest.session_failed', response.locals.requestId, sessionError?.message)
+    return response.status(500).json({ error: 'Guest session could not be created.' })
+  }
+  setRefreshCookie(response, session.session.refresh_token)
+  response.json({ accessToken: session.session.access_token, ...refreshTokenForClient(request.header('x-client-platform'), session.session.refresh_token), user: { username: `guest_${parsed.data.phone}`, name, role: 'customer' } })
+})
+
+router.post('/guest/verify-phone', requireAuth, async (request, response) => {
+  const parsed = z.object({ challengeId: z.string().uuid(), phone: phoneSchema, otp: z.string().regex(/^\d{6}$/) }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Enter the verification code sent to this mobile number.' })
+  const phone = toE164IndianMobile(parsed.data.phone)
+  if (!phone) return response.status(400).json({ error: 'Enter the verification code sent to this mobile number.' })
+  if (!(await passesChallengeAttempt(response, parsed.data.challengeId, phone, parsed.data.otp))) return
+  if (!(await markChallengeVerified(response, parsed.data.challengeId))) return
+  response.json({ verified: true })
+})
+
+router.post('/phone/request-otp', otpRequestLimit, otpPhoneLimit, async (request, response) => {
+  const parsed = z.object({ phone: phoneSchema }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
+  const phone = toE164IndianMobile(parsed.data.phone)
+  if (!phone) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
+  return issueOtpChallenge(response, phone, 'user_registration_otp')
 })
 
 router.post('/phone/verify-otp', phoneOtpVerifyLimit, async (request, response) => {
@@ -122,80 +238,33 @@ router.post('/phone/verify-otp', phoneOtpVerifyLimit, async (request, response) 
   if (!parsed.success) {
     return response.status(400).json({ error: 'Enter the verification code sent to this mobile number.' })
   }
+  const phone = toE164IndianMobile(parsed.data.phone)
+  if (!phone) {
+    return response.status(400).json({ error: 'Enter the verification code sent to this mobile number.' })
+  }
+  if (!(await passesChallengeAttempt(response, parsed.data.challengeId, phone, parsed.data.otp))) return
 
-  const phone = `+91${parsed.data.phone}`
-  const { data: challenge, error: challengeError } = await supabase
-    .from('guest_otp_challenges')
-    .select('id,otp_hash,expires_at,attempts,verified_at')
-    .eq('id', parsed.data.challengeId)
+  const { data: matchedProfile, error: lookupError } = await supabase
+    .from('profiles')
+    .select('id,role,full_name,username,phone_e164,theme_mode,selfie_required')
     .eq('phone_e164', phone)
+    .not('phone_verified_at', 'is', null)
     .maybeSingle()
-  if (challengeError) return response.status(500).json({ error: challengeError.message })
-  if (
-    !challenge ||
-    challenge.verified_at ||
-    challenge.attempts >= 5 ||
-    new Date(challenge.expires_at).getTime() <= Date.now()
-  ) {
-    return response.status(400).json({ error: 'This verification code is invalid or expired.' })
+  if (lookupError) {
+    logFailure('phone.profile_lookup_failed', response.locals.requestId, lookupError.message)
+    return response.status(500).json({ error: 'The phone account could not be checked.' })
   }
-
-  const expected = Buffer.from(challenge.otp_hash, 'hex')
-  const received = crypto.createHash('sha256').update(parsed.data.otp).digest()
-  if (expected.length !== received.length || !crypto.timingSafeEqual(expected, received)) {
-    const { error: attemptError } = await supabase
-      .from('guest_otp_challenges')
-      .update({ attempts: challenge.attempts + 1 })
-      .eq('id', challenge.id)
-      .eq('attempts', challenge.attempts)
-      .is('verified_at', null)
-    if (attemptError) return response.status(500).json({ error: attemptError.message })
-    return response.status(400).json({ error: 'The verification code is incorrect.' })
-  }
-
-  let profile: {
-    id: string
-    role: string
-    full_name: string
-    username: string | null
-    phone_e164: string | null
-    theme_mode: string | null
-    selfie_required: boolean | null
-  } | null = null
-  for (const phoneValue of [phone, parsed.data.phone]) {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('id,role,full_name,username,phone_e164,theme_mode,selfie_required')
-      .eq('phone_e164', phoneValue)
-      .maybeSingle()
-    if (error) return response.status(500).json({ error: 'The phone account could not be checked.' })
-    if (data) {
-      profile = data
-      break
-    }
-  }
-
-  if (!profile && !parsed.data.name) {
+  const existingProfile = matchedProfile as ProfileRow | null
+  if (!existingProfile && !parsed.data.name) {
     return response.status(400).json({ error: 'Enter your name to create a new customer account.' })
   }
+  if (!(await markChallengeVerified(response, parsed.data.challengeId))) return
 
-  const { data: consumed, error: consumeError } = await supabase
-    .from('guest_otp_challenges')
-    .update({ verified_at: new Date().toISOString() })
-    .eq('id', challenge.id)
-    .eq('attempts', challenge.attempts)
-    .is('verified_at', null)
-    .gt('expires_at', new Date().toISOString())
-    .select('id')
-    .maybeSingle()
-  if (consumeError) return response.status(500).json({ error: consumeError.message })
-  if (!consumed) {
-    return response.status(400).json({ error: 'This verification code is invalid or expired.' })
-  }
-
+  let profile: ProfileRow
   let session: { access_token: string; refresh_token: string }
   let authUser: { id: string; email?: string | null }
-  if (profile) {
+  if (existingProfile) {
+    profile = existingProfile
     const { data: existingUser, error: userError } = await authSupabase.auth.admin.getUserById(profile.id)
     if (userError || !existingUser.user?.email) {
       return response.status(403).json({ error: 'The phone account is unavailable.' })
@@ -206,6 +275,7 @@ router.post('/phone/verify-otp', phoneOtpVerifyLimit, async (request, response) 
     })
     const tokenHash = link?.properties?.hashed_token
     if (linkError || !tokenHash) {
+      logFailure('phone.magiclink_failed', response.locals.requestId, linkError?.message)
       return response.status(500).json({ error: 'A phone sign-in session could not be created.' })
     }
     const { data: verified, error: verifyError } = await authSupabase.auth.verifyOtp({
@@ -213,6 +283,7 @@ router.post('/phone/verify-otp', phoneOtpVerifyLimit, async (request, response) 
       type: 'magiclink',
     })
     if (verifyError || !verified.session || !verified.user) {
+      logFailure('phone.magiclink_verify_failed', response.locals.requestId, verifyError?.message)
       return response.status(500).json({ error: 'A phone sign-in session could not be created.' })
     }
     session = {
@@ -236,6 +307,7 @@ router.post('/phone/verify-otp', phoneOtpVerifyLimit, async (request, response) 
       },
     })
     if (createError || !created.user) {
+      logFailure('phone.user_create_failed', response.locals.requestId, createError?.message)
       return response.status(409).json({ error: 'The phone account could not be created. Try signing in again.' })
     }
 
@@ -246,6 +318,7 @@ router.post('/phone/verify-otp', phoneOtpVerifyLimit, async (request, response) 
         id: created.user.id,
         full_name: parsed.data.name,
         phone_e164: phone,
+        phone_verified_at: new Date().toISOString(),
         username,
         role: 'customer',
         signup_platform: signupPlatform,
@@ -254,19 +327,19 @@ router.post('/phone/verify-otp', phoneOtpVerifyLimit, async (request, response) 
       .select('id,role,full_name,username,phone_e164,theme_mode,selfie_required')
       .single()
     if (profileError || !createdProfile) {
+      logFailure('phone.profile_create_failed', response.locals.requestId, profileError?.message)
       const { error: rollbackError } = await authSupabase.auth.admin.deleteUser(created.user.id)
-      if (rollbackError) {
-        console.error(JSON.stringify({ event: 'phone_signup.rollback_failed', userId: created.user.id, error: rollbackError.message }))
-      }
+      if (rollbackError) logFailure('phone.rollback_failed', response.locals.requestId, rollbackError.message)
       return response.status(500).json({ error: 'The customer account could not be created.' })
     }
-    profile = createdProfile
+    profile = createdProfile as ProfileRow
 
     const { data: signedIn, error: signInError } = await authSupabase.auth.signInWithPassword({
       email,
       password,
     })
     if (signInError || !signedIn.session) {
+      logFailure('phone.session_failed', response.locals.requestId, signInError?.message)
       return response.status(500).json({ error: 'The customer account was created but could not be signed in.' })
     }
     session = {
@@ -279,7 +352,7 @@ router.post('/phone/verify-otp', phoneOtpVerifyLimit, async (request, response) 
   setRefreshCookie(response, session.refresh_token)
   return response.json({
     accessToken: session.access_token,
-    refreshToken: session.refresh_token,
+    ...refreshTokenForClient(request.header('x-client-platform'), session.refresh_token),
     user: {
       id: authUser.id,
       email: authUser.email,
@@ -292,18 +365,22 @@ router.post('/phone/verify-otp', phoneOtpVerifyLimit, async (request, response) 
   })
 })
 
-router.post('/login', loginLimit, async (request, response) => {
+router.post('/login', loginLimit, loginAccountLimit, async (request, response) => {
   const parsed = credentialsSchema.safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Invalid credentials', details: parsed.error.flatten() })
   const credential = (parsed.data.email ?? parsed.data.username!).trim().toLowerCase()
   let email = credential
   let username = credential
   if (!credential.includes('@')) {
-    const { data: usernameProfile } = await supabase.from('profiles').select('id,username').ilike('username', credential).maybeSingle()
-    if (!usernameProfile) return response.status(401).json({ error: 'Invalid credentials' })
-    const { data: authUser } = await authSupabase.auth.admin.getUserById(usernameProfile.id)
-    email = authUser.user?.email ?? ''
-    username = usernameProfile.username ?? credential
+    const { data: usernameProfile } = await supabase.from('profiles').select('id,username').ilike('username', escapeIlike(credential)).maybeSingle()
+    let matchedEmail: string | undefined
+    if (usernameProfile) {
+      const { data: authUser } = await authSupabase.auth.admin.getUserById(usernameProfile.id)
+      matchedEmail = authUser.user?.email ?? undefined
+      username = usernameProfile.username ?? credential
+    }
+    // An unknown username still goes through the password check so both cases take similar time.
+    email = matchedEmail ?? unmatchedLoginEmail
   }
   const { data, error } = await authSupabase.auth.signInWithPassword({ email, password: parsed.data.password })
   if (error || !data.session || !data.user) return response.status(401).json({ error: 'Invalid credentials' })
@@ -313,7 +390,8 @@ router.post('/login', loginLimit, async (request, response) => {
     const { data: vendor, error: vendorLookupError } = await supabase.from('vendors').select('id').eq('owner_profile_id', profile.id).maybeSingle()
     if (vendorLookupError) return response.status(500).json({ error: 'Vendor profile could not be checked.' })
     if (!vendor) {
-      const phone = profile.phone_e164 ?? (typeof data.user.user_metadata?.phone === 'string' ? data.user.user_metadata.phone : null) ?? data.user.phone
+      const rawPhone = profile.phone_e164 ?? (typeof data.user.user_metadata?.phone === 'string' ? data.user.user_metadata.phone : null) ?? data.user.phone
+      const phone = rawPhone ? toE164IndianMobile(rawPhone) : null
       if (phone) {
         const { error: vendorCreateError } = await supabase.from('vendors').insert({
           owner_profile_id: profile.id,
@@ -323,19 +401,23 @@ router.post('/login', loginLimit, async (request, response) => {
           verification: 'pending',
           is_online: false,
         })
-        if (vendorCreateError) return response.status(500).json({ error: 'Vendor profile could not be created.' })
+        if (vendorCreateError) {
+          logFailure('login.vendor_create_failed', response.locals.requestId, vendorCreateError.message)
+          return response.status(500).json({ error: 'Vendor profile could not be created.' })
+        }
       }
     }
   }
   setRefreshCookie(response, data.session.refresh_token)
   const user = { id: data.user.id, email: data.user.email, username: profile.username ?? username ?? data.user.email, name: profile.full_name ?? data.user.email, role: profile.role ?? 'customer', themeMode: profile.theme_mode ?? 'system', selfieRequired: profile.selfie_required === true }
-  return response.json({ accessToken: data.session.access_token, refreshToken: data.session.refresh_token, user })
+  return response.json({ accessToken: data.session.access_token, ...refreshTokenForClient(request.header('x-client-platform'), data.session.refresh_token), user })
 })
-router.post('/signup', signupLimit, async (request, response) => {
+
+router.post('/signup', signupLimit, signupEmailLimit, async (request, response) => {
   const parsed = z.object({
     email: z.string().email(),
     username: z.string().min(3).max(40).regex(/^[a-zA-Z0-9._-]+$/).optional(),
-    password: z.string().min(8),
+    password: z.string().min(8).refine(passwordWithinBcryptLimit, 'Password must be 72 bytes or fewer.'),
     name: z.string().min(2).max(60),
     phone: phoneSchema,
     role: z.enum(['customer', 'vendor', 'admin']).optional(),
@@ -352,30 +434,34 @@ router.post('/signup', signupLimit, async (request, response) => {
   const signupPlatform = clientPlatformFromHeader(request.header('x-client-platform'))
   const themeMode = parsed.data.themeMode ?? 'system'
   const username = parsed.data.username?.toLowerCase() ?? parsed.data.email.split('@')[0]?.toLowerCase() ?? 'user'
+  // The phone is not stored here. It is written by the phone verify route after the OTP passes.
   const { data, error } = await authSupabase.auth.admin.generateLink({
     type: 'signup',
     email: parsed.data.email,
     password: parsed.data.password,
     options: {
-      data: { full_name: parsed.data.name, phone: parsed.data.phone, role: 'customer', username },
+      data: { full_name: parsed.data.name, role: 'customer', username },
       redirectTo: `${config.FRONTEND_ORIGIN}/login`,
     },
   })
-  if (error) return response.status(400).json({ error: error.message })
+  if (error) {
+    logFailure('signup.link_failed', response.locals.requestId, error.message)
+    return response.status(400).json({ error: signupFailedMessage })
+  }
   const userId = data.user.id
   const { error: profileError } = await supabase.from('profiles').upsert({
     id: userId,
     full_name: parsed.data.name,
-    phone_e164: parsed.data.phone,
     username,
     role: 'customer',
     signup_platform: signupPlatform,
     theme_mode: themeMode,
   })
   if (profileError) {
+    logFailure('signup.profile_failed', response.locals.requestId, profileError.message)
     const { error: deleteError } = await authSupabase.auth.admin.deleteUser(userId)
-    if (deleteError) console.error(JSON.stringify({ event: 'signup.rollback_failed', userId, error: deleteError.message }))
-    return response.status(400).json({ error: profileError.message })
+    if (deleteError) logFailure('signup.rollback_failed', response.locals.requestId, deleteError.message)
+    return response.status(400).json({ error: signupFailedMessage })
   }
 
   const cleanupUnconfirmedAccount = async () => {
@@ -404,93 +490,99 @@ router.post('/signup', signupLimit, async (request, response) => {
       }
     }
     if (photoError) {
-      console.error(JSON.stringify({ event: 'signup.selfie_failed', userId, error: photoError }))
+      logFailure('signup.selfie_failed', response.locals.requestId, photoError)
       await cleanupUnconfirmedAccount()
       return response.status(500).json({ error: 'Your photo could not be saved. Please try again.' })
     }
   }
 
-  try {
-    const actionLink = data.properties.action_link
-    if (!actionLink) {
-      await cleanupUnconfirmedAccount()
-      return response.status(502).json({ error: 'We could not create an email confirmation link. Please try again.' })
-    }
-    const email = signupConfirmationEmail(parsed.data.name, actionLink)
-    const delivery = await sendEmail(parsed.data.email, email.subject, email.html)
-    if (!delivery.queued) {
-      const cleanedUp = await cleanupUnconfirmedAccount()
-      if (!cleanedUp) console.error(JSON.stringify({ event: 'signup.unconfirmed_account_retained', userId, reason: 'email_delivery_not_configured' }))
-      return response.status(503).json({ error: 'Email confirmation is unavailable. Configure SMTP_USER, SMTP_PASSWORD, and MAIL_FROM on the backend, then try again.' })
-    }
-  } catch (deliveryError) {
-    const cleanedUp = await cleanupUnconfirmedAccount()
-    console.error(JSON.stringify({
-      event: 'signup.confirmation_email_failed',
-      userId,
-      error: deliveryError instanceof Error ? deliveryError.message : 'Unknown email delivery error',
-      cleanedUp,
-    }))
-    return response.status(502).json({ error: 'The confirmation email could not be sent. Please try again in a few minutes.' })
+  const actionLink = data.properties.action_link
+  if (!actionLink) {
+    await cleanupUnconfirmedAccount()
+    return response.status(502).json({ error: 'We could not create an email confirmation link. Please try again.' })
   }
+  const confirmation = signupConfirmationEmail(parsed.data.name, actionLink)
+  void (async () => {
+    try {
+      const delivery = await sendEmail(parsed.data.email, confirmation.subject, confirmation.html)
+      if (!delivery.queued) throw new Error(delivery.reason)
+    } catch (deliveryError) {
+      const cleanedUp = await cleanupUnconfirmedAccount().catch(() => false)
+      console.error(JSON.stringify({ event: 'signup.confirmation_email_failed', requestId: response.locals.requestId, userId, error: mailErrorCode(deliveryError), cleanedUp }))
+    }
+  })()
 
   response.status(201).json({ requiresEmailVerification: true, emailSent: true, userId, signupPlatform, themeMode })
 })
-router.post('/password-reset', passwordResetLimit, async (request, response) => {
+
+// Sends the reset email after the response, so the reply never depends on whether the account exists or the mail went out.
+function deliverPasswordReset(email: string, requestId: unknown) {
+  void (async () => {
+    try {
+      const { data, error } = await authSupabase.auth.admin.generateLink({ type: 'recovery', email, options: { redirectTo: `${config.FRONTEND_ORIGIN}/login` } })
+      const actionLink = data?.properties?.action_link
+      if (error || !actionLink) {
+        logFailure('auth.password_reset_link_failed', requestId, error?.message)
+        return
+      }
+      const reset = passwordResetEmail(actionLink)
+      const delivery = await sendEmail(email, reset.subject, reset.html)
+      if (!delivery.queued) throw new Error(delivery.reason)
+    } catch (deliveryError) {
+      logFailure('auth.password_reset_email_failed', requestId, mailErrorCode(deliveryError))
+    }
+  })()
+}
+
+router.post('/password-reset', passwordResetLimit, passwordResetEmailLimit, async (request, response) => {
   const parsed = z.object({ email: z.string().email() }).safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Valid email is required' })
   if (!isEmailConfigured()) return response.status(503).json({ error: 'Password reset email is unavailable. Configure Gmail SMTP_USER, SMTP_PASSWORD, and MAIL_FROM on the backend, then try again.' })
-
-  const { data, error } = await authSupabase.auth.admin.generateLink({
-    type: 'recovery',
-    email: parsed.data.email,
-    options: { redirectTo: `${config.FRONTEND_ORIGIN}/login` },
-  })
-  if (error || !data?.properties.action_link) {
-    if (error && /user not found|not found/i.test(error.message)) {
-      return response.status(202).json({ accepted: true })
-    }
-    if (error) {
-      console.error(JSON.stringify({ event: 'auth.password_reset_link_failed', error: error.message }))
-      return response.status(502).json({ error: 'Password reset instructions could not be prepared. Please try again shortly.' })
-    }
-    return response.status(502).json({ error: 'Password reset instructions could not be prepared. Please try again shortly.' })
-  }
-
-  try {
-    const email = passwordResetEmail(data.properties.action_link)
-    const delivery = await sendEmail(parsed.data.email, email.subject, email.html)
-    if (!delivery.queued) throw new Error(delivery.reason)
-  } catch (deliveryError) {
-    console.error(JSON.stringify({
-      event: 'auth.password_reset_email_failed',
-      error: deliveryError instanceof Error ? deliveryError.message : 'Unknown email delivery error',
-    }))
-    return response.status(502).json({ error: 'The password reset email could not be sent. Please try again in a few minutes.' })
-  }
+  deliverPasswordReset(parsed.data.email, response.locals.requestId)
   response.status(202).json({ accepted: true })
 })
+
 router.post('/password-update', passwordUpdateLimit, async (request, response) => {
   const parsed = z.object({
     accessToken: z.string().min(20).max(4096),
-    password: z.string().min(8).max(128),
+    password: z.string().min(8).max(128).refine(passwordWithinBcryptLimit, 'Password must be 72 bytes or fewer.'),
   }).safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'A valid recovery link and password are required.' })
 
   const { data, error } = await authSupabase.auth.getUser(parsed.data.accessToken)
-  if (error || !data.user) return response.status(401).json({ error: 'The password reset link is invalid or expired.' })
+  if (error || !data.user || !hasRecoveryClaim(parsed.data.accessToken)) return response.status(401).json({ error: 'The password reset link is invalid or expired.' })
 
   const { error: updateError } = await authSupabase.auth.admin.updateUserById(data.user.id, {
     password: parsed.data.password,
   })
   if (updateError) {
-    console.error(JSON.stringify({ event: 'auth.password_update_failed', userId: data.user.id, error: updateError.message }))
+    logFailure('auth.password_update_failed', response.locals.requestId, updateError.message)
     return response.status(500).json({ error: 'The password could not be updated. Please try again.' })
   }
+  const { error: signOutError } = await authSupabase.auth.admin.signOut(parsed.data.accessToken, 'others')
+  if (signOutError) logFailure('auth.password_update_signout_failed', response.locals.requestId, signOutError.message)
   return response.json({ updated: true })
 })
-router.post('/refresh', async (request, response) => { const cookies = parseCookies(request.headers.cookie); const refreshToken = request.body?.refreshToken ?? cookies.refresh_token; if (!refreshToken) return response.status(401).json({ error: 'Refresh token required' }); const { data, error } = await authSupabase.auth.refreshSession({ refresh_token: refreshToken }); if (error || !data.session) return response.status(401).json({ error: 'Session expired' }); setRefreshCookie(response, data.session.refresh_token); return response.json({ accessToken: data.session.access_token, refreshToken: data.session.refresh_token }) })
-router.post('/mobile-refresh', async (request, response) => { const parsed = z.object({ refreshToken: z.string().min(20).max(4096) }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Refresh token required' }); const { data, error } = await authSupabase.auth.refreshSession({ refresh_token: parsed.data.refreshToken }); if (error || !data.session || !data.user) return response.status(401).json({ error: 'Session expired' }); const { data: profile } = await supabase.from('profiles').select('id,role,full_name,username,theme_mode').eq('id', data.user.id).single(); return response.json({ accessToken: data.session.access_token, refreshToken: data.session.refresh_token, user: { id: data.user.id, email: data.user.email, username: profile?.username ?? data.user.email, name: profile?.full_name ?? data.user.email, role: profile?.role ?? 'customer', themeMode: profile?.theme_mode ?? 'system' } }) })
+
+router.post('/refresh', async (request, response) => {
+  if (!originAllowed(request)) return response.status(403).json({ error: 'Request origin is not allowed.' })
+  const refreshToken = refreshTokenFromRequest(request)
+  if (!refreshToken) return response.status(401).json({ error: 'Refresh token required' })
+  const { data, error } = await authSupabase.auth.refreshSession({ refresh_token: refreshToken })
+  if (error || !data.session) return response.status(401).json({ error: 'Session expired' })
+  setRefreshCookie(response, data.session.refresh_token)
+  return response.json({ accessToken: data.session.access_token, ...refreshTokenForClient(request.header('x-client-platform'), data.session.refresh_token) })
+})
+
+router.post('/mobile-refresh', async (request, response) => {
+  const parsed = z.object({ refreshToken: z.string().min(20).max(4096) }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Refresh token required' })
+  const { data, error } = await authSupabase.auth.refreshSession({ refresh_token: parsed.data.refreshToken })
+  if (error || !data.session || !data.user) return response.status(401).json({ error: 'Session expired' })
+  const { data: profile } = await supabase.from('profiles').select('id,role,full_name,username,theme_mode').eq('id', data.user.id).single()
+  return response.json({ accessToken: data.session.access_token, ...refreshTokenForClient(request.header('x-client-platform'), data.session.refresh_token), user: { id: data.user.id, email: data.user.email, username: profile?.username ?? data.user.email, name: profile?.full_name ?? data.user.email, role: profile?.role ?? 'customer', themeMode: profile?.theme_mode ?? 'system' } })
+})
+
 router.get('/preferences', requireAuth, async (request, response) => {
   const { data, error } = await supabase.from('profiles').select('theme_mode').eq('id', request.authUser!.id).single()
   if (error || !data) return response.status(404).json({ error: 'Profile not found' })
@@ -503,5 +595,27 @@ router.patch('/preferences', requireAuth, async (request, response) => {
   if (error || !data) return response.status(400).json({ error: 'Preferences could not be saved' })
   return response.json({ themeMode: data.theme_mode })
 })
-router.post('/logout', (_request, response) => { clearRefreshCookie(response); return response.status(204).send() })
+
+// Revokes every session for the user. Without an access token, the refresh cookie or body token is exchanged for one first.
+router.post('/logout', async (request, response) => {
+  if (!originAllowed(request)) return response.status(403).json({ error: 'Request origin is not allowed.' })
+  let accessToken = bearerToken(request)
+  if (!accessToken) {
+    const refreshToken = refreshTokenFromRequest(request)
+    if (refreshToken) {
+      const { data } = await authSupabase.auth.refreshSession({ refresh_token: refreshToken })
+      accessToken = data.session?.access_token
+    }
+  }
+  if (accessToken) {
+    const { error } = await authSupabase.auth.admin.signOut(accessToken, 'global').catch((signOutError: unknown) => ({ error: { message: signOutError instanceof Error ? signOutError.message : 'unknown' } }))
+    if (error) {
+      logFailure('auth.logout_failed', response.locals.requestId, error.message)
+      return response.status(502).json({ error: 'Sign-out could not be completed. Please try again.' })
+    }
+  }
+  clearRefreshCookie(response)
+  return response.status(204).send()
+})
+
 export default router

@@ -3,7 +3,7 @@ import { Pencil, Plus, Search, ShieldCheck, Trash2, Truck, UserRound, Users } fr
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { adminApi } from '../api/admin'
 import { adminQueryKeys, useAdminCustomers, useAdminDrivers, useAdminVehicles, useAdminVendors } from '../hooks/useAdminData'
-import { Modal } from './WorkspaceInteractive'
+import { Modal } from '../components/Modal'
 import { adminEntitiesContent as c } from '../content/admin-entities'
 
 const copy = c.entities.modal

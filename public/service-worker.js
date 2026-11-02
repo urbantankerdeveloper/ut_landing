@@ -1,5 +1,6 @@
-const CACHE = 'urban-tanker-shell-v3'
-const PRECACHE = ['/', '/manifest.json', '/robots.txt', '/sitemap.xml', '/assets/urban-tanker-hero.jpg']
+const CACHE = 'urban-tanker-shell-v4'
+const STATIC_PATHS = new Set(['/manifest.json', '/robots.txt', '/sitemap.xml', '/assets/urban-tanker-hero.jpg'])
+const PRECACHE = ['/', ...STATIC_PATHS]
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(PRECACHE)).then(() => self.skipWaiting()))
@@ -13,7 +14,6 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return
   const requestUrl = new URL(event.request.url)
   if (requestUrl.origin !== self.location.origin) return
-  if (requestUrl.pathname.startsWith('/api/')) return
   if (event.request.mode === 'navigate') {
     const networkResponse = fetch(event.request)
     event.waitUntil(networkResponse.then((response) => response.ok ? caches.open(CACHE).then((cache) => cache.put('/', response.clone())) : undefined).catch(() => undefined))
@@ -28,19 +28,25 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(caches.match(event.request).then((cached) => cached ?? networkResponse))
     return
   }
+  if (!STATIC_PATHS.has(requestUrl.pathname)) return
   const networkResponse = fetch(event.request)
   event.waitUntil(networkResponse.then((response) => response.ok ? caches.open(CACHE).then((cache) => cache.put(event.request, response.clone())) : undefined).catch(() => undefined))
   event.respondWith(networkResponse.catch(async () => (await caches.match(event.request)) ?? Response.error()))
 })
 
 self.addEventListener('push', (event) => {
-  const data = event.data?.json() ?? { title: 'Urban Tanker update', body: 'You have a new booking update.' }
-  event.waitUntil(self.registration.showNotification(data.title ?? 'Urban Tanker update', { body: data.body ?? data.detail ?? '', icon: '/manifest.json', data: { url: data.url ?? '/' } }))
+  let data = null
+  try { data = event.data?.json() ?? null } catch { data = null }
+  const message = data && typeof data === 'object' ? data : { title: 'Urban Tanker update', body: 'You have a new booking update.' }
+  event.waitUntil(self.registration.showNotification(message.title ?? 'Urban Tanker update', { body: message.body ?? message.detail ?? '', icon: '/manifest.json', data: { url: message.url ?? '/' } }))
 })
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
-  event.waitUntil(clients.openWindow(event.notification.data?.url ?? '/'))
+  let target
+  try { target = new URL(event.notification.data?.url ?? '/', self.location.origin) } catch { return }
+  if (target.origin !== self.location.origin) return
+  event.waitUntil(clients.openWindow(target.href))
 })
 
 self.addEventListener('sync', (event) => {

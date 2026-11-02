@@ -1,10 +1,14 @@
 import { Suspense, useCallback, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { lazyWithRetry } from '../utils/lazyWithRetry'
 import { BarChart3, Bell, CalendarCheck, ChevronDown, CircleDollarSign, ClipboardList, FileText, Gauge, House, LayoutDashboard, LogOut, MapPin, Menu, MessageSquare, PanelLeftClose, PanelLeftOpen, Receipt, Repeat, Settings2, Tag, Truck, UserRound, UserPlus, Users, Wallet, X } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
 import { useNavigationStore, type WorkspaceRole } from '../stores/navigationStore'
 import { WorkspaceContentSkeleton } from '../components/ScreenSkeleton'
 import { useVendorOfflineSync } from '../hooks/useVendorData'
+import { authApi } from '../api/auth'
+import { clearOfflineQueue } from '../services/offlineMutationQueue'
+import { BOOKING_DRAFT_KEY, REPEAT_BOOKING_KEY } from '../constants/bookingDraft'
 import { workspaceContent as w } from '../content/workspace'
 
 const WorkspaceContent = lazyWithRetry(() => import('./WorkspaceContent').then(({ WorkspaceContent: content }) => ({ default: content })))
@@ -40,6 +44,7 @@ export default function WorkspaceScreen() {
   useVendorOfflineSync(activeRole === 'vendor')
   const user = useAuthStore((state) => state.user)
   const signOut = useAuthStore((state) => state.signOut)
+  const queryClient = useQueryClient()
   const data = roleData[activeRole]
   const [activeItem, setActiveItem] = useState('overview')
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -51,7 +56,15 @@ export default function WorkspaceScreen() {
   const selectItem = useCallback((key: string) => { setActiveItem(key); const group = navigationGroups.find((item) => item.keys.includes(key)); if (group) setExpandedAdminGroups(new Set([group.label])); setNotices([]); setSidebarOpen(false) }, [navigationGroups])
   const addNotice = useCallback((message: string) => { const id = Date.now() + Math.random(); setNotices((current) => [...current.slice(-4), { id, message }]); window.setTimeout(() => setNotices((current) => current.filter((notice) => notice.id !== id)), 5000) }, [])
   const navigateContent = useCallback((screen: 'booking' | 'bookings' | 'offers' | 'home') => screen === 'booking' ? navigate('booking') : screen === 'offers' ? selectItem('offers') : navigate('home'), [navigate, selectItem])
-  const logout = () => { signOut(); navigate('home') }
+  const logout = async () => {
+    await authApi.logout().catch(() => undefined)
+    queryClient.clear()
+    clearOfflineQueue()
+    sessionStorage.removeItem(BOOKING_DRAFT_KEY)
+    sessionStorage.removeItem(REPEAT_BOOKING_KEY)
+    signOut()
+    navigate('home')
+  }
   const renderNavItem = ({ label, icon: Icon, key }: NavItem) => <button className={activeItem === key ? 'is-active' : ''} aria-current={activeItem === key ? 'page' : undefined} key={key} onClick={() => selectItem(key)} title={sidebarCollapsed ? label : undefined}><Icon size={16} /><span>{label}</span></button>
   const renderNavGroups = (groups: NavGroup[]) => <>
     {data.nav.filter((item) => item.key === 'overview').map(renderNavItem)}

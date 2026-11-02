@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { LatLngLiteral } from 'leaflet'
 import { MapPin } from 'lucide-react'
 import { LocationPicker } from './LocationPicker'
-import { Modal } from '../screens/WorkspaceInteractive'
+import { Modal } from './Modal'
 import { lookupDeliveryPoint } from '../services/geocoding'
 import { locationContent } from '../content/location'
 
@@ -14,26 +14,30 @@ export function LocationPickerModal({ value, onChange, onClose }: Props) {
   const [candidateIsInChennai, setCandidateIsInChennai] = useState<boolean | null>(null)
   const [isResolving, setIsResolving] = useState(false)
   const [lookupError, setLookupError] = useState<string | null>(null)
+  const latestRequest = useRef(0)
   async function selectLocation(point: LatLngLiteral) {
+    const requestId = ++latestRequest.current
     setIsResolving(true)
     setLookupError(null)
+    setSelectedName(null)
     setCandidatePoint(point)
     setCandidateIsInChennai(null)
     try {
       const result = await lookupDeliveryPoint(point)
+      if (requestId !== latestRequest.current) return
       setSelectedName(result.approximateName)
       setCandidateIsInChennai(result.isInChennai)
-      if (result.isInChennai) onChange(point, result.approximateName)
-      else setLookupError(locationContent.modal.outsideChennai)
+      if (!result.isInChennai) setLookupError(locationContent.modal.outsideChennai)
     } catch (error) {
+      if (requestId !== latestRequest.current) return
       const message = error instanceof Error ? error.message : 'Location name lookup failed'
       setLookupError(locationContent.modal.lookupFailed)
       setCandidateIsInChennai(false)
       setSelectedName(locationContent.modal.selectedArea(point.lat.toFixed(5), point.lng.toFixed(5)))
       console.warn(JSON.stringify({ event: 'location.reverse_geocode_failed', error: message }))
     } finally {
-      setIsResolving(false)
+      if (requestId === latestRequest.current) setIsResolving(false)
     }
   }
-  return <Modal title={locationContent.modal.title} onClose={onClose}><div className="location-picker-modal"><p className="modal-required-note"><MapPin size={15} /> {locationContent.modal.hint}</p><LocationPicker value={candidatePoint} onChange={(point) => void selectLocation(point)} />{selectedName && <p className="location-selected-name" role="status"><MapPin size={15} /> {isResolving ? locationContent.modal.finding : selectedName}</p>}{lookupError && <p className="location-lookup-error" role="alert">{lookupError}</p>}<button className="button button-primary button-large" type="button" disabled={!candidatePoint || isResolving || candidateIsInChennai !== true} onClick={onClose}>{isResolving ? locationContent.modal.findingButton : locationContent.modal.useLocation}</button></div></Modal>
+  return <Modal title={locationContent.modal.title} onClose={onClose}><div className="location-picker-modal"><p className="modal-required-note"><MapPin size={15} /> {locationContent.modal.hint}</p><LocationPicker value={candidatePoint} onChange={(point) => void selectLocation(point)} />{selectedName && <p className="location-selected-name" role="status"><MapPin size={15} /> {isResolving ? locationContent.modal.finding : selectedName}</p>}{lookupError && <p className="location-lookup-error" role="alert">{lookupError}</p>}<button className="button button-primary button-large" type="button" disabled={!candidatePoint || isResolving || candidateIsInChennai !== true} onClick={() => { if (candidatePoint && selectedName) onChange(candidatePoint, selectedName); onClose() }}>{isResolving ? locationContent.modal.findingButton : locationContent.modal.useLocation}</button></div></Modal>
 }

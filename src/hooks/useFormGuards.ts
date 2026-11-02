@@ -19,7 +19,7 @@ function queryAll<T extends Element>(root: ParentNode, selector: string): T[] {
 function configure(root: ParentNode = document) {
   const currentDate = today()
   queryAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(root, 'input, textarea, select').forEach((field) => {
-    field.autocomplete = 'off'
+    if (field.type !== 'password') field.autocomplete = 'off'
   })
   queryAll<HTMLInputElement>(root, 'input[type="date"]').forEach((input) => {
     input.min = currentDate
@@ -63,13 +63,21 @@ function configure(root: ParentNode = document) {
 export function useFormGuards() {
   useEffect(() => {
     configure()
+    const pendingRoots = new Set<HTMLElement>()
+    let frame = 0
     const configureAddedFields = (records: MutationRecord[]) => {
       for (const record of records) {
         for (const node of record.addedNodes) {
           if (!(node instanceof HTMLElement)) continue
-          if (node.matches('input, textarea, select') || node.querySelector('input, textarea, select')) configure(node)
+          if (node.matches('input, textarea, select') || node.querySelector('input, textarea, select')) pendingRoots.add(node)
         }
       }
+      if (frame || !pendingRoots.size) return
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        pendingRoots.forEach((root) => { if (root.isConnected) configure(root) })
+        pendingRoots.clear()
+      })
     }
     const onInput = (event: Event) => {
       const input = event.target
@@ -108,6 +116,7 @@ export function useFormGuards() {
     document.addEventListener('input', onInput, true)
     document.addEventListener('submit', onSubmit, true)
     return () => {
+      if (frame) cancelAnimationFrame(frame)
       observer.disconnect()
       document.removeEventListener('input', onInput, true)
       document.removeEventListener('submit', onSubmit, true)

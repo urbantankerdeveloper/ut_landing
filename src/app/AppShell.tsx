@@ -7,7 +7,7 @@ import { useNavigationStore } from '../stores/navigationStore'
 import { useFormGuards } from '../hooks/useFormGuards'
 import { useAuthStore } from '../stores/authStore'
 import type { WorkspaceRole } from '../stores/navigationStore'
-import { Modal } from '../screens/WorkspaceInteractive'
+import { Modal } from '../components/Modal'
 import { BookingPageFooter, BookingPageHeader } from '../components/booking/BookingPageChrome'
 import { chromeContent as c } from '../content/chrome'
 

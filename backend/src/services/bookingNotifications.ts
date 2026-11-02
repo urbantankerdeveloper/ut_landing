@@ -33,8 +33,9 @@ export async function notifyCustomerOfAssignment(booking: AssignedBooking) {
   const customerMapUrl = booking.latitude !== null && booking.longitude !== null && booking.latitude !== undefined && booking.longitude !== undefined
     ? `https://www.google.com/maps/search/?api=1&query=${booking.latitude},${booking.longitude}`
     : null
-  const detail = `Fleet assigned: ${vehicle}. Driver: ${driver}. Live tracking: ${trackingUrl}`
-  const payload = { vehicle, driver, trackingUrl, customerMapUrl, latitude: booking.latitude ?? null, longitude: booking.longitude ?? null }
+  const detail = `Fleet assigned: ${vehicle}. Driver: ${driver}. Open your booking to follow live tracking.`
+  // The tracking link is sent by email and SMS only. It is not stored in notifications or push payloads.
+  const payload = { vehicle, driver, customerMapUrl, latitude: booking.latitude ?? null, longitude: booking.longitude ?? null }
 
   await notifyCustomer({
     customerId: booking.customer_id,
@@ -45,7 +46,7 @@ export async function notifyCustomerOfAssignment(booking: AssignedBooking) {
     payload,
   })
 
-  const message = `Urban Tanker ${booking.reference ?? booking.id}: ${detail}${customerMapUrl ? ` Delivery location: ${customerMapUrl}` : ''}`
+  const message = `Urban Tanker ${booking.reference ?? booking.id}: ${detail} Live tracking: ${trackingUrl}${customerMapUrl ? ` Delivery location: ${customerMapUrl}` : ''}`
   const providerResults = await notifyUser({ email: authUser.user.email ?? undefined }, 'Your Urban Tanker fleet is assigned', message)
   const sms = await notifyCustomerSms(profileResult.data?.phone_e164, 'vendor_acceptance', {
     reference: booking.reference ?? booking.id,

@@ -7,24 +7,40 @@ export function setRealtimeServer(server: Server) {
   realtimeServer = server
 }
 
+// Frequent location pings are pushed live but are not written to the admin notification feed.
+const transientRealtimeEvents = new Set(['booking.location.updated'])
+
 export function emitRealtime(event: string, payload: unknown = {}) {
-  realtimeServer?.emit(event, payload)
-  void persistAdminEvent(event, payload)
+  if (event === 'booking.updated') emitBookingUpdated(payload)
+  else realtimeServer?.emit(event, payload)
+  persistUnlessTransient(event, payload)
 }
 export function emitRealtimeToUser(userId: string, event: string, payload: unknown = {}) {
   realtimeServer?.to(`customer:${userId}`).emit(event, payload)
-  void persistAdminEvent(event, payload)
+  persistUnlessTransient(event, payload)
 }
 export function emitRealtimeToVendor(vendorId: string, event: string, payload: unknown = {}) {
   realtimeServer?.to(`vendor:${vendorId}`).emit(event, payload)
-  void persistAdminEvent(event, payload)
+  persistUnlessTransient(event, payload)
 }
 export function emitRealtimeToBooking(bookingId: string, event: string, payload: unknown = {}) {
   realtimeServer?.to(`booking:${bookingId}`).emit(event, payload)
-  void persistAdminEvent(event, payload)
+  persistUnlessTransient(event, payload)
 }
 export function emitRealtimeToAdmins(event: string, payload: unknown = {}) {
   realtimeServer?.to('admins').emit(event, payload)
+}
+// Booking updates reach the people following that booking and the admins, not every connected socket.
+function emitBookingUpdated(payload: unknown) {
+  const bookingId = payload && typeof payload === 'object' ? (payload as { bookingId?: unknown }).bookingId : undefined
+  if (typeof bookingId !== 'string') {
+    console.error(JSON.stringify({ event: 'realtime.booking_updated_dropped', reason: 'bookingId missing' }))
+    return
+  }
+  realtimeServer?.to([`booking:${bookingId}`, 'admins']).emit('booking.updated', payload)
+}
+function persistUnlessTransient(event: string, payload: unknown) {
+  if (!transientRealtimeEvents.has(event)) void persistAdminEvent(event, payload)
 }
 async function persistAdminEvent(event: string, payload: unknown) {
   const { data: admins, error: adminError } = await supabase.from('profiles').select('id').eq('role', 'admin')

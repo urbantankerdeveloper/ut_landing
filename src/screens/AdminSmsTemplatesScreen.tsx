@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus } from 'lucide-react'
 import { adminApi, type AdminSmsTemplate } from '../api/admin'
 import { adminQueryKeys, useAdminSmsTemplates } from '../hooks/useAdminData'
-import { Modal } from './WorkspaceInteractive'
+import { Modal } from '../components/Modal'
 import { adminEntitiesContent as c } from '../content/admin-entities'
 
 const copy = c.smsTemplates

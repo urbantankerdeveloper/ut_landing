@@ -1,12 +1,15 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import rateLimit from 'express-rate-limit'
+import crypto from 'node:crypto'
 import { supabase } from '../supabase.js'
 
 const router = Router()
 const partnerApplicationLimit = rateLimit({ windowMs: 60 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many partner applications from this address. Try again later.' } })
 const phone = z.string().regex(/^\d{10}$/, 'Enter a valid 10-digit phone number.')
 const allowedServices = z.enum(['Water tanker', 'Sewage suction', 'Drinking water supply', 'Tank and sump cleaning', 'Borewell services', 'RMC mix / ready-mix concrete', 'Empty tanker and bulk-liquid transport', 'Emergency water and sewage'])
+const partnerDocumentPrefix = 'partner-applications/'
+const partnerDocumentPath = z.string().trim().min(1).max(300).regex(/^[A-Za-z0-9][A-Za-z0-9._/-]*$/).refine((path) => path.startsWith(partnerDocumentPrefix) && !path.includes('..'), { message: 'Document path is not allowed.' })
 const applicationSchema = z.object({
   businessName: z.string().trim().min(2).max(120),
   partnerType: z.string().trim().min(2).max(60),
@@ -23,15 +26,16 @@ const applicationSchema = z.object({
   availability: z.string().trim().min(2).max(80),
   notes: z.string().trim().max(2000).optional(),
   documentNames: z.array(z.string().trim().min(1).max(180)).max(10).default([]),
+  documents: z.array(z.object({ path: partnerDocumentPath, type: z.string().trim().min(1).max(100) })).max(10).optional(),
 })
 
-function reference() { return `PA-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}` }
+function reference() { return `PA-${crypto.randomUUID().slice(0, 8).toUpperCase()}` }
 
 router.post('/applications', partnerApplicationLimit, async (request, response) => {
   const parsed = applicationSchema.safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Complete the required partner application fields.', details: parsed.error.flatten() })
   const input = parsed.data
-  const { data, error } = await supabase.from('partner_applications').insert({ reference: reference(), business_name: input.businessName, partner_type: input.partnerType, phone_e164: input.phone, whatsapp_e164: input.whatsapp || null, email: input.email, service_zone: input.zone, business_address: input.address, service_codes: input.serviceCodes, vehicle_count: input.vehicleCount, primary_registration: input.registration, vehicle_capacity: input.capacity, years_in_operation: input.experience ?? null, availability: input.availability, notes: input.notes || null, document_names: input.documentNames }).select('reference,status,created_at').single()
+  const { data, error } = await supabase.from('partner_applications').insert({ reference: reference(), business_name: input.businessName, partner_type: input.partnerType, phone_e164: input.phone, whatsapp_e164: input.whatsapp || null, email: input.email, service_zone: input.zone, business_address: input.address, service_codes: input.serviceCodes, vehicle_count: input.vehicleCount, primary_registration: input.registration, vehicle_capacity: input.capacity, years_in_operation: input.experience ?? null, availability: input.availability, notes: input.notes || null, document_names: [...input.documentNames, ...(input.documents ?? []).map((document) => document.path.split('/').pop() ?? document.path)] }).select('reference,status,created_at').single()
   if (error) return response.status(500).json({ error: 'The partner application could not be saved.' })
   response.status(201).json({ ok: true, reference: data.reference, status: data.status, message: 'Your partnership request was received for review.' })
 })

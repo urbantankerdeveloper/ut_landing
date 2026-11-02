@@ -1,6 +1,6 @@
 import { useState, type ComponentType, type ReactNode } from 'react'
 import { ArrowRight, CheckCircle2, CircleDollarSign, ClipboardList, FileText, Gauge, Settings2, ShieldCheck, Truck, UserRound, Users, Wallet, XCircle } from 'lucide-react'
-import { Modal } from './WorkspaceInteractive'
+import { Modal } from '../components/Modal'
 import { AdminEntityManager } from './AdminEntityManager'
 import AdminReportsScreen from './AdminReportsScreen'
 import AdminCouponsScreen from './AdminCouponsScreen'

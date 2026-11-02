@@ -3,6 +3,8 @@ import { useMutation } from '@tanstack/react-query'
 import { customerApi } from '../api/customer'
 import { apiFetch } from '../api/client'
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 export function useGeolocation() {
   const [position, setPosition] = useState<GeolocationPosition | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -22,7 +24,7 @@ export function useRazorpayPayment() {
     try {
       const order = await customerApi.createPaymentOrder({ amount, bookingId })
       const Razorpay = await loadRazorpayWidget()
-      await new Promise<void>((resolve, reject) => { let settled = false; const finish = (callback: () => void) => { if (settled) return; settled = true; callback() }; const checkout = new Razorpay({ key: order.keyId ?? import.meta.env.VITE_RAZORPAY_KEY_ID, amount: order.amount, currency: order.currency, name: 'Urban Tanker', order_id: order.id, prefill: customer, handler: async (result: { razorpay_payment_id: string; razorpay_signature: string }) => { try { await customerApi.verifyPayment({ orderId: order.id, paymentId: result.razorpay_payment_id, signature: result.razorpay_signature }); finish(() => { setCompleted(true); resolve() }) } catch (verificationError) { finish(() => reject(verificationError)) } }, modal: { ondismiss: () => finish(() => reject(new Error('Payment cancelled'))) } }); checkout.open() })
+      await new Promise<void>((resolve, reject) => { let settled = false; const finish = (callback: () => void) => { if (settled) return; settled = true; callback() }; const checkout = new Razorpay({ key: order.keyId ?? import.meta.env.VITE_RAZORPAY_KEY_ID, amount: order.amount, currency: order.currency, name: 'Urban Tanker', order_id: order.id, prefill: { ...customer, email: EMAIL_PATTERN.test(customer.email ?? '') ? customer.email : undefined }, handler: async (result: { razorpay_payment_id: string; razorpay_signature: string }) => { try { await customerApi.verifyPayment({ orderId: order.id, paymentId: result.razorpay_payment_id, signature: result.razorpay_signature }); finish(() => { setCompleted(true); resolve() }) } catch (verificationError) { finish(() => reject(verificationError)) } }, modal: { ondismiss: () => finish(() => reject(new Error('Payment cancelled'))) } }); checkout.open() })
     } catch (paymentError) { const message = paymentError instanceof Error ? paymentError.message : 'Payment could not be completed.'; setError(message); throw paymentError } finally { setLoading(false) }
   }
   return { pay, loading, error, completed }

@@ -2,7 +2,8 @@ import { useState, type FormEvent } from 'react'
 import { ArrowRight, Check } from 'lucide-react'
 import { useNavigationStore } from '../stores/navigationStore'
 import { useAuthStore } from '../stores/authStore'
-import { partnerApi } from '../api/partner'
+import { partnerApi, type PartnerDocument } from '../api/partner'
+import { useFileUpload } from '../hooks/useFrontendFeatures'
 import { partnerContent as p } from '../content/partner'
 
 export default function PartnerApplicationScreen() {
@@ -10,6 +11,7 @@ export default function PartnerApplicationScreen() {
   const openWorkspace = useNavigationStore((state) => state.openWorkspace)
   const setPartnerFormDirty = useNavigationStore((state) => state.setPartnerFormDirty)
   const user = useAuthStore((state) => state.user)
+  const fileUpload = useFileUpload()
   const openVendorWorkspace = () => user ? openWorkspace(user.role) : navigate('login')
   const [selectedServices, setSelectedServices] = useState<string[]>([])
   const [message, setMessage] = useState<string | null>(null)
@@ -19,9 +21,16 @@ export default function PartnerApplicationScreen() {
     event.preventDefault()
     if (selectedServices.length === 0) { setMessage(p.messages.chooseService); return }
     const data = new FormData(event.currentTarget)
-    const documentNames = data.getAll('documents').filter((file): file is File => file instanceof File && file.name.length > 0).map((file) => file.name)
+    const files = data.getAll('documents').filter((file): file is File => file instanceof File && file.name.length > 0)
+    if (files.length > 10) { setMessage(p.messages.tooManyDocuments); return }
     try {
-      const result = await partnerApi.apply({ businessName: String(data.get('name') ?? ''), partnerType: String(data.get('partnerType') ?? ''), phone: String(data.get('phone') ?? ''), whatsapp: String(data.get('whatsapp') ?? ''), email: String(data.get('email') ?? ''), zone: String(data.get('zone') ?? ''), address: String(data.get('address') ?? ''), serviceCodes: selectedServices, vehicleCount: Number(data.get('vehicleCount') ?? 0), registration: String(data.get('registration') ?? ''), capacity: String(data.get('capacity') ?? ''), experience: data.get('experience') ? Number(data.get('experience')) : undefined, availability: String(data.get('availability') ?? ''), notes: String(data.get('notes') ?? ''), documentNames })
+      const applicationId = crypto.randomUUID()
+      const documents: PartnerDocument[] = []
+      for (const file of files) {
+        const signed = await fileUpload.upload(file, 'partner-applications', applicationId)
+        documents.push({ path: signed.path, type: file.type || 'application/octet-stream' })
+      }
+      const result = await partnerApi.apply({ businessName: String(data.get('name') ?? ''), partnerType: String(data.get('partnerType') ?? ''), phone: String(data.get('phone') ?? ''), whatsapp: String(data.get('whatsapp') ?? ''), email: String(data.get('email') ?? ''), zone: String(data.get('zone') ?? ''), address: String(data.get('address') ?? ''), serviceCodes: selectedServices, vehicleCount: Number(data.get('vehicleCount') ?? 0), registration: String(data.get('registration') ?? ''), capacity: String(data.get('capacity') ?? ''), experience: data.get('experience') ? Number(data.get('experience')) : undefined, availability: String(data.get('availability') ?? ''), notes: String(data.get('notes') ?? ''), documents })
       setSubmitted(true)
       setPartnerFormDirty(false)
       setMessage(p.messages.submitted(result.message, result.reference))

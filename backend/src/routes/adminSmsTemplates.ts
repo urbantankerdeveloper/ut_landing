@@ -1,8 +1,9 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { requireAuth, requireRole } from '../middleware/auth.js'
+import { config } from '../config.js'
 import { supabase } from '../supabase.js'
-import { invalidateSmsTemplateCache, smsTemplateKeys, smsTemplateVariables } from '../services/sms.js'
+import { invalidateSmsTemplateCache, isOtpTemplateKey, smsTemplateKeys, smsTemplateRequiredVariables, smsTemplateVariables } from '../services/sms.js'
 
 const router = Router()
 router.use('/sms-templates', requireAuth, requireRole('admin'))
@@ -33,14 +34,28 @@ function placeholdersIn(body: string) {
   return [...new Set([...body.matchAll(placeholderPattern)].map((match) => match[1] ?? ''))]
 }
 
-// Built-in messages may only use the variables their code path sends; otherwise sending would fail.
-export function placeholderError(templateKey: string, body: string) {
-  if (!knownKeys.includes(templateKey)) return null
-  const allowed = smsTemplateVariables[templateKey as keyof typeof smsTemplateVariables]
-  const unknown = placeholdersIn(body).filter((name) => !allowed.includes(name))
-  if (!unknown.length) return null
-  return `Unknown placeholder(s): ${unknown.map((name) => `{{${name}}}`).join(', ')}. Allowed for this message: ${allowed.map((name) => `{{${name}}}`).join(', ')}`
+function requiredVariablesFor(templateKey: string): readonly string[] {
+  if (knownKeys.includes(templateKey)) return smsTemplateRequiredVariables[templateKey as keyof typeof smsTemplateRequiredVariables]
+  return isOtpTemplateKey(templateKey) ? ['otp'] : []
 }
+
+// Built-in messages may only use the variables their code path sends; otherwise sending would fail.
+// Mandatory placeholders must stay in the body, so an OTP message always carries its code.
+export function placeholderError(templateKey: string, body: string) {
+  if (knownKeys.includes(templateKey)) {
+    const allowed = smsTemplateVariables[templateKey as keyof typeof smsTemplateVariables]
+    const unknown = placeholdersIn(body).filter((name) => !allowed.includes(name))
+    if (unknown.length) return `Unknown placeholder(s): ${unknown.map((name) => `{{${name}}}`).join(', ')}. Allowed for this message: ${allowed.map((name) => `{{${name}}}`).join(', ')}`
+  }
+  const present = placeholdersIn(body)
+  const missing = requiredVariablesFor(templateKey).filter((name) => !present.includes(name))
+  if (missing.length) return `Missing required placeholder(s): ${missing.map((name) => `{{${name}}}`).join(', ')}. This message must include them.`
+  return null
+}
+
+const smsProviderNote = config.SMS_PROVIDER === 'twilio'
+  ? null
+  : 'SMS_PROVIDER is msg91, so the body saved here is not sent. MSG91 sends its approved template for this key, filled with the same variables. Change the wording in the MSG91 template as well.'
 
 type TemplateRow = { template_key: string; body: string; variables: string[]; is_active: boolean; updated_at: string; msg91_template_id: string | null }
 
@@ -55,6 +70,10 @@ function toTemplate(row: TemplateRow) {
     updatedAt: row.updated_at,
     isBuiltIn: builtIn,
     allowedVariables: builtIn ? smsTemplateVariables[row.template_key as keyof typeof smsTemplateVariables] : null,
+    requiredVariables: requiredVariablesFor(row.template_key),
+    canDeactivate: !isOtpTemplateKey(row.template_key),
+    bodyUsedByProvider: config.SMS_PROVIDER === 'twilio',
+    providerNote: smsProviderNote,
   }
 }
 
@@ -75,6 +94,7 @@ router.post('/sms-templates', async (request, response) => {
   const parsed = createSchema.safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid SMS template' })
   const { templateKey, body, isActive = true, msg91TemplateId } = parsed.data
+  if (isActive === false && isOtpTemplateKey(templateKey)) return response.status(400).json({ error: 'OTP templates must stay active' })
   const placeholderIssue = placeholderError(templateKey, body)
   if (placeholderIssue) return response.status(400).json({ error: placeholderIssue })
 
@@ -96,6 +116,7 @@ router.patch('/sms-templates/:key', async (request, response) => {
   const parsed = updateSchema.safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid SMS template' })
   const { body, isActive, msg91TemplateId } = parsed.data
+  if (isActive === false && isOtpTemplateKey(key)) return response.status(400).json({ error: 'OTP templates must stay active' })
 
   const { data: current, error: readError } = await supabase.from('sms_templates').select('body').eq('template_key', key).maybeSingle()
   if (readError) return response.status(500).json({ error: readError.message })

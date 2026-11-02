@@ -1,5 +1,6 @@
-import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { ArrowRight, Check, ImagePlus, Plus, Truck, UserRound, X } from 'lucide-react'
+import { useState, type FormEvent, type ReactNode } from 'react'
+import { ArrowRight, Check, ImagePlus, Plus, Truck, UserRound } from 'lucide-react'
+import { Modal } from '../components/Modal'
 import { demoDataEnabled } from '../constants/demo'
 import { workspaceContent as w } from '../content/workspace'
 
@@ -32,31 +33,4 @@ export function ServiceRequestPanel() {
   const [submitted, setSubmitted] = useState(false)
   function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setModalOpen(false); setSubmitted(true) }
   return <section className="workspace-view-panel"><div className="view-panel-heading"><div><p className="eyebrow">{w.serviceRequest.eyebrow}</p><h2>{w.serviceRequest.title}</h2></div><button className="button button-primary" onClick={() => setModalOpen(true)}><Plus size={15} /> {w.serviceRequest.newRequest}</button></div><div className="support-request-list"><article><span className="resource-icon"><Check size={18} /></span><div><b>{w.serviceRequest.demoTitle}</b><p>{w.serviceRequest.demoDetail}</p></div><span className="resource-status is-active">{w.serviceRequest.resolved}</span></article><article><span className="resource-icon"><ArrowRight size={18} /></span><div><b>{w.serviceRequest.needHelpTitle}</b><p>{w.serviceRequest.needHelpDetail}</p></div><button className="text-button" onClick={() => setModalOpen(true)}>{w.serviceRequest.start} <ArrowRight size={14} /></button></article></div>{submitted && <p className="workspace-notice-global" role="status">{w.serviceRequest.submitted}</p>}{modalOpen && <Modal title={w.serviceRequest.modalTitle} onClose={() => setModalOpen(false)}><form className="modal-form" onSubmit={submit}><Field label={w.serviceRequest.subject}><input name="subject" required placeholder={w.serviceRequest.subjectPlaceholder} autoFocus /></Field><div className="modal-form-row"><Field label={w.serviceRequest.bookingReference}><input name="booking" placeholder={w.serviceRequest.bookingPlaceholder} /></Field><Field label={w.serviceRequest.priority}><select name="priority" defaultValue="normal">{w.serviceRequest.priorityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></Field></div><Field label={w.serviceRequest.message}><textarea name="message" rows={4} required placeholder={w.serviceRequest.messagePlaceholder} /></Field><button className="button button-primary button-large" type="submit">{w.serviceRequest.submit} <ArrowRight size={15} /></button></form></Modal>}</section>
-}
-
-export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
-  const dialogRef = useRef<HTMLElement>(null)
-  const titleId = useId()
-  const onCloseRef = useRef(onClose)
-  useEffect(() => {
-    onCloseRef.current = onClose
-  }, [onClose])
-  useEffect(() => {
-    const previousFocus = document.activeElement as HTMLElement | null
-    const firstFocusable = dialogRef.current?.querySelector<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])')
-    ;(firstFocusable ?? dialogRef.current)?.focus()
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') { event.preventDefault(); onCloseRef.current(); return }
-      if (event.key !== 'Tab' || !dialogRef.current) return
-      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'))
-      if (!focusable.length) return
-      const first = focusable[0]
-      const last = focusable[focusable.length - 1]
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => { document.removeEventListener('keydown', handleKeyDown); previousFocus?.focus() }
-  }, [])
-  return <div className="modal-backdrop-new" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section ref={dialogRef} className="modal-new" role="dialog" tabIndex={-1} aria-modal="true" aria-labelledby={titleId}><button className="modal-close-new" type="button" onClick={onClose} aria-label={w.common.closeDialog}><X size={17} aria-hidden="true" /></button><p className="eyebrow">{w.modal.eyebrow}</p><h2 id={titleId}>{title}</h2>{children}</section></div>
 }

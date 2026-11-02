@@ -53,7 +53,8 @@ The current topology is split: the frontend is served by Hostinger from `public_
 - Secrets are entered in the Render dashboard (`sync: false` in `render.yaml`), never committed. Set `FRONTEND_ORIGIN` to the HTTPS Hostinger origin, and `CORS_ORIGINS` for any extra origin such as the `www` host.
 - The server refuses to start in production when `FRONTEND_ORIGIN` is not HTTPS, when `USE_DEFAULT_VERIFICATION_CODE` is `true`, or when `SUPABASE_DB_URL` is set without `DB_SSL_CA`. Get the CA certificate from the Supabase dashboard and paste it into `DB_SSL_CA` with `\n` for line breaks.
 - The refresh cookie is `SameSite=None; Secure` in production so it works across the Hostinger and Render origins. Browsers that block third-party cookies can still drop it. A same-site API subdomain (for example `api.<your-domain>` pointed at Render) removes that risk and is the recommended next step.
-- Run one API instance. Socket.io uses the in-memory adapter, so realtime events do not cross instances. Background sweeps are guarded by a database advisory lock, but the realtime layer needs a Redis adapter before you scale out.
+- Scale out only when load needs it. Each API instance must set the same `REDIS_URL`, which shares Socket.io rooms and rate limits across instances. Without it the API runs as one instance, and the server logs a `scaling.single_instance` warning in production. Background sweeps are guarded by a database advisory lock, so they run on one instance per cycle.
+- Socket.io clients fall back to HTTP long-polling, and polling needs sticky sessions at the load balancer. Either enable sticky sessions, or set the client to WebSocket-only transport before running more than one instance.
 - Node 22 is pinned in `.nvmrc`, `engines`, and `render.yaml`.
 - CI (`.github/workflows/ci.yml`) runs lint, tests, both builds, and a high-severity production audit for both packages.
 

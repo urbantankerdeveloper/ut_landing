@@ -5,7 +5,7 @@ import { customerDemoDataEnabled } from '../constants/demo'
 import { REPEAT_BOOKING_KEY } from '../constants/bookingDraft'
 import { useCustomerBookings } from '../hooks/useCustomerData'
 import type { CustomerBooking } from '../api/customer'
-import { Modal } from './WorkspaceInteractive'
+import { Modal } from '../components/Modal'
 import { customerContent as c } from '../content/customer'
 
 type Props = { onNavigate: (screen: 'booking' | 'bookings' | 'offers' | 'home') => void }

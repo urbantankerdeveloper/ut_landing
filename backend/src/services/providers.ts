@@ -1,21 +1,29 @@
-import nodemailer from 'nodemailer'
+import nodemailer, { type Transporter } from 'nodemailer'
 import { config } from '../config.js'
+import { escapeHtml } from '../lib/html.js'
 
 export function isEmailConfigured() {
   return Boolean(config.SMTP_USER && config.SMTP_PASSWORD && config.MAIL_FROM)
+}
+
+let smtpTransporter: Transporter | null = null
+function emailTransporter() {
+  smtpTransporter ??= nodemailer.createTransport({
+    host: config.SMTP_HOST,
+    port: config.SMTP_PORT,
+    secure: config.SMTP_SECURE,
+    auth: { user: config.SMTP_USER, pass: config.SMTP_PASSWORD },
+    connectionTimeout: 8_000,
+    socketTimeout: 8_000,
+  })
+  return smtpTransporter
 }
 
 export async function sendEmail(to: string, subject: string, html: string) {
   if (!isEmailConfigured()) {
     return { queued: false, reason: 'SMTP_USER, SMTP_PASSWORD, and MAIL_FROM are not configured' }
   }
-  const transporter = nodemailer.createTransport({
-    host: config.SMTP_HOST,
-    port: config.SMTP_PORT,
-    secure: config.SMTP_SECURE,
-    auth: { user: config.SMTP_USER, pass: config.SMTP_PASSWORD },
-  })
-  await transporter.sendMail({ from: config.MAIL_FROM, to, subject, html })
+  await emailTransporter().sendMail({ from: config.MAIL_FROM, to, subject, html })
   return { queued: true }
 }
 
@@ -29,6 +37,7 @@ export async function sendSms(to: string, body: string) {
     method: 'POST',
     headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
     body: encoded,
+    signal: AbortSignal.timeout(8_000),
   })
   if (!response.ok) throw new Error(`SMS provider failed: ${response.status}`)
   return { queued: true }
@@ -40,7 +49,7 @@ export async function sendWhatsApp(to: string, body: string) {
 
 export async function notifyUser(to: { email?: string; phone?: string; whatsapp?: string }, subject: string, message: string) {
   return Promise.all([
-    to.email ? sendEmail(to.email, subject, `<p>${message}</p>`) : Promise.resolve({ queued: false, reason: 'No email' }),
+    to.email ? sendEmail(to.email, subject, `<p>${escapeHtml(message)}</p>`) : Promise.resolve({ queued: false, reason: 'No email' }),
     to.phone ? sendSms(to.phone, message) : Promise.resolve({ queued: false, reason: 'No phone' }),
     to.whatsapp ? sendWhatsApp(to.whatsapp, message) : Promise.resolve({ queued: false, reason: 'No WhatsApp' }),
   ])

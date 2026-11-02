@@ -34,20 +34,16 @@ async function refreshSession() {
     refreshInFlight = (async () => {
       const timed = createTimedSignal()
       try {
-        const refreshToken = useAuthStore.getState().refreshToken
         const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
           method: 'POST',
           credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(refreshToken ? { refreshToken } : {}),
           signal: timed.signal,
         })
         if (!response.ok) return null
-        const body = await response.json() as { accessToken?: string; token?: string; refreshToken?: string }
+        const body = await response.json() as { accessToken?: string; token?: string }
         const token = body.accessToken ?? body.token
         if (!token) return null
         useAuthStore.getState().setAccessToken(token)
-        if (body.refreshToken) useAuthStore.getState().setRefreshToken(body.refreshToken)
         return token
       } finally {
         timed.dispose()
@@ -65,7 +61,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}, retry = 
     const authorization = authHeaders().Authorization
     if (authorization && !headers.has('Authorization')) headers.set('Authorization', authorization)
     const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers, credentials: 'include', signal: timed.signal })
-    if (response.status === 401 && retry && path !== '/auth/refresh') {
+    if (response.status === 401 && retry && !path.startsWith('/auth/')) {
       try {
         if (await refreshSession()) return await apiFetch<T>(path, init, false)
       } catch (error) {

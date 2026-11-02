@@ -1,14 +1,20 @@
 import { z } from 'zod'
 import { supabase } from '../supabase.js'
 
+const maxPropertyKeyLength = 64
+const maxPropertyValueLength = 200
+const maxProperties = 20
+
 export const analyticsEventSchema = z.object({
   eventName: z.string().regex(/^[a-z0-9._-]{2,80}$/),
   sessionId: z.string().regex(/^[a-zA-Z0-9._:-]{8,120}$/),
-  properties: z.record(z.string(), z.union([z.string().max(200), z.number().finite(), z.boolean()])).default({}),
-}).superRefine((event, context) => {
-  if (Object.keys(event.properties).length > 20) {
-    context.addIssue({ code: 'custom', path: ['properties'], message: 'At most 20 properties are allowed' })
-  }
+  // Public input is bounded rather than rejected: keys over 64 characters are dropped, string values are cut to 200 characters, and only the first 20 properties are kept.
+  properties: z.record(z.string(), z.union([z.string(), z.number().finite(), z.boolean()])).default({}).transform((properties) => Object.fromEntries(
+    Object.entries(properties)
+      .filter(([key]) => key.length <= maxPropertyKeyLength)
+      .slice(0, maxProperties)
+      .map(([key, value]) => [key, typeof value === 'string' ? value.slice(0, maxPropertyValueLength) : value]),
+  )),
 })
 
 export type AnalyticsEvent = z.infer<typeof analyticsEventSchema>

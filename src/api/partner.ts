@@ -15,8 +15,10 @@ export type PartnerApplicationInput = {
   experience?: number
   availability: string
   notes?: string
-  documentNames: string[]
+  documents?: PartnerDocument[]
 }
+
+export type PartnerDocument = { path: string; type: string }
 
 export type PartnerApplicationResponse = { ok: true; reference: string; status: string; message: string }
 

@@ -76,10 +76,5 @@
       { "id": "UT-2411", "service": "Sewage tanker - 9 KL", "location": "Guindy, Chennai", "status": "In progress", "amountInr": 2900 },
       { "id": "UT-2409", "service": "Tank cleaning", "location": "Adyar, Chennai", "status": "Delivered", "amountInr": 2100 }
     ]
-  },
-  "demoAccounts": [
-    { "role": "customer", "username": "customer", "password": "customer123" },
-    { "role": "vendor", "username": "vendor", "password": "vendor123" },
-    { "role": "admin", "username": "admin", "password": "Maneesh@123" }
-  ]
+  }
 }

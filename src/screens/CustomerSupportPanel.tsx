@@ -1,7 +1,7 @@
 import type { FormEvent } from 'react'
 import { useState } from 'react'
 import { ArrowRight, Check, Plus } from 'lucide-react'
-import { Modal } from './WorkspaceInteractive'
+import { Modal } from '../components/Modal'
 import { customerDemoDataEnabled } from '../constants/demo'
 import { useCreateSupportRequest, useCustomerSupportRequests } from '../hooks/useCustomerData'
 import { customerContent as c } from '../content/customer'

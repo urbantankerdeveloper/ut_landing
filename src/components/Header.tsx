@@ -7,7 +7,10 @@ import { chromeContent as c } from '../content/chrome'
 const navScreens: Record<(typeof c.header.navItems)[number]['id'], ScreenId> = { subscription: 'subscriptions', track: 'tracking', about: 'about' }
 
 export function Header() {
-	const { activeScreen, mobileMenuOpen, navigate, setMobileMenuOpen } = useNavigationStore()
+	const activeScreen = useNavigationStore((state) => state.activeScreen)
+	const mobileMenuOpen = useNavigationStore((state) => state.mobileMenuOpen)
+	const navigate = useNavigationStore((state) => state.navigate)
+	const setMobileMenuOpen = useNavigationStore((state) => state.setMobileMenuOpen)
 	const user = useAuthStore((state) => state.user)
 	const openWorkspace = useNavigationStore((state) => state.openWorkspace)
 	const [servicesOpen, setServicesOpen] = useState(false)

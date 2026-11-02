@@ -4,7 +4,7 @@ import { demoDataEnabled } from '../constants/demo'
 import { useRealtimeInvalidation } from './useRealtimeInvalidation'
 
 export const adminQueryKeys = { orders: ['admin', 'orders'], vendors: ['admin', 'vendors'], customers: ['admin', 'customers'], vehicles: ['admin', 'vehicles'], drivers: ['admin', 'drivers'], services: ['admin', 'services'], payments: ['admin', 'payments'], payouts: ['admin', 'payouts'], complaints: ['admin', 'complaints'], alerts: ['admin', 'alerts'], notifications: ['admin', 'notifications'], coupons: ['admin', 'coupons'], auditLogs: ['admin', 'audit-logs'], flags: ['admin', 'feature-flags'], smsTemplates: ['admin', 'sms-templates'] } as const
-const liveOptions = { enabled: !demoDataEnabled, staleTime: 30_000, retry: 2 }
+const liveOptions = { enabled: !demoDataEnabled, staleTime: 30_000 }
 export function useAdminOrders() { const query = useQuery({ queryKey: adminQueryKeys.orders, queryFn: adminApi.orders, ...liveOptions }); useRealtimeInvalidation(adminQueryKeys.orders); return query }
 export const useAdminBookings = useAdminOrders
 export function useAdminVendors() { return useQuery({ queryKey: adminQueryKeys.vendors, queryFn: adminApi.vendors, ...liveOptions }) }

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Camera } from 'lucide-react'
 import { adminApi } from '../api/admin'
-import { Modal } from './WorkspaceInteractive'
+import { Modal } from '../components/Modal'
 import { adminEntitiesContent as c } from '../content/admin-entities'
 
 const copy = c.customerSelfie

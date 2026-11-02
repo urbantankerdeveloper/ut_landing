@@ -24,6 +24,21 @@ export const smsTemplateVariables: Record<SmsTemplateKey, readonly string[]> = {
   delivery_otp: ['reference', 'otp'],
 }
 
+// Placeholders an edited body must keep. An OTP message without {{otp}} cannot do its job.
+export const smsTemplateRequiredVariables: Record<SmsTemplateKey, readonly string[]> = {
+  user_registration_otp: ['otp'],
+  booking_verification_otp: ['otp'],
+  guest_booking_confirmation: ['reference'],
+  vendor_acceptance: ['reference'],
+  delivery_confirmation: ['reference'],
+  delivery_otp: ['otp'],
+}
+
+// OTP templates cannot be deactivated, because the code paths that send them would then fail.
+export function isOtpTemplateKey(key: string) {
+  return key.endsWith('_otp')
+}
+
 const templateCacheTtlMs = 5 * 60 * 1000
 const templateCache = new Map<string, { body: string; msg91TemplateId: string | null; expiresAt: number }>()
 
@@ -95,6 +110,7 @@ async function sendMsg91Flow(templateId: string, phoneE164: string, vars: Record
     method: 'POST',
     headers: { authkey: config.MSG91_AUTH_KEY, 'Content-Type': 'application/json' },
     body: JSON.stringify(buildMsg91FlowPayload(templateId, phoneE164, vars)),
+    signal: AbortSignal.timeout(8_000),
   })
   const result = (await response.json().catch(() => ({}))) as { type?: string; message?: string }
   if (!response.ok || result.type !== 'success') {

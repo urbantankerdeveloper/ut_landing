@@ -1,10 +1,28 @@
 import { supabase } from '../supabase.js'
+import { config } from '../config.js'
 import { databasePool } from '../database.js'
 import { runAnalyticsRetentionSweep } from '../routes/analytics.js'
 export async function runReminderSweep() { const cutoff = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); const { data, error } = await supabase.from('bookings').select('id,customer_id,scheduled_for').eq('status', 'accepted').lte('scheduled_for', cutoff); if (error) throw new Error(`Reminder sweep failed: ${error.message}`); return data?.length ?? 0 }
 export async function runDocumentExpirySweep() { const cutoff = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10); const { data, error } = await supabase.from('documents').select('id,owner_id,expires_on').lte('expires_on', cutoff); if (error) throw new Error(`Document expiry sweep failed: ${error.message}`); return data?.length ?? 0 }
-export async function runStorageCleanupSweep() { const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(); const { data } = await supabase.from('documents').select('id,object_key,created_at').eq('verification', 'rejected').lt('created_at', cutoff).limit(100); let removed = 0; let failed = 0; const failures: string[] = []; for (const document of data ?? []) { const { error } = await supabase.storage.from('urban-tanker-documents').remove([document.object_key]); if (!error) { await supabase.from('documents').delete().eq('id', document.id); removed += 1 } else { failed += 1; failures.push(document.id) } } return { scanned: data?.length ?? 0, removed, failed, failures } }
+export async function runStorageCleanupSweep() { const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(); const { data, error: scanError } = await supabase.from('documents').select('id,object_key,created_at').eq('verification', 'rejected').lt('created_at', cutoff).limit(100); if (scanError) throw new Error(`Storage cleanup sweep failed: ${scanError.message}`); let removed = 0; let failed = 0; const failures: string[] = []; for (const document of data ?? []) { const { error } = await supabase.storage.from('urban-tanker-documents').remove([document.object_key]); if (!error) { await supabase.from('documents').delete().eq('id', document.id); removed += 1 } else { failed += 1; failures.push(document.id) } } return { scanned: data?.length ?? 0, removed, failed, failures } }
 const JOBS_LOCK_KEY = 728341
 // Several API instances can share one database; the advisory lock makes sure only one of them runs the sweeps per cycle.
-async function withJobsLock(task: () => Promise<unknown>) { if (!databasePool) return task(); const client = await databasePool.connect(); try { const { rows } = await client.query<{ locked: boolean }>('select pg_try_advisory_lock($1) as locked', [JOBS_LOCK_KEY]); if (!rows[0]?.locked) return; try { await task() } finally { await client.query('select pg_advisory_unlock($1)', [JOBS_LOCK_KEY]) } } finally { client.release() } }
-export function startBackgroundJobs() { const run = async () => { try { await withJobsLock(() => Promise.all([runReminderSweep(), runDocumentExpirySweep(), runStorageCleanupSweep(), runAnalyticsRetentionSweep()])) } catch (error) { console.error(JSON.stringify({ event: 'background_jobs.failed', error: error instanceof Error ? error.message : String(error) })) } }; const timer = setInterval(() => { void run() }, 15 * 60 * 1000); timer.unref(); return () => clearInterval(timer) }
+// In production the sweeps do not run without the lock, so two instances can never both run them.
+async function withJobsLock(task: () => Promise<unknown>) { if (!databasePool) { if (config.NODE_ENV === 'production') throw new Error('Background jobs need SUPABASE_DB_URL for the advisory lock in production'); return task() } const client = await databasePool.connect(); try { const { rows } = await client.query<{ locked: boolean }>('select pg_try_advisory_lock($1) as locked', [JOBS_LOCK_KEY]); if (!rows[0]?.locked) return; try { await task() } finally { await client.query('select pg_advisory_unlock($1)', [JOBS_LOCK_KEY]) } } finally { client.release() } }
+const sweeps = { reminders: runReminderSweep, documentExpiry: runDocumentExpirySweep, storageCleanup: runStorageCleanupSweep, analyticsRetention: runAnalyticsRetentionSweep }
+export function startBackgroundJobs() {
+  const run = async () => {
+    try {
+      await withJobsLock(async () => {
+        const names = Object.keys(sweeps) as Array<keyof typeof sweeps>
+        const results = await Promise.allSettled(names.map((name) => sweeps[name]()))
+        results.forEach((result, index) => {
+          if (result.status === 'rejected') console.error(JSON.stringify({ event: 'background_jobs.job_failed', job: names[index], error: result.reason instanceof Error ? result.reason.message : String(result.reason) }))
+        })
+      })
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'background_jobs.failed', error: error instanceof Error ? error.message : String(error) }))
+    }
+  }
+  const timer = setInterval(() => { void run() }, 15 * 60 * 1000); timer.unref(); return () => clearInterval(timer)
+}

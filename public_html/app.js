@@ -14,14 +14,8 @@ function setProfile(profile){Store.update(function(d){var existing=d.customers.f
     var passwordInput = byId('login-password');
     var errorBox = byId('login-error');
     var submit = byId('unified-login-submit');
-    // Explicit demo accounts only. Production must verify credentials and roles on the server.
-    var demoAccounts = [
-      { role: 'customer', usernames: ['customer', 'customer@urbantanker.com'], passwords: ['customer123'], profile: { name: 'Demo Customer', email: 'customer@urbantanker.com', phone: '', provider: 'Demo password' } },
-      { role: 'vendor', usernames: ['vendor', 'vendor@bluedrop.demo', '9876543210'], passwords: ['vendor123'], vendorId: 'v1' },
-      { role: 'vendor', usernames: ['ops@clearspring.demo', '9820012345'], passwords: ['vendor123'], vendorId: 'v2' },
-      { role: 'vendor', usernames: ['help@ecodrain.demo', '9867412345'], passwords: ['vendor123'], vendorId: 'v3' },
-      { role: 'admin', usernames: ['admin', 'admin@urbantanker.com'], passwords: ['Maneesh@123', 'Urban@2026'] }
-    ];
+    // No local accounts: this static page fails closed until it is wired to the API login.
+    var demoAccounts = [];
     function showError(message) {
       errorBox.textContent = message;
       errorBox.hidden = false;
@@ -35,7 +29,7 @@ function setProfile(profile){Store.update(function(d){var existing=d.customers.f
       this.setAttribute('aria-pressed', String(visible));
     });
     byId('login-google').addEventListener('click', function () {
-      showError('Google sign-in is not connected yet. Use a demo username and password below.');
+      showError('Google sign-in is not connected yet. Use your username and password below.');
     });
     form.addEventListener('submit', function (event) {
       event.preventDefault();
@@ -49,7 +43,7 @@ function setProfile(profile){Store.update(function(d){var existing=d.customers.f
       var account = demoAccounts.find(function (item) {
         return item.usernames.indexOf(username) !== -1 && item.passwords.indexOf(password) !== -1;
       });
-      if (!account) { showError('Username or password not recognised. Check your details or try a demo account.'); return; }
+      if (!account) { showError('Username or password not recognised. Check your details and try again.'); return; }
       try {
         // A new login replaces the previous role, including stale staff sessions.
         [CUSTOMER_SESSION_KEY, VENDOR_SESSION_KEY, ADMIN_SESSION_KEY, 'urban-tanker-vendor-id', 'urban-tanker-driver-id'].forEach(function (key) { window.sessionStorage.removeItem(key); });

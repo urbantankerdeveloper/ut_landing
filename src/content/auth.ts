@@ -58,12 +58,7 @@ export const authContent = {
       options: {
         customer: 'Customer',
         vendor: 'Vendor partner',
-        admin: 'Administrator',
       },
-    },
-    adminKey: {
-      label: 'Admin registration key',
-      placeholder: 'Enter administrator key',
     },
     email: {
       label: 'Email',
@@ -145,9 +140,5 @@ export const authContent = {
     invalidCredentials: 'Username or password not recognised.',
     invalidResetLink: 'This password reset link is invalid or expired. Request a new one.',
     genericFailure: 'Unable to complete the request. Please try again.',
-  },
-  demo: {
-    vendorName: 'Demo Vendor',
-    adminName: 'Demo Admin',
   },
 } as const

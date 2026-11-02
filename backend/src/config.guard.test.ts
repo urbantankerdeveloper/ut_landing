@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 
-const base = { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k' }
+const base = { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k', SUPABASE_DB_URL: '', OTP_HMAC_SECRET: 'x'.repeat(32) }
 
 describe('production configuration guards', () => {
   const original = { ...process.env }
@@ -45,5 +45,20 @@ describe('production configuration guards', () => {
   it('explains how to fix a missing required variable', async () => {
     process.env = { ...original, SUPABASE_URL: '', SUPABASE_SERVICE_ROLE_KEY: 'k' }
     await expect(import('./config.js')).rejects.toThrow('Copy backend/.env.example to backend/.env')
+  })
+
+  it('requires NODE_ENV to be set explicitly', async () => {
+    process.env = { ...original, ...base, NODE_ENV: '' }
+    await expect(import('./config.js')).rejects.toThrow('NODE_ENV must be set to development, test, or production')
+  })
+
+  it('requires a TLS Redis URL in production', async () => {
+    process.env = { ...original, ...base, NODE_ENV: 'production', FRONTEND_ORIGIN: 'https://app.example.com', REDIS_URL: 'redis://cache.example.com:6379' }
+    await expect(import('./config.js')).rejects.toThrow('rediss://')
+  })
+
+  it('requires https CORS origins in production', async () => {
+    process.env = { ...original, ...base, NODE_ENV: 'production', FRONTEND_ORIGIN: 'https://app.example.com', CORS_ORIGINS: 'http://urbantanker.com' }
+    await expect(import('./config.js')).rejects.toThrow('CORS_ORIGINS entries must be https origins')
   })
 })

@@ -50,7 +50,9 @@ alter table public.saved_addresses enable row level security;
 alter table public.invoices enable row level security;
 
 create policy "profiles self read" on public.profiles for select using (auth.uid() = id);
-create policy "customer own bookings" on public.bookings for select using (auth.uid() = customer_id);
+-- H-01: no customer policy on bookings. The select policy exposed delivery_otp_hash and
+-- tracking_token_hash, and insert/update let customers write any status. Customers reach
+-- bookings only through the backend (service_role). See the revokes near line 430.
 create policy "customer own addresses" on public.saved_addresses for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "customer own invoices" on public.invoices for select using (auth.uid() = customer_id);
 
@@ -95,7 +97,7 @@ create policy "authenticated users upload documents" on storage.objects for inse
 drop policy if exists "authenticated users read their documents" on storage.objects;
 create policy "authenticated users read their documents" on storage.objects for select to authenticated using (bucket_id = 'urban-tanker-documents' and owner_id = auth.uid()::text);
 
-create or replace function public.audit_booking_status() returns trigger language plpgsql security definer as $$ begin if old.status is distinct from new.status then insert into public.audit_logs(actor_id, action, entity_type, entity_id, metadata) values (auth.uid(), 'booking.status_changed', 'booking', new.id, jsonb_build_object('from', old.status, 'to', new.status)); end if; return new; end $$;
+create or replace function public.audit_booking_status() returns trigger language plpgsql security definer set search_path = public as $$ begin if old.status is distinct from new.status then insert into public.audit_logs(actor_id, action, entity_type, entity_id, metadata) values (auth.uid(), 'booking.status_changed', 'booking', new.id, jsonb_build_object('from', old.status, 'to', new.status)); end if; return new; end $$;
 drop trigger if exists bookings_audit_status on public.bookings;
 create trigger bookings_audit_status after update of status on public.bookings for each row execute function public.audit_booking_status();
 
@@ -222,6 +224,7 @@ begin
 end;
 $$;
 
+revoke all on function public.transition_booking(uuid, uuid, public.booking_status, uuid, uuid, uuid, text) from public, anon, authenticated;
 grant execute on function public.transition_booking(uuid, uuid, public.booking_status, uuid, uuid, uuid, text) to service_role;
 
 
@@ -371,7 +374,8 @@ with account_profiles as (
     ) as full_name,
     nullif(btrim(raw_user_meta_data->>'phone'), '') as phone_e164,
     nullif(btrim(raw_user_meta_data->>'username'), '') as username,
-    raw_user_meta_data->>'role' as account_role
+    -- Roles come only from app_metadata (service-side only). user_metadata is client-writable and must never grant a role.
+    raw_app_meta_data->>'role' as account_role
   from auth.users
 ), unique_accounts as (
   select
@@ -384,7 +388,7 @@ insert into public.profiles (id, full_name, phone_e164, role, username)
 select
   id,
   full_name,
-  case when phone_count = 1 then phone_e164 end,
+  null::text, -- unverified phones are not carried over; users verify again
   case
     when account_role in ('customer', 'vendor', 'dispatcher', 'admin')
       then account_role::public.user_role
@@ -427,27 +431,13 @@ for select
 to anon, authenticated
 using (is_active = true);
 
-drop policy if exists "customers can create own bookings" on public.bookings;
-create policy "customers can create own bookings"
-on public.bookings
-for insert
-to authenticated
-with check (auth.uid() = customer_id);
+-- H-01: customers cannot read, insert or update bookings directly. create_customer_booking and
+-- transition_booking (service_role only) are the write paths. Hash columns never reach clients.
+revoke insert, update, delete, select on public.bookings from anon, authenticated;
 
-drop policy if exists "customers can read own bookings" on public.bookings;
-create policy "customers can read own bookings"
-on public.bookings
-for select
-to authenticated
-using (auth.uid() = customer_id);
-
-drop policy if exists "customers can update own bookings" on public.bookings;
-create policy "customers can update own bookings"
-on public.bookings
-for update
-to authenticated
-using (auth.uid() = customer_id)
-with check (auth.uid() = customer_id);
+drop policy if exists "users can mark own notifications read" on public.notifications;
+-- M-26: clients must not update notifications. Mark-as-read goes through the backend.
+revoke update on public.notifications from authenticated, anon;
 
 drop policy if exists "users can read own notifications" on public.notifications;
 create policy "users can read own notifications"
@@ -455,14 +445,6 @@ on public.notifications
 for select
 to authenticated
 using (auth.uid() = recipient_id);
-
-drop policy if exists "users can mark own notifications read" on public.notifications;
-create policy "users can mark own notifications read"
-on public.notifications
-for update
-to authenticated
-using (auth.uid() = recipient_id)
-with check (auth.uid() = recipient_id);
 
 drop policy if exists "vendors can read own vendor profile" on public.vendors;
 create policy "vendors can read own vendor profile"
@@ -852,6 +834,23 @@ begin
     select tablename from pg_tables where schemaname = 'public'
   loop
     execute format('alter table public.%I enable row level security', table_name);
+  end loop;
+end $$;
+
+-- C-03: only service_role may execute functions in public. Covers every function in this
+-- script, including trigger functions, so no function is reachable through PostgREST /rpc by anon or authenticated.
+do $$
+declare
+  fn record;
+begin
+  for fn in
+    select p.oid::regprocedure as signature
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+  loop
+    execute format('revoke all on routine %s from public, anon, authenticated', fn.signature);
+    execute format('grant execute on routine %s to service_role', fn.signature);
   end loop;
 end $$;
 

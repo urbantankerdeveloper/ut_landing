@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -36,11 +39,24 @@ jobs:
       - name: Backend tests
         run: npm test --prefix backend
 
-      - name: Build frontend (Hostinger) and backend (Render)
-        run: npm run build:all
-
       - name: Production dependency audit (frontend)
         run: npm audit --omit=dev --audit-level=high
 
       - name: Production dependency audit (backend)
         run: npm audit --omit=dev --audit-level=high --prefix backend
+
+      - name: Build frontend (Hostinger) and backend (Render)
+        run: npm run build:all
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Pinned to a major version tag; SHA pinning was not applied because the pin could not be verified offline.
+      - name: Scan for committed secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

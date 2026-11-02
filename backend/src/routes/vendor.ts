@@ -1,3 +1,4 @@
+import { databaseFailure } from '../lib/httpErrors.js'
 import { Router } from 'express'
 import { requireAuth, requireRole } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
@@ -8,7 +9,13 @@ type RelatedRecord = { id: string; name?: string; registration_number?: string }
 type OrderOffer = { event_type: string; distanceKm?: number }
 const statusMap: Record<string, 'Available' | 'Assigned' | 'Accepted' | 'En route' | 'Arrived' | 'Delivered' | 'Rejected' | 'Unavailable'> = { pending_vendor: 'Available', vendor_assigned: 'Assigned', accepted: 'Accepted', en_route: 'En route', arrived: 'Arrived', delivered: 'Delivered', cancelled: 'Rejected' }
 function formatAmount(amountPaise?: number | null) { return `₹${(Number(amountPaise ?? 0) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}` }
+function areaOf(address: string) {
+  const parts = address.split(',').map((part) => part.trim()).filter(Boolean)
+  if (parts.length < 2) return undefined
+  return parts.length >= 3 ? parts[parts.length - 2] : parts[parts.length - 1]
+}
 function normalizeOrder(order: BookingRecord, vendorId: string, offer: OrderOffer | undefined, services: Map<string, string>, vehicles: Map<string, string>, drivers: Map<string, string>) {
+  const detailsVisible = order.vendor_id === vendorId
   const serviceDetails = order.service_details?.map((item) => ({
     service: services.get(item.serviceId) ?? item.serviceId,
     capacity: item.capacity,
@@ -19,21 +26,21 @@ function normalizeOrder(order: BookingRecord, vendorId: string, offer: OrderOffe
     depth: item.depth,
     grade: item.grade,
     pump: item.pump,
-    pickupLocation: item.pickupLocation,
+    pickupLocation: detailsVisible ? item.pickupLocation : undefined,
     materialType: item.materialType,
-    details: item.details,
+    details: detailsVisible ? item.details : undefined,
     deliveryDate: item.deliveryDate,
     preferredTime: item.preferredTime,
-    location: item.location,
+    location: detailsVisible ? item.location : undefined,
   })) ?? []
   return {
     id: order.id,
     reference: order.reference,
     service: serviceDetails.map((item) => item.service).join(', ') || services.get(order.service_code) || order.service_code,
     serviceDetails,
-    location: order.address_text,
-    latitude: order.latitude,
-    longitude: order.longitude,
+    location: detailsVisible ? order.address_text : areaOf(order.address_text),
+    latitude: detailsVisible ? order.latitude : undefined,
+    longitude: detailsVisible ? order.longitude : undefined,
     distance: offer?.distanceKm,
     amount: formatAmount(order.quoted_amount_paise),
     status: offer?.event_type === 'vendor_order_taken' || Boolean(order.vendor_id && order.vendor_id !== vendorId) ? 'Unavailable' : statusMap[order.status] ?? 'Available',
@@ -84,7 +91,7 @@ async function loadVendorOrders(vendorId: string, offset = 0, pageSize?: number)
   const drivers = new Map((driversResult.data as RelatedRecord[] ?? []).map((driver) => [driver.id, driver.name ?? driver.id]))
   return { data: orders.map((order) => normalizeOrder(order, vendorId, offerByBooking.get(order.id), services, vehicles, drivers)), error: null, hasMore }
 }
-router.get('/dashboard', async (request, response) => { const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', request.authUser!.id).single(); if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' }); const [ordersResult, vehiclesResult, driversResult] = await Promise.all([loadVendorOrders(vendor.id, 0, 100), supabase.from('vehicles').select('id,registration_number,capacity_litres,is_active,verification').eq('vendor_id', vendor.id).order('registration_number'), supabase.from('drivers').select('id,name,mobile_e164,is_active,verification').eq('vendor_id', vendor.id).order('name')]); const queryError = ordersResult.error ?? vehiclesResult.error ?? driversResult.error; if (queryError) return response.status(500).json({ error: queryError.message }); response.json({ orders: ordersResult.data ?? [], vehicles: vehiclesResult.data ?? [], drivers: driversResult.data ?? [] }) })
+router.get('/dashboard', async (request, response) => { const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', request.authUser!.id).single(); if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' }); const [ordersResult, vehiclesResult, driversResult] = await Promise.all([loadVendorOrders(vendor.id, 0, 100), supabase.from('vehicles').select('id,registration_number,capacity_litres,is_active,verification').eq('vendor_id', vendor.id).order('registration_number'), supabase.from('drivers').select('id,name,mobile_e164,is_active,verification').eq('vendor_id', vendor.id).order('name')]); const queryError = ordersResult.error ?? vehiclesResult.error ?? driversResult.error; if (queryError) return databaseFailure(response, 'vendor.database_error', queryError, 500); response.json({ orders: ordersResult.data ?? [], vehicles: vehiclesResult.data ?? [], drivers: driversResult.data ?? [] }) })
 router.get('/orders', async (request, response) => {
   const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', request.authUser!.id).single()
   if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' })
@@ -92,11 +99,11 @@ router.get('/orders', async (request, response) => {
   const pageSize = Number(request.query.pageSize ?? 100)
   if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) return response.status(400).json({ error: 'Invalid order page' })
   const { data, error, hasMore } = await loadVendorOrders(vendor.id, offset, pageSize)
-  if (error) return response.status(500).json({ error: error.message })
+  if (error) return databaseFailure(response, 'vendor.database_error', error, 500)
   response.json({ rows: data ?? [], nextOffset: hasMore ? offset + pageSize : null })
 })
-router.get('/vehicles', async (request, response) => { const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', request.authUser!.id).single(); if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' }); const { data, error } = await supabase.from('vehicles').select('id,registration_number,capacity_litres,is_active,verification').eq('vendor_id', vendor.id).order('registration_number'); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
-router.get('/drivers', async (request, response) => { const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', request.authUser!.id).single(); if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' }); const { data, error } = await supabase.from('drivers').select('id,name,mobile_e164,is_active,verification').eq('vendor_id', vendor.id).order('name'); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
-router.get('/services', async (request, response) => { const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', request.authUser!.id).single(); if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' }); const { data, error } = await supabase.from('service_catalog').select('*').eq('is_active', true).order('name'); if (error) return response.status(500).json({ error: error.message }); const { data: availability, error: availabilityError } = await supabase.from('vendor_service_availability').select('service_code,is_enabled').eq('vendor_id', vendor.id); if (availabilityError) return response.status(500).json({ error: availabilityError.message }); const enabled = new Map((availability ?? []).map((item) => [item.service_code, item.is_enabled])); response.json((data ?? []).map((service) => ({ ...service, vendor_enabled: enabled.has(service.code) ? enabled.get(service.code) : true }))) })
-router.get('/payouts', async (request, response) => { const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', request.authUser!.id).single(); if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' }); const { data, error } = await supabase.from('vendor_payouts').select('*').eq('vendor_id', vendor.id).order('created_at', { ascending: false }); if (error) return response.status(500).json({ error: error.message }); response.json(data ?? []) })
+router.get('/vehicles', async (request, response) => { const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', request.authUser!.id).single(); if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' }); const { data, error } = await supabase.from('vehicles').select('id,registration_number,capacity_litres,is_active,verification').eq('vendor_id', vendor.id).order('registration_number'); if (error) return databaseFailure(response, 'vendor.database_error', error, 500); response.json(data ?? []) })
+router.get('/drivers', async (request, response) => { const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', request.authUser!.id).single(); if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' }); const { data, error } = await supabase.from('drivers').select('id,name,mobile_e164,is_active,verification').eq('vendor_id', vendor.id).order('name'); if (error) return databaseFailure(response, 'vendor.database_error', error, 500); response.json(data ?? []) })
+router.get('/services', async (request, response) => { const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', request.authUser!.id).single(); if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' }); const { data, error } = await supabase.from('service_catalog').select('*').eq('is_active', true).order('name'); if (error) return databaseFailure(response, 'vendor.database_error', error, 500); const { data: availability, error: availabilityError } = await supabase.from('vendor_service_availability').select('service_code,is_enabled').eq('vendor_id', vendor.id); if (availabilityError) return databaseFailure(response, 'vendor.database_error', availabilityError, 500); const enabled = new Map((availability ?? []).map((item) => [item.service_code, item.is_enabled])); response.json((data ?? []).map((service) => ({ ...service, vendor_enabled: enabled.has(service.code) ? enabled.get(service.code) : true }))) })
+router.get('/payouts', async (request, response) => { const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', request.authUser!.id).single(); if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' }); const { data, error } = await supabase.from('vendor_payouts').select('*').eq('vendor_id', vendor.id).order('created_at', { ascending: false }); if (error) return databaseFailure(response, 'vendor.database_error', error, 500); response.json(data ?? []) })
 export default router

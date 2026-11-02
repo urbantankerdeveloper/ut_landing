@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { apiFetch } from '../api/client'
 import { vendorApi, type VendorOrderMutation, type VendorOrderPage } from '../api/vendor'
@@ -7,7 +7,8 @@ import { enqueueMutation, flushMutationQueue, queuedMutationCount } from '../ser
 import { useRealtimeInvalidation } from './useRealtimeInvalidation'
 
 export const vendorQueryKeys = { dashboard: ['vendor', 'dashboard'], orders: ['vendor', 'orders'], vehicles: ['vendor', 'vehicles'], drivers: ['vendor', 'drivers'], payouts: ['vendor', 'payouts'], services: ['vendor', 'services'] } as const
-const liveOptions = { enabled: !demoDataEnabled, staleTime: 30_000, retry: 2 }
+const liveOptions = { enabled: !demoDataEnabled, staleTime: 30_000 }
+const LOCATION_POST_INTERVAL_MS = 15_000
 export function useVendorOfflineSync(enabled = true) { useEffect(() => { if (!enabled) return; const flush = async () => { const count = await flushMutationQueue((endpoint, init) => apiFetch(endpoint, init), (payload) => vendorApi.registerOfflineMutation(payload)); if (count) window.dispatchEvent(new Event('vendor-queue-flushed')) }; const handleServiceWorkerMessage = (event: MessageEvent) => { if (event.data?.type === 'urban-tanker-sync') void flush() }; window.addEventListener('online', flush); navigator.serviceWorker?.addEventListener('message', handleServiceWorkerMessage); void flush(); return () => { window.removeEventListener('online', flush); navigator.serviceWorker?.removeEventListener('message', handleServiceWorkerMessage) } }, [enabled]) }
 export function useVendorDashboard() { return useQuery({ queryKey: vendorQueryKeys.dashboard, queryFn: vendorApi.dashboard, ...liveOptions }) }
 export function useVendorOrders() { const query = useInfiniteQuery({ queryKey: vendorQueryKeys.orders, initialPageParam: 0, queryFn: ({ pageParam }) => vendorApi.orders(pageParam), getNextPageParam: (lastPage) => lastPage.nextOffset ?? undefined, ...liveOptions }); useRealtimeInvalidation(vendorQueryKeys.orders); return { ...query, data: query.data?.pages.flatMap((page) => page.rows) } }
@@ -32,15 +33,29 @@ export function useVendorDocuments() { return useQuery({ queryKey: ['vendor', 'd
 export function useCreateVendorDocument() { const queryClient = useQueryClient(); return useMutation({ mutationFn: async (payload: Parameters<typeof vendorApi.createDocument>[0]) => { if (!navigator.onLine) { enqueueMutation({ endpoint: '/vendor/documents', init: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) } }); return payload as unknown as Awaited<ReturnType<typeof vendorApi.createDocument>> }; return vendorApi.createDocument(payload) }, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['vendor', 'documents'] }) }) }
 export function useUpdateVendorDocument() { const queryClient = useQueryClient(); return useMutation({ mutationFn: async ({ id, payload }: { id: string; payload: Parameters<typeof vendorApi.updateDocument>[1] }) => { if (!navigator.onLine) { enqueueMutation({ endpoint: `/vendor/documents/${id}`, init: { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) } }); return payload as Awaited<ReturnType<typeof vendorApi.updateDocument>> }; return vendorApi.updateDocument(id, payload) }, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['vendor', 'documents'] }) }) }
 export function useMarkVendorNotificationRead() { const queryClient = useQueryClient(); return useMutation({ mutationFn: vendorApi.markNotificationRead, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['vendor', 'notifications'] }) }) }
-export function useVendorLocation(bookingId: string | null) { const mutation = useMutation({ mutationFn: vendorApi.location }); useEffect(() => { if (!bookingId || demoDataEnabled || !navigator.geolocation) return; const watchId = navigator.geolocation.watchPosition((position) => { mutation.mutate({ bookingId, latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy }) }, undefined, { enableHighAccuracy: true, maximumAge: 15_000, timeout: 10_000 }); return () => navigator.geolocation.clearWatch(watchId) }, [bookingId, mutation]); return mutation }
+export function useVendorLocation(bookingId: string | null) {
+  const mutation = useMutation({ mutationFn: vendorApi.location })
+  const { mutate } = mutation
+  const lastPostedAt = useRef(0)
+  useEffect(() => {
+    if (!bookingId || demoDataEnabled || !navigator.geolocation) return
+    const watchId = navigator.geolocation.watchPosition((position) => {
+      const now = Date.now()
+      if (now - lastPostedAt.current < LOCATION_POST_INTERVAL_MS) return
+      lastPostedAt.current = now
+      mutate({ bookingId, latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy })
+    }, undefined, { enableHighAccuracy: true, maximumAge: 15_000, timeout: 10_000 })
+    return () => navigator.geolocation.clearWatch(watchId)
+  }, [bookingId, mutate])
+  return mutation
+}
 export function useVendorOrderMutation() {
   const queryClient = useQueryClient()
   const [queuedCount, setQueuedCount] = useState(() => queuedMutationCount())
   useEffect(() => {
-    const flush = async () => { const count = await flushMutationQueue((endpoint, init) => apiFetch(endpoint, init), (payload) => vendorApi.registerOfflineMutation(payload)); if (count) { setQueuedCount(queuedMutationCount()); queryClient.invalidateQueries({ queryKey: vendorQueryKeys.orders }) } }
-    window.addEventListener('online', flush)
-    void flush()
-    return () => window.removeEventListener('online', flush)
+    const refresh = () => { setQueuedCount(queuedMutationCount()); void queryClient.invalidateQueries({ queryKey: vendorQueryKeys.orders }) }
+    window.addEventListener('vendor-queue-flushed', refresh)
+    return () => window.removeEventListener('vendor-queue-flushed', refresh)
   }, [queryClient])
   const mutation = useMutation({
     mutationFn: (payload: VendorOrderMutation) => vendorApi.mutateOrder(payload),
@@ -60,7 +75,7 @@ export function useVendorOrderMutation() {
     },
   })
   function mutate(payload: VendorOrderMutation, options?: Parameters<typeof mutation.mutate>[1]) {
-    if (!navigator.onLine) { enqueueMutation({ endpoint: `/vendor/orders/${payload.orderId}`, init: { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) } }); setQueuedCount(queuedMutationCount()); return }
+    if (!navigator.onLine) { enqueueMutation({ endpoint: `/vendor/orders/${payload.orderId}/transition`, init: { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) } }); setQueuedCount(queuedMutationCount()); return }
     mutation.mutate(payload, options)
   }
   return { ...mutation, mutate, queuedCount }

@@ -269,8 +269,10 @@ function isValidDeliveryDate(value: string) {
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
 }
 
+const DRAFT_PERSIST_DELAY_MS = 300
+
 export default function BookingScreen() {
-  const draft = loadBookingDraft()
+  const [draft] = useState(loadBookingDraft)
   const navigate = useNavigationStore((state) => state.navigate)
   const createBooking = useCreateCustomerBooking()
   const servicesQuery = useCustomerServices()
@@ -338,7 +340,7 @@ export default function BookingScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [bookingId, setBookingId] = useState<string | null>(draft.bookingId ?? null)
   const [quotedTotal, setQuotedTotal] = useState<number | null>(draft.quotedTotal ?? null)
-  const [idempotencyKey] = useState(draft.idempotencyKey ?? crypto.randomUUID())
+  const [idempotencyKey] = useState(() => draft.idempotencyKey ?? crypto.randomUUID())
   const selectedServices = useMemo(() => serviceEntries.map((entry) => entry.serviceId), [serviceEntries])
   const activeServiceEntries = useMemo(() => serviceEntries.filter((entry) => options.some((option) => option.code === entry.serviceId)), [serviceEntries, options])
   const availableServiceOptions = useMemo(() => options.filter((option) => !activeServiceEntries.some((entry) => entry.serviceId === option.code)), [activeServiceEntries, options])
@@ -393,17 +395,26 @@ export default function BookingScreen() {
       sessionStorage.removeItem(BOOKING_DRAFT_KEY)
       return
     }
-    const bookingDraft: BookingDraft = { idempotencyKey, selectedServices, serviceEntries, serviceItemsInitialized: hasInitializedServiceEntries, serviceDetails, capacity, step, details: { notes: getValues('notes') ?? '', location: sharedLocation, deliveryDate: sharedDate }, locationAddress: sharedLocation, coordinates: sharedCoordinates ? { latitude: sharedCoordinates.lat, longitude: sharedCoordinates.lng } : null, region, addressLabel, addressCity, addressPincode, saveAddress: saveAddressForFuture, savedAddressId, sharedDate, preferredTime, phone, paymentMethod, couponCode, couponDiscount, guestName, phoneChallenges, bookingId, quotedTotal }
-    sessionStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify(bookingDraft))
+    const timer = window.setTimeout(() => {
+      const bookingDraft: BookingDraft = { idempotencyKey, selectedServices, serviceEntries, serviceItemsInitialized: hasInitializedServiceEntries, serviceDetails, capacity, step, details: { notes: getValues('notes') ?? '' }, locationAddress: sharedLocation, coordinates: sharedCoordinates ? { latitude: sharedCoordinates.lat, longitude: sharedCoordinates.lng } : null, region, addressLabel, addressCity, addressPincode, saveAddress: saveAddressForFuture, savedAddressId, sharedDate, preferredTime, phone, paymentMethod, couponCode, couponDiscount, guestName, phoneChallenges, bookingId, quotedTotal }
+      sessionStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify(bookingDraft))
+    }, DRAFT_PERSIST_DELAY_MS)
+    return () => window.clearTimeout(timer)
   }, [idempotencyKey, selectedServices, serviceEntries, hasInitializedServiceEntries, serviceDetails, capacity, step, getValues, sharedLocation, sharedCoordinates, sharedDate, region, addressLabel, addressCity, addressPincode, saveAddressForFuture, savedAddressId, preferredTime, phone, paymentMethod, couponCode, couponDiscount, guestName, phoneChallenges, bookingId, quotedTotal])
   useEffect(() => {
+    let timer: number | undefined
     const subscription = watch((values) => {
-      try {
-        const saved = JSON.parse(sessionStorage.getItem(BOOKING_DRAFT_KEY) ?? '{}') as Partial<BookingDraft>
-        sessionStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify({ ...saved, idempotencyKey, phone: values.phone, capacity: values.capacity, paymentMethod: values.paymentMethod, couponCode: values.couponCode, guestName: values.guestName, details: { ...saved.details, notes: values.notes } }))
-      } catch { /* Draft persistence must not interrupt typing. */ }
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        try {
+          const stored = sessionStorage.getItem(BOOKING_DRAFT_KEY)
+          if (!stored) return
+          const saved = JSON.parse(stored) as Partial<BookingDraft>
+          sessionStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify({ ...saved, idempotencyKey, phone: values.phone, capacity: values.capacity, paymentMethod: values.paymentMethod, couponCode: values.couponCode, guestName: values.guestName, details: { ...saved.details, notes: values.notes } }))
+        } catch { /* Draft persistence must not interrupt typing. */ }
+      }, DRAFT_PERSIST_DELAY_MS)
     })
-    return () => subscription.unsubscribe()
+    return () => { window.clearTimeout(timer); subscription.unsubscribe() }
   }, [watch, idempotencyKey])
   useEffect(() => {
     sessionStorage.removeItem(REPEAT_BOOKING_KEY)
@@ -549,9 +560,8 @@ export default function BookingScreen() {
       updateMapLocation(service, point, result.approximateName)
       setLocationStatus((current) => ({ ...current, [service]: c.location.currentLocationDetected }))
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return
       setLocationStatus((current) => { const next = { ...current }; delete next[service]; return next })
-      setLocationEligibility((current) => ({ ...current, [service]: false }))
-      setLocationToasts((current) => ({ ...current, [service]: c.location.verifyFailed }))
       console.warn(JSON.stringify({ event: 'location.reverse_geocode_failed', error: error instanceof Error ? error.message : 'Unknown error' }))
     }
   }
@@ -634,7 +644,7 @@ export default function BookingScreen() {
         await customerApi.verifyContactPhoneOtp({ challengeId, phone: normalizedPhone, otp })
       } else {
         const session = await customerApi.verifyGuestOtp({ challengeId, phone: normalizedPhone, otp, name: guestName.trim() || undefined })
-        signIn(session.user, session.accessToken, session.refreshToken)
+        signIn(session.user, session.accessToken)
       }
       setPhoneChallenges((current) => ({ ...current, [normalizedPhone]: challengeId }))
       setOtpMessages((current) => ({ ...current, [normalizedPhone]: c.otp.verified }))

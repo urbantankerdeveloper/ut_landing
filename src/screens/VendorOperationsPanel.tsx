@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Bell, Check, MessageCircle, Plus, Send } from 'lucide-react'
-import { Modal } from './WorkspaceInteractive'
+import { Modal } from '../components/Modal'
 import { demoDataEnabled } from '../constants/demo'
 import { useCreateVendorComplaint, useMarkVendorNotificationRead, useVendorComplaints, useVendorNotifications } from '../hooks/useVendorData'
 import { vendorContent as c } from '../content/vendor'
