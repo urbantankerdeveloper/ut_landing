@@ -9,6 +9,7 @@ import { useAuthStore } from '../stores/authStore'
 import type { WorkspaceRole } from '../stores/navigationStore'
 import { Modal } from '../screens/WorkspaceInteractive'
 import { BookingPageFooter, BookingPageHeader } from '../components/booking/BookingPageChrome'
+import { chromeContent as c } from '../content/chrome'
 
 export function AppShell() {
 	useFormGuards()
@@ -40,34 +41,34 @@ export function AppShell() {
 	const mainRef = useRef<HTMLElement>(null)
 	useLayoutEffect(() => {
 		const titles: Record<string, string> = {
-			home: 'Urban Tanker | One App. All Water Services.',
-			services: 'Services | Urban Tanker',
-			subscriptions: 'Subscriptions | Urban Tanker',
-			booking: 'Book a service | Urban Tanker',
-			'yearly-contract': 'Yearly contract | Urban Tanker',
-			coupons: 'Coupons | Urban Tanker',
-			tracking: 'Track your booking | Urban Tanker',
-			partner: 'Become a partner | Urban Tanker',
-			terms: 'Terms and conditions | Urban Tanker',
-			policy: 'Privacy policy | Urban Tanker',
-			account: 'My account | Urban Tanker',
-			login: 'Sign in | Urban Tanker',
-			about: 'About Urban Tanker',
-			'customer-workspace': 'Customer workspace | Urban Tanker',
-			'vendor-workspace': 'Vendor workspace | Urban Tanker',
-			'admin-workspace': 'Admin workspace | Urban Tanker',
-			'dispatcher-workspace': 'Dispatch workspace | Urban Tanker',
+			home: c.appShell.documentTitles.home,
+			services: c.appShell.documentTitles.services,
+			subscriptions: c.appShell.documentTitles.subscriptions,
+			booking: c.appShell.documentTitles.booking,
+			'yearly-contract': c.appShell.documentTitles.yearlyContract,
+			coupons: c.appShell.documentTitles.coupons,
+			tracking: c.appShell.documentTitles.tracking,
+			partner: c.appShell.documentTitles.partner,
+			terms: c.appShell.documentTitles.terms,
+			policy: c.appShell.documentTitles.policy,
+			account: c.appShell.documentTitles.account,
+			login: c.appShell.documentTitles.login,
+			about: c.appShell.documentTitles.about,
+			'customer-workspace': c.appShell.documentTitles.customerWorkspace,
+			'vendor-workspace': c.appShell.documentTitles.vendorWorkspace,
+			'admin-workspace': c.appShell.documentTitles.adminWorkspace,
+			'dispatcher-workspace': c.appShell.documentTitles.dispatcherWorkspace,
 		}
-		document.title = titles[activeScreen] ?? 'Urban Tanker'
+		document.title = titles[activeScreen] ?? c.appShell.documentTitles.fallback
 		window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
 		mainRef.current?.focus({ preventScroll: true })
 	}, [activeScreen])
 	if (!hasHydrated) return <div className="app-shell app-shell-hydrating"><main id="main-content"><ScreenSkeleton workspace={false} /></main></div>
 	return <div className={`app-shell ${isWorkspace ? 'app-shell-workspace' : ''} ${isAuthScreen ? 'app-shell-auth' : ''} ${isPublicTracking ? 'app-shell-public-tracking' : ''}`}>
-		<a className="skip-link" href="#main-content">Skip to main content</a>
-		{isPublicTracking ? <header className="public-tracking-header"><span>Track your booking</span></header> : isBookingScreen ? <BookingPageHeader /> : !isWorkspace && !isAuthScreen && <Header />}
+		<a className="skip-link" href="#main-content">{c.appShell.skipToMain}</a>
+		{isPublicTracking ? <header className="public-tracking-header"><span>{c.appShell.publicTrackingHeading}</span></header>: isBookingScreen ? <BookingPageHeader /> : !isWorkspace && !isAuthScreen && <Header />}
 		<main ref={mainRef} id="main-content" tabIndex={-1} aria-labelledby={isPublicTracking ? undefined : 'page-announcement'}>{!isPublicTracking && <span id="page-announcement" className="visually-hidden" aria-live="polite">{activeScreen.replaceAll('-', ' ')}</span>}<ScreenRenderer /></main>
 		{isBookingScreen ? <BookingPageFooter /> : !isPublicTracking && !isWorkspace && !isAuthScreen && <Footer />}
-		{pendingNavigation && <Modal title={activeScreen === 'partner' ? 'Leave partner application?' : 'Leave booking?'} onClose={cancelNavigation}><div className="booking-exit-confirmation"><p>{activeScreen === 'partner' ? 'You have an unfinished partner application. If you leave now, the details entered here will be cleared.' : 'Are you sure you want to leave the booking screen? Any details entered here will be cleared.'}</p><div><button className="button button-quiet" type="button" onClick={cancelNavigation}>Stay on this page</button><button className="button button-primary" type="button" onClick={confirmNavigation}>{activeScreen === 'partner' ? 'Leave application' : 'Leave booking'}</button></div></div></Modal>}
+		{pendingNavigation && <Modal title={activeScreen === 'partner' ? c.appShell.leavePartner.title : c.appShell.leaveBooking.title} onClose={cancelNavigation}><div className="booking-exit-confirmation"><p>{activeScreen === 'partner' ? c.appShell.leavePartner.body : c.appShell.leaveBooking.body}</p><div><button className="button button-quiet" type="button" onClick={cancelNavigation}>{c.appShell.stayOnPage}</button><button className="button button-primary" type="button" onClick={confirmNavigation}>{activeScreen === 'partner' ? c.appShell.leavePartner.confirm : c.appShell.leaveBooking.confirm}</button></div></div></Modal>}
 	</div>
 }

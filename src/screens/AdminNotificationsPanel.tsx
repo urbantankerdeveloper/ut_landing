@@ -2,6 +2,9 @@ import { useMemo, useState } from 'react'
 import { Bell, Check, CheckCheck, ChevronDown } from 'lucide-react'
 import type { AdminNotification } from '../api/admin'
 import { useAdminNotifications, useMarkAdminNotificationRead } from '../hooks/useAdminData'
+import { adminEntitiesContent as c } from '../content/admin-entities'
+
+const copy = c.notifications
 
 type Props = { onNotice?: (message: string) => void }
 type NotificationGroup = { key: string; label: string; notifications: AdminNotification[] }
@@ -42,7 +45,7 @@ export function AdminNotificationsPanel({ onNotice }: Props) {
     setPendingGroupKeys((current) => new Set(current).add(group.key))
     try {
       const results = await Promise.allSettled(unread.map((item) => markRead.mutateAsync(item.id)))
-      if (results.some((result) => result.status === 'rejected')) onNotice?.('Some notifications could not be marked as read.')
+      if (results.some((result) => result.status === 'rejected')) onNotice?.(copy.someFailed)
     } finally {
       setPendingGroupKeys((current) => { const next = new Set(current); next.delete(group.key); return next })
     }
@@ -52,19 +55,19 @@ export function AdminNotificationsPanel({ onNotice }: Props) {
     setMarkingAll(true)
     try {
       const results = await Promise.allSettled(unreadNotifications.map((item) => markRead.mutateAsync(item.id)))
-      if (results.some((result) => result.status === 'rejected')) onNotice?.('Some notifications could not be marked as read.')
+      if (results.some((result) => result.status === 'rejected')) onNotice?.(copy.someFailed)
     } finally {
       setMarkingAll(false)
     }
   }
 
-  if (query.isLoading) return <section className="admin-view-panel"><h2>Loading notifications...</h2></section>
-  if (query.isError) return <section className="admin-view-panel"><h2>Notifications are unavailable.</h2><button className="button button-primary" onClick={() => query.refetch()}>Retry</button></section>
+  if (query.isLoading) return <section className="admin-view-panel"><h2>{copy.loading}</h2></section>
+  if (query.isError) return <section className="admin-view-panel"><h2>{copy.unavailable}</h2><button className="button button-primary" onClick={() => query.refetch()}>{copy.retry}</button></section>
 
   return <section className="admin-view-panel admin-notifications-panel">
     <div className="view-panel-heading">
-      <div><p className="eyebrow">OPERATIONS NOTIFICATIONS</p><h2>All booking and delivery events.</h2></div>
-      <button className="button button-quiet" onClick={() => void markAllRead()} disabled={!unreadNotifications.length || markingAll}>Mark all read</button>
+      <div><p className="eyebrow">{copy.eyebrow}</p><h2>{copy.title}</h2></div>
+      <button className="button button-quiet" onClick={() => void markAllRead()} disabled={!unreadNotifications.length || markingAll}>{copy.markAllRead}</button>
     </div>
     <div className="admin-notification-groups">
       {groups.map((group) => {
@@ -82,14 +85,14 @@ export function AdminNotificationsPanel({ onNotice }: Props) {
               <span className="admin-notification-icon"><Bell size={17} aria-hidden="true" /></span>
               <span className="admin-notification-group-summary">
                 <strong>{group.label}</strong>
-                <span>{group.notifications.length} notification{group.notifications.length === 1 ? '' : 's'} · Latest: {latest.title}</span>
+                <span>{copy.summary(group.notifications.length, latest.title)}</span>
                 <small>{new Date(latest.created_at).toLocaleString()}</small>
               </span>
-              {unreadCount > 0 && <span className="admin-notification-unread-count">{unreadCount} unread</span>}
+              {unreadCount > 0 && <span className="admin-notification-unread-count">{copy.unreadCount(unreadCount)}</span>}
               <ChevronDown className="admin-notification-chevron" size={17} aria-hidden="true" />
             </button>
-            <button className="admin-notification-mark-read" type="button" onClick={() => void markGroupRead(group)} disabled={!unreadCount || pendingGroupKeys.has(group.key) || markingAll} aria-label={`Mark ${group.label} notifications as read`}>
-              {unreadCount ? <><CheckCheck size={15} /> Mark read</> : <Check size={16} aria-label="All notifications read" />}
+            <button className="admin-notification-mark-read" type="button" onClick={() => void markGroupRead(group)} disabled={!unreadCount || pendingGroupKeys.has(group.key) || markingAll} aria-label={copy.markGroupRead(group.label)}>
+              {unreadCount ? <><CheckCheck size={15} /> {copy.markRead}</> : <Check size={16} aria-label={copy.allRead} />}
             </button>
           </div>
           {isExpanded && <div className="admin-notification-events">
@@ -97,15 +100,15 @@ export function AdminNotificationsPanel({ onNotice }: Props) {
               <span className="admin-notification-event-indicator" />
               <div>
                 <strong>{item.title}</strong>
-                <p>{item.event_type}{item.payload?.status ? ` · ${item.payload.status}` : ''}{item.payload?.detail ? ` · ${item.payload.detail}` : ''}</p>
+                <p>{item.event_type}{item.payload?.status ? copy.statusPart(item.payload.status) : ''}{item.payload?.detail ? copy.detailPart(item.payload.detail) : ''}</p>
                 <small>{new Date(item.created_at).toLocaleString()}</small>
               </div>
-              {!item.read_at && <span className="admin-notification-unread-label">Unread</span>}
+              {!item.read_at && <span className="admin-notification-unread-label">{copy.unread}</span>}
             </article>)}
           </div>}
         </section>
       })}
     </div>
-    {!notifications.length && <div className="admin-empty-state">No notifications yet.</div>}
+    {!notifications.length && <div className="admin-empty-state">{copy.empty}</div>}
   </section>
 }

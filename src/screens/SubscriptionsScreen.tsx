@@ -1,4 +1,49 @@
-import { ArrowRight, CalendarClock, PauseCircle, ShieldCheck } from 'lucide-react'
+import { ArrowRight, CalendarClock, PauseCircle, ShieldCheck, type LucideIcon } from 'lucide-react'
 import { useNavigationStore } from '../stores/navigationStore'
-const plans = [{ name: 'Home tanker lite', price: '₹1,799', detail: 'A delivery every 10–14 days', featured: false }, { name: 'Property care', price: '₹6,500', detail: 'Five scheduled deliveries each month', featured: true }, { name: 'Site partner', price: 'Custom', detail: 'Flexible capacity for active projects', featured: false }]
-export default function SubscriptionsScreen() { const navigate = useNavigationStore((state) => state.navigate); return <section className="content-screen subscriptions-screen"><div className="section-intro"><p className="eyebrow">SUBSCRIPTIONS</p><h1>Reliable water, already planned.</h1><p>Set a recurring tanker schedule for your home, apartment or business. Pause, skip or change anytime.</p></div><div className="plan-grid">{plans.map((plan) => <article className={`plan-card ${plan.featured ? 'is-featured' : ''}`} key={plan.name}>{plan.featured && <span className="plan-badge">MOST POPULAR</span>}<h2>{plan.name}</h2><p>{plan.detail}</p><strong>{plan.price}<small>{plan.price !== 'Custom' && ' / month'}</small></strong><button className="button button-primary" onClick={() => navigate('booking')}>Choose plan <ArrowRight size={15} /></button></article>)}</div><div className="feature-strip"><div><CalendarClock size={20} /><b>Predictable delivery</b><span>Set a schedule that works for your property.</span></div><div><PauseCircle size={20} /><b>Stay flexible</b><span>Pause, skip or change without a call.</span></div><div><ShieldCheck size={20} /><b>Trusted fulfilment</b><span>Verified vendors with live status updates.</span></div></div></section> }
+import { subscriptionsContent as c } from '../content/subscriptions'
+
+type FeatureId = (typeof c.features)[number]['id']
+
+const featureIcons: Record<FeatureId, LucideIcon> = {
+  predictable: CalendarClock,
+  flexible: PauseCircle,
+  fulfilment: ShieldCheck,
+}
+
+export default function SubscriptionsScreen() {
+  const navigate = useNavigationStore((state) => state.navigate)
+  return (
+    <section className="content-screen subscriptions-screen">
+      <div className="section-intro">
+        <p className="eyebrow">{c.intro.eyebrow}</p>
+        <h1>{c.intro.title}</h1>
+        <p>{c.intro.body}</p>
+      </div>
+      <div className="plan-grid">
+        {c.plans.map((plan) => (
+          <article className={`plan-card ${plan.featured ? 'is-featured' : ''}`} key={plan.id}>
+            {plan.featured && <span className="plan-badge">{c.featuredBadge}</span>}
+            <h2>{plan.name}</h2>
+            <p>{plan.detail}</p>
+            <strong>{plan.price}<small>{!plan.isCustomPrice && c.priceSuffix}</small></strong>
+            <button className="button button-primary" onClick={() => navigate('booking')}>
+              {c.choosePlan} <ArrowRight size={15} />
+            </button>
+          </article>
+        ))}
+      </div>
+      <div className="feature-strip">
+        {c.features.map((feature) => {
+          const Icon = featureIcons[feature.id]
+          return (
+            <div key={feature.id}>
+              <Icon size={20} />
+              <b>{feature.title}</b>
+              <span>{feature.copy}</span>
+            </div>
+          )
+        })}
+      </div>
+    </section>
+  )
+}

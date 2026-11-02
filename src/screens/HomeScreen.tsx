@@ -1,12 +1,30 @@
 import { useEffect, useState } from 'react'
-import { ArrowRight, Check, Construction, Droplets, LocateFixed, ShieldCheck, Truck, Waves } from 'lucide-react'
+import { ArrowRight, Check, Construction, Droplets, LocateFixed, ShieldCheck, Truck, Waves, type LucideIcon } from 'lucide-react'
 import { useNavigationStore } from '../stores/navigationStore'
 import { reverseGeocodeApproximate } from '../services/geocoding'
-const services = [{ category: 'EVERYDAY ESSENTIALS', title: 'Water Tankers', copy: 'Reliable water supply for homes, apartments and project sites.', facts: ['3–16 KL capacities', 'Domestic & industrial'], detail: 'Raw, domestic, construction and commercial water supply matched to your capacity and site requirements.', icon: Droplets }, { category: 'CLEANER SPACES', title: 'Sewage Tankers', copy: 'Septic tank cleaning and scheduled wastewater collection.', facts: ['Suction & removal', 'Site assessment'], detail: 'Septic tank cleaning, sewage suction, drain and manhole cleaning for homes and commercial sites.', icon: Waves }, { category: 'BELOW THE SURFACE', title: 'Infrastructure', copy: 'Drilling, inspection and maintenance for your site.', facts: ['New & existing borewells', 'Depth-based planning'], detail: 'New borewell drilling, existing-well inspection, cleaning and maintenance planned around your property.', icon: LocateFixed }, { category: 'BUILT FOR PROJECTS', title: 'RMC Mix Trucks', copy: 'Ready-mix concrete delivered to your construction site.', facts: ['Grade-specific mixes', 'Pump coordination'], detail: 'Grade-specific concrete delivery coordinated around your project, quantity and pour requirements.', icon: Construction }, { category: 'BEYOND WATER', title: 'Empty Tanker Hire', copy: 'Dedicated tanker hire for your commercial requirements.', facts: ['6–24 KL capacities', 'Bulk-liquid transport'], detail: 'Compatible tanker hire for permitted food-grade, industrial and other bulk-liquid transport requirements.', icon: Truck }]
+import { homeContent as c } from '../content/home'
+
+type ServiceId = (typeof c.services)[number]['id']
+type BenefitId = (typeof c.benefits)[number]['id']
+
+const serviceIcons: Record<ServiceId, LucideIcon> = {
+  water: Droplets,
+  sewage: Waves,
+  infrastructure: LocateFixed,
+  rmc: Construction,
+  emptyTanker: Truck,
+}
+
+const benefitIcons: Record<BenefitId, LucideIcon> = {
+  trusted: ShieldCheck,
+  schedule: Truck,
+  loop: LocateFixed,
+}
+
 export default function HomeScreen() {
   const navigate = useNavigationStore((state) => state.navigate)
   const supportsGeolocation = typeof navigator !== 'undefined' && Boolean(navigator.geolocation)
-  const [locationLabel, setLocationLabel] = useState('Choose a delivery area when booking')
+  const [locationLabel, setLocationLabel] = useState<string>(c.location.defaultLabel)
   const [locationState, setLocationState] = useState<'idle' | 'loading' | 'ready' | 'unavailable'>('idle')
 
   useEffect(() => {
@@ -18,22 +36,128 @@ export default function HomeScreen() {
   function detectLocation() {
     if (!supportsGeolocation || locationState === 'loading') return
     setLocationState('loading')
-    setLocationLabel('Finding your area…')
+    setLocationLabel(c.location.locating)
     navigator.geolocation.getCurrentPosition(async ({ coords }) => {
       try {
         const area = await reverseGeocodeApproximate({ lat: coords.latitude, lng: coords.longitude })
         setLocationLabel(area)
         setLocationState('ready')
       } catch (error) {
-        setLocationLabel('Could not determine area · Choose it when booking')
+        setLocationLabel(c.location.unableToDetermine)
         setLocationState('unavailable')
         console.warn(JSON.stringify({ event: 'home.location_reverse_geocode_failed', error: error instanceof Error ? error.message : 'Unknown error' }))
       }
     }, () => {
-      setLocationLabel('Location unavailable · Choose an area when booking')
+      setLocationLabel(c.location.unavailable)
       setLocationState('unavailable')
     }, { enableHighAccuracy: false, timeout: 10_000, maximumAge: 60_000 })
   }
 
-  return <div className="home-screen"><section className="hero hero-photo"><div className="hero-copy"><button type="button" className={`location-chip ${locationState === 'unavailable' ? 'location-chip-unavailable' : ''}`} onClick={detectLocation} disabled={!supportsGeolocation || locationState === 'loading'} aria-live="polite" aria-busy={locationState === 'loading'}><LocateFixed size={13} /> <span>{locationState === 'ready' ? 'Delivering to' : locationState === 'loading' ? 'Locating' : supportsGeolocation ? 'Use my location' : 'Area'}</span> <strong>{locationState === 'loading' ? 'Finding your area…' : locationLabel}</strong></button><p className="eyebrow">Complete Water Solutions Partner</p><h1>Urban Tanker. <em>For every drop you need.</em></h1><p className="hero-lede">Reliable water, sanitation, infrastructure and bulk-liquid services for homes, apartments, businesses and project sites.</p><div className="hero-actions"><button className="button button-primary hero-primary" onClick={() => navigate('booking')}>Book now <ArrowRight size={16} /></button><button className="button button-quiet hero-secondary" onClick={() => navigate('services')}>Explore services</button></div><div className="trust-row"><span><Check size={14} /><b>Verified</b> vendors</span><span><Check size={14} /><b>Live</b> tracking</span><span><Check size={14} /><b>Secure</b> delivery OTP</span></div></div></section><section className="home-subscription-teaser"><div><p className="eyebrow">YEARLY CONTRACTS</p><h2>One plan. A whole year covered.</h2><p>Residential, commercial and apartment service plans. Combine services and see your annual estimate.</p></div><div className="teaser-plan"><small>BUILT AROUND YOUR PROPERTY</small><strong>12 months. <span>Your services.</span></strong><p>Water, sewage, cleaning and more in one request.</p><button className="button button-primary" onClick={() => navigate('booking')}>Build your yearly plan <ArrowRight size={15} /></button></div></section><section className="reference-showcase"><div className="reference-header"><div><p className="eyebrow">THE URBAN TANKER WAY</p><h2>Every requirement. Covered.</h2></div><button className="text-button" onClick={() => navigate('services')}>Explore all services <ArrowRight size={14} /></button></div><p className="service-explorer-intro">From everyday essentials to ambitious projects. Get to know the service that fits.</p><div className="service-showcase-grid">{services.map(({ category, title, copy, facts, detail, icon: Icon }) => <article className="service-showcase-card" key={title}><div className="service-card-top"><span className="service-category">{category}</span><span className="service-icon"><Icon size={23} /></span></div><h3>{title}</h3><p>{copy}</p><div className="service-facts">{facts.map((fact) => <span key={fact}>{fact}</span>)}</div><details className="service-disclosure"><summary>Discover the service <span aria-hidden="true">+</span></summary><p>{detail}</p><button className="text-button" onClick={() => navigate('booking')}>Book service <ArrowRight size={13} /></button></details></article>)}</div></section><section className="benefit-strip"><div><ShieldCheck size={20} /><span><b>Trusted operations</b><small>Verified vendors and secure delivery</small></span></div><div><Truck size={20} /><span><b>On your schedule</b><small>Choose a preferred delivery slot</small></span></div><div><LocateFixed size={20} /><span><b>Stay in the loop</b><small>Track every booking status</small></span></div></section></div>
+  return (
+    <div className="home-screen">
+      <section className="hero hero-photo">
+        <div className="hero-copy">
+          <button
+            type="button"
+            className={`location-chip ${locationState === 'unavailable' ? 'location-chip-unavailable' : ''}`}
+            onClick={detectLocation}
+            disabled={!supportsGeolocation || locationState === 'loading'}
+            aria-live="polite"
+            aria-busy={locationState === 'loading'}
+          >
+            <LocateFixed size={13} /> <span>{locationState === 'ready' ? c.location.deliveringTo : locationState === 'loading' ? c.location.locatingLabel : supportsGeolocation ? c.location.useMyLocation : c.location.areaLabel}</span> <strong>{locationState === 'loading' ? c.location.locating : locationLabel}</strong>
+          </button>
+          <p className="eyebrow">{c.hero.eyebrow}</p>
+          <h1>
+            {c.hero.titleLead} <em>{c.hero.titleEmphasis}</em>
+          </h1>
+          <p className="hero-lede">{c.hero.lede}</p>
+          <div className="hero-actions">
+            <button className="button button-primary hero-primary" onClick={() => navigate('booking')}>
+              {c.hero.primaryCta} <ArrowRight size={16} />
+            </button>
+            <button className="button button-quiet hero-secondary" onClick={() => navigate('services')}>
+              {c.hero.secondaryCta}
+            </button>
+          </div>
+          <div className="trust-row">
+            {c.trust.items.map((item) => (
+              <span key={item.id}>
+                <Check size={14} />
+                <b>{item.emphasis}</b> {item.label}
+              </span>
+            ))}
+          </div>
+        </div>
+      </section>
+      <section className="home-subscription-teaser">
+        <div>
+          <p className="eyebrow">{c.subscriptionTeaser.eyebrow}</p>
+          <h2>{c.subscriptionTeaser.title}</h2>
+          <p>{c.subscriptionTeaser.body}</p>
+        </div>
+        <div className="teaser-plan">
+          <small>{c.subscriptionTeaser.planLabel}</small>
+          <strong>
+            {c.subscriptionTeaser.planTitle} <span>{c.subscriptionTeaser.planTitleEmphasis}</span>
+          </strong>
+          <p>{c.subscriptionTeaser.planBody}</p>
+          <button className="button button-primary" onClick={() => navigate('booking')}>
+            {c.subscriptionTeaser.cta} <ArrowRight size={15} />
+          </button>
+        </div>
+      </section>
+      <section className="reference-showcase">
+        <div className="reference-header">
+          <div>
+            <p className="eyebrow">{c.showcase.eyebrow}</p>
+            <h2>{c.showcase.title}</h2>
+          </div>
+          <button className="text-button" onClick={() => navigate('services')}>
+            {c.showcase.exploreAll} <ArrowRight size={14} />
+          </button>
+        </div>
+        <p className="service-explorer-intro">{c.showcase.intro}</p>
+        <div className="service-showcase-grid">
+          {c.services.map((service) => {
+            const Icon = serviceIcons[service.id]
+            return (
+              <article className="service-showcase-card" key={service.id}>
+                <div className="service-card-top">
+                  <span className="service-category">{service.category}</span>
+                  <span className="service-icon"><Icon size={23} /></span>
+                </div>
+                <h3>{service.title}</h3>
+                <p>{service.copy}</p>
+                <div className="service-facts">
+                  {service.facts.map((fact) => <span key={fact}>{fact}</span>)}
+                </div>
+                <details className="service-disclosure">
+                  <summary>{c.showcase.discoverLabel} <span aria-hidden="true">{c.showcase.disclosureMarker}</span></summary>
+                  <p>{service.detail}</p>
+                  <button className="text-button" onClick={() => navigate('booking')}>
+                    {c.showcase.bookService} <ArrowRight size={13} />
+                  </button>
+                </details>
+              </article>
+            )
+          })}
+        </div>
+      </section>
+      <section className="benefit-strip">
+        {c.benefits.map((benefit) => {
+          const Icon = benefitIcons[benefit.id]
+          return (
+            <div key={benefit.id}>
+              <Icon size={20} />
+              <span>
+                <b>{benefit.title}</b>
+                <small>{benefit.copy}</small>
+              </span>
+            </div>
+          )
+        })}
+      </section>
+    </div>
+  )
 }

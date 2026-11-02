@@ -2,13 +2,14 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Crosshair, MapPin, Save } from 'lucide-react'
 import { vendorApi, type VendorProfileLocation } from '../api/vendor'
+import { vendorContent as c } from '../content/vendor'
 
 type Props = { onNotice: (message: string) => void }
 
 export function VendorLocationPanel({ onNotice }: Props) {
   const profile = useQuery({ queryKey: ['vendor', 'profile'], queryFn: vendorApi.profile })
-  if (profile.isLoading) return <section className="workspace-view-panel"><h2>Loading service location…</h2></section>
-  if (profile.isError || !profile.data) return <section className="workspace-view-panel"><h2>Service location is unavailable.</h2><button className="button button-primary" onClick={() => void profile.refetch()}>Retry</button></section>
+  if (profile.isLoading) return <section className="workspace-view-panel"><h2>{c.location.loading}</h2></section>
+  if (profile.isError || !profile.data) return <section className="workspace-view-panel"><h2>{c.location.unavailable}</h2><button className="button button-primary" onClick={() => void profile.refetch()}>{c.common.retry}</button></section>
   return <VendorLocationEditor key={`${profile.data.latitude ?? ''}:${profile.data.longitude ?? ''}`} profile={profile.data} onNotice={onNotice} />
 }
 
@@ -23,14 +24,14 @@ function VendorLocationEditor({ profile, onNotice }: Props & { profile: VendorPr
     mutationFn: vendorApi.updateProfileLocation,
     onSuccess: (updated) => {
       queryClient.setQueryData(['vendor', 'profile'], updated)
-      onNotice('Service location saved. Nearby order distances will use this pin.')
+      onNotice(c.location.saved)
     },
-    onError: () => onNotice('Service location could not be saved.'),
+    onError: () => onNotice(c.location.saveFailed),
   })
 
   function useCurrentLocation() {
     if (!navigator.geolocation) {
-      setLocationError('Location detection is not supported in this browser. Enter coordinates manually.')
+      setLocationError(c.location.geolocationUnsupported)
       return
     }
     setLocating(true)
@@ -40,29 +41,30 @@ function VendorLocationEditor({ profile, onNotice }: Props & { profile: VendorPr
       setLongitude(position.coords.longitude.toFixed(6))
       setLocating(false)
     }, (error) => {
-      setLocationError(error.code === error.PERMISSION_DENIED ? 'Location permission was denied. Enter coordinates manually.' : 'Could not detect your location. Try again or enter coordinates manually.')
+      setLocationError(error.code === error.PERMISSION_DENIED ? c.location.permissionDenied : c.location.detectFailed)
       setLocating(false)
     }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 })
   }
 
   return <section className="workspace-view-panel vendor-management-panel">
-    <div className="view-panel-heading"><div><p className="eyebrow">DISPATCH LOCATION</p><h2>Set your service base.</h2></div><span className="admin-record-icon"><MapPin size={18} /></span></div>
-    <p>Orders are ranked using the distance from this pin to the customer’s delivery location. Keep it at your depot or usual dispatch point.</p>
+    <div className="view-panel-heading"><div><p className="eyebrow">{c.location.eyebrow}</p><h2>{c.location.heading}</h2></div><span className="admin-record-icon"><MapPin size={18} /></span></div>
+    <p>{c.location.intro}</p>
     <form className="modal-form vendor-location-form" onSubmit={(event) => {
       event.preventDefault()
       const lat = Number(latitude)
       const lng = Number(longitude)
       if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-        setLocationError('Enter a valid latitude and longitude.')
+        setLocationError(c.location.invalidCoordinates)
         return
       }
       setLocationError('')
       save.mutate({ latitude: lat, longitude: lng })
     }}>
-      <div className="vendor-location-fields"><label>Latitude<input type="number" inputMode="decimal" min="-90" max="90" step="0.000001" value={latitude} onChange={(event) => setLatitude(event.target.value)} required placeholder="e.g. 12.971600" /></label><label>Longitude<input type="number" inputMode="decimal" min="-180" max="180" step="0.000001" value={longitude} onChange={(event) => setLongitude(event.target.value)} required placeholder="e.g. 80.243200" /></label></div>
+      <div className="vendor-location-fields"><label>{c.location.latitude}<input type="number" inputMode="decimal" min="-90" max="90" step="0.000001" value={latitude} onChange={(event) => setLatitude(event.target.value)} required placeholder={c.location.latitudePlaceholder} /></label><label>{c.location.longitude}<input type="number" inputMode="decimal" min="-180" max="180" step="0.000001" value={longitude} onChange={(event) => setLongitude(event.target.value)} required placeholder={c.location.longitudePlaceholder} /></label></div>
       {locationError && <p role="alert" className="form-error">{locationError}</p>}
-      {profile.latitude === null || profile.longitude === null ? <p className="vendor-location-note">No service pin is saved yet. Your orders can still arrive, but their distance cannot be calculated until you set it.</p> : <p className="vendor-location-note">Saved service point: {Number(profile.latitude).toFixed(6)}, {Number(profile.longitude).toFixed(6)}</p>}
-      <div className="vendor-location-actions"><button className="button button-quiet" type="button" onClick={useCurrentLocation} disabled={locating}><Crosshair size={16} /> {locating ? 'Finding location…' : 'Use current location'}</button><button className="button button-primary" type="submit" disabled={save.isPending}><Save size={16} /> {save.isPending ? 'Saving…' : 'Save service location'}</button></div>
+      {profile.latitude === null || profile.longitude === null ? <p className="vendor-location-note">{c.location.noPinSaved}</p> : <p className="vendor-location-note">{c.location.savedPoint(Number(profile.latitude).toFixed(6), Number(profile.longitude).toFixed(6))}</p>}
+      <div className="vendor-location-actions"><button className="button button-quiet" type="button" onClick={useCurrentLocation} disabled={locating}><Crosshair size={16} /> {locating ? c.location.findingLocation : c.location.useCurrentLocation}</button><button className="button button-primary" type="submit" disabled={save.isPending}><Save size={16} /> {save.isPending ? c.common.saving : c.location.saveLocation}</button></div>
     </form>
   </section>
 }
+

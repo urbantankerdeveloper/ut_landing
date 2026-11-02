@@ -2,6 +2,7 @@ import { Suspense } from 'react'
 import { lazyWithRetry } from '../utils/lazyWithRetry'
 import { ScreenSkeleton } from './ScreenSkeleton'
 import { useNavigationStore } from '../stores/navigationStore'
+import { chromeContent as c } from '../content/chrome'
 const PublicTrackingScreen = lazyWithRetry(() => import('../screens/PublicTrackingScreen'))
 const screens = { home: lazyWithRetry(() => import('../screens/HomeScreen')), services: lazyWithRetry(() => import('../screens/ServicesScreen')), subscriptions: lazyWithRetry(() => import('../screens/SubscriptionsScreen')), booking: lazyWithRetry(() => import('../screens/BookingScreen')), 'yearly-contract': lazyWithRetry(() => import('../screens/BookingScreen')), coupons: lazyWithRetry(() => import('../screens/PublicReferenceScreen')), tracking: lazyWithRetry(() => import('../screens/PublicReferenceScreen')), partner: lazyWithRetry(() => import('../screens/PartnerApplicationScreen')), terms: lazyWithRetry(() => import('../screens/PublicReferenceScreen')), policy: lazyWithRetry(() => import('../screens/PublicReferenceScreen')), account: lazyWithRetry(() => import('../screens/AccountScreen')), login: lazyWithRetry(() => import('../screens/LoginScreen')), about: lazyWithRetry(() => import('../screens/AboutScreen')) } as const
 const workspaceScreens = { 'customer-workspace': lazyWithRetry(() => import('../screens/WorkspaceScreen')), 'vendor-workspace': lazyWithRetry(() => import('../screens/WorkspaceScreen')), 'dispatcher-workspace': lazyWithRetry(() => import('../screens/WorkspaceScreen')), 'admin-workspace': lazyWithRetry(() => import('../screens/WorkspaceScreen')) } as const
@@ -20,5 +21,5 @@ export function ScreenRenderer() {
 }
 
 function LoginLoadingScreen() {
-	return <section className="auth-loading-screen" role="status" aria-live="polite" aria-label="Loading login screen"><div className="auth-loading-spinner" /><p>Loading your account</p></section>
+	return <section className="auth-loading-screen" role="status" aria-live="polite" aria-label={c.screenRenderer.loginLoadingLabel}><div className="auth-loading-spinner" /><p>{c.screenRenderer.loginLoadingText}</p></section>
 }

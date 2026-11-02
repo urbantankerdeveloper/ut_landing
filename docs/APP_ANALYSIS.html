@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Urban Tanker Application Analysis</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.5; color: #172033; background: #f4f7fb; }
+    body { max-width: 1100px; margin: 0 auto; padding: 2rem 1rem 4rem; }
+    header, section { background: #fff; border: 1px solid #dbe3ef; border-radius: 12px; box-shadow: 0 2px 8px rgb(23 32 51 / 6%); }
+    header { margin-bottom: 1.5rem; padding: 1.5rem; }
+    section { margin-bottom: 1.25rem; padding: 1.25rem 1.5rem; }
+    h1, h2 { margin-top: 0; }
+    h1 { margin-bottom: 0.5rem; }
+    h2 { padding-bottom: 0.75rem; border-bottom: 1px solid #e6ebf2; }
+    h3 { margin-bottom: 0.25rem; font-size: 1rem; }
+    ul, ol { padding-left: 1.75rem; }
+    li { margin: 0.5rem 0; }
+    .muted { color: #4b5a72; font-size: 0.92rem; }
+    .pill { display: inline-block; margin-right: 0.4rem; padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.03em; white-space: nowrap; }
+    .high { color: #8a1c1c; background: #fde2e2; }
+    .medium { color: #7a4b00; background: #fff0c7; }
+    .low { color: #14532d; background: #dcfce7; }
+    .info { color: #4d3d76; background: #eee7ff; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+    th, td { padding: 0.55rem 0.6rem; border-bottom: 1px solid #e6ebf2; text-align: left; vertical-align: top; }
+    th { background: #f7f9fc; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: #4b5a72; }
+    code { padding: 0.1rem 0.3rem; border-radius: 4px; background: #eef2f7; font-size: 0.88em; word-break: break-word; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.75rem; margin-top: 1rem; }
+    .stat { padding: 0.9rem 1rem; border: 1px solid #e6ebf2; border-radius: 10px; background: #fbfcfe; }
+    .stat strong { display: block; font-size: 1.5rem; line-height: 1.1; }
+    .stat span { font-size: 0.85rem; color: #4b5a72; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Urban Tanker Application Analysis</h1>
+    <p><strong>Scope:</strong> the web application in <code>ut_landing</code> (React 19 frontend, Express backend, Supabase), with the content migration. The Flutter app in <code>urban_tanker_app</code> is covered only where it touches the backend.</p>
+    <p><strong>Date:</strong> 2 November 2026</p>
+    <div class="stats">
+      <div class="stat"><strong>95</strong><span>frontend source files (TypeScript and TSX)</span></div>
+      <div class="stat"><strong>171</strong><span>backend route handlers in 15 files</span></div>
+      <div class="stat"><strong>16</strong><span>content modules now holding the UI text</span></div>
+      <div class="stat"><strong>561 / 561</strong><span>plain-text literals found verbatim in content</span></div>
+      <div class="stat"><strong>80</strong><span>tests passing (15 frontend, 65 backend)</span></div>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>1. Summary</h2>
+      <p>The application is feature-rich and mostly complete for a first release. The customer-facing site, the booking flow, the vendor, admin and customer portals, and the backend API all exist. The main risks are not missing features. They are security hygiene (credentials in files), correctness in a few portal views, and operational gaps that must be closed before launch.</p>
+      <p>This pass moved the user-visible text of the whole web app into typed content modules under <code>src/content/</code>, in the style of AEM content fragments. Rendered output is unchanged for the public screens, and every plain-text literal from the portal screens was found verbatim in the content layer.</p>
+    </section>
+
+    <section>
+      <h2>2. Architecture</h2>
+      <h3>Frontend (<code>ut_landing/src</code>)</h3>
+      <ul>
+        <li>React 19 and TypeScript on Vite 8. Screens are chosen by a Zustand navigation store, not URL routes. The only path-based route is <code>/track/&lt;token&gt;</code> for public tracking.</li>
+        <li>Screens are lazy-loaded. A chunk-reload guard now handles stale chunks after a deploy.</li>
+        <li>Data comes from React Query over a typed API client (<code>src/api</code>). Realtime uses socket.io-client with a reconnecting client (<code>src/services/realtime.ts</code>).</li>
+        <li>Auth state lives in a Zustand store. The refresh token is an HttpOnly cookie.</li>
+        <li>Leaflet and OpenStreetMap for maps and geocoding. Razorpay checkout is loaded from its CDN.</li>
+        <li>Offline support: a service worker and a vendor mutation queue (<code>src/services/offlineMutationQueue.ts</code>).</li>
+        <li>Styling is SCSS, split across roughly 30 partials, several of them with minified one-line rules.</li>
+      </ul>
+      <h3>Backend (<code>ut_landing/backend</code>)</h3>
+      <ul>
+        <li>Express 5 with helmet, CORS allow-list, compression, a global rate limiter, and an observability middleware that writes JSON logs.</li>
+        <li>Supabase for auth, storage and Postgres (via the <code>pg</code> pool and <code>supabase-js</code>). Schema is in <code>backend/supabase/001_initial.sql</code> with an incremental update block.</li>
+        <li>Integrations: Razorpay (order, verify, webhook, refund), MSG91 or Twilio for SMS, SMTP for email, OneSignal and web push, analytics with retention and anonymisation.</li>
+        <li>Background sweeps run every 15 minutes: booking reminders, document expiry, storage cleanup and analytics retention.</li>
+      </ul>
+      <h3>Hosting</h3>
+      <ul>
+        <li>Frontend on Hostinger (<code>public_html</code>, with <code>public/.htaccess</code> for routing, headers and CSP). API on Render (<code>render.yaml</code>). Mobile app on the stores.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>3. Inventory</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Area</th><th>Count</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>Screens</td><td>48</td><td>Public: home, booking, services, subscriptions, about, partner, login, terms, policy, tracking. Portals: about 38 for customer, vendor, admin and dispatcher.</td></tr>
+            <tr><td>Components</td><td>13</td><td>Header and footer, map pickers, booking sections, error boundary, skeleton.</td></tr>
+            <tr><td>Hooks and API modules</td><td>7 and 8</td><td>Typed clients for auth, customer, vendor, admin and partner endpoints.</td></tr>
+            <tr><td>Stores</td><td>3</td><td>Auth, navigation, feature flags.</td></tr>
+            <tr><td>Backend routes</td><td>15 files, 171 handlers</td><td>Largest: <code>adminExtended.ts</code> (43) and <code>vendorExtended.ts</code> (28).</td></tr>
+            <tr><td>Backend services</td><td>14</td><td>Booking lifecycle, pricing, payment security, SMS, email, push, realtime, jobs, tracking tokens, selfie.</td></tr>
+            <tr><td>Tests</td><td>15 frontend, 65 backend, 3 Playwright specs</td><td>Playwright specs are not run in this review. There are no component tests.</td></tr>
+            <tr><td>Legacy static pages</td><td>54 HTML files in <code>public_html/</code></td><td>Design reference site, not part of the React build. Kept for later verification.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>4. Content Migration (AEM-Style Layer)</h2>
+      <p>Every user-visible literal in the web app is now held in a typed content module under <code>src/content/</code>. Components import the module and render its values. The modules are plain TypeScript objects declared <code>as const</code>, so a missing key fails the typecheck. Lists are arrays of objects with an <code>id</code>, and dynamic text is a function. Emphasis splits into separate keys, so the markup stays in the component.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Module</th><th>Covers</th></tr></thead>
+          <tbody>
+            <tr><td><code>chrome.ts</code></td><td>Header, footer, app shell, error boundary, skeleton, screen renderer</td></tr>
+            <tr><td><code>legal.ts</code>, <code>reference.ts</code></td><td>Terms and privacy text, public reference intros</td></tr>
+            <tr><td><code>home.ts</code>, <code>services.ts</code>, <code>subscriptions.ts</code>, <code>about.ts</code></td><td>Public marketing screens</td></tr>
+            <tr><td><code>auth.ts</code>, <code>partner.ts</code></td><td>Login, signup, reset, selfie upload, partner application</td></tr>
+            <tr><td><code>booking.ts</code></td><td>Booking wizard, validation messages, quote and confirmation</td></tr>
+            <tr><td><code>tracking.ts</code>, <code>location.ts</code></td><td>Public tracking, status labels, map pickers and live map</td></tr>
+            <tr><td><code>customer.ts</code>, <code>workspace.ts</code></td><td>Customer panels and account, shared workspace shell</td></tr>
+            <tr><td><code>vendor.ts</code></td><td>Vendor orders, fleet, operations, management, documents, payouts, complaints</td></tr>
+            <tr><td><code>admin-operations.ts</code>, <code>admin-entities.ts</code></td><td>Admin bookings, dispatch, reports, finance, pricing, entities, coupons, notifications, SMS templates</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>Verification</h3>
+      <ul>
+        <li><strong>Rendered text, public screens:</strong> ten screens captured at 390 px and 1280 px before and after the migration. All 20 captures match exactly.</li>
+        <li><strong>Portal literals:</strong> 561 plain-text literals from the original portal files were checked. All 561 are present verbatim in the content modules.</li>
+        <li><strong>Build and checks:</strong> typecheck, lint, 15 frontend tests and the production build pass. No display text is left in the screens or components, apart from data values the code compares against (status codes and similar).</li>
+      </ul>
+      <h3>Not yet in the content layer</h3>
+      <ul>
+        <li>The backend's own user-facing text: email and SMS templates, and API error messages shown in the UI.</li>
+        <li>The 54 legacy HTML pages in <code>public_html/</code>. These are static files and are not part of the React build.</li>
+        <li>The Flutter mobile app's text, which has its own copy of the strings.</li>
+        <li>Status codes are still raw codes in some live views (for example <code>pending_vendor</code>, <code>en_route</code>), since no label map exists for them.</li>
+      </ul>
+      <h3>Trade-offs</h3>
+      <ul>
+        <li>The content is compiled into the bundle. A change needs a rebuild and deploy, not an editor in a CMS. Moving to a headless CMS later means replacing the module imports with a loader. The keys are already in place for that.</li>
+        <li>There is no locale support yet. Adding a second language would mean one module per locale, with the same keys.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>5. Findings</h2>
+      <h3>Security</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Severity</th><th>Finding</th><th>Action</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill high">HIGH</span></td><td>A real Supabase database URL with its password is in <code>backend/vitest.config.ts</code>. It replaced the blank value that was set earlier for the tests.</td><td>Revert to a blank value and rotate the database password. Test config must never hold real credentials.</td></tr>
+            <tr><td><span class="pill high">HIGH</span></td><td>Credentials in <code>backend/.env.local</code> were printed in tool output during this session. These include the MongoDB connection string password and the OneSignal REST key.</td><td>Rotate both. Keep <code>.env.local</code> out of version control and out of logs.</td></tr>
+            <tr><td><span class="pill medium">MEDIUM</span></td><td>Demo accounts with a plain admin password are in <code>LoginScreen</code> source (content). They are switched off by <code>demoDataEnabled = false</code>, but the strings are still in the source.</td><td>Delete the demo credentials from the source. Keep the flag only as a build-time switch.</td></tr>
+            <tr><td><span class="pill medium">MEDIUM</span></td><td>The refresh cookie uses <code>SameSite=None; Secure</code> because the frontend and API are on different sites. Some browsers block third-party cookies.</td><td>Serve the API from a subdomain of the frontend domain.</td></tr>
+            <tr><td><span class="pill medium">MEDIUM</span></td><td>The global rate limiter and the realtime server both use in-memory state.</td><td>Run one API instance until a Redis store is added.</td></tr>
+            <tr><td><span class="pill low">DONE</span></td><td>Database TLS verification is enforced in production, the fixed verification code is blocked in production, the CSP is set, the CORS list is driven by config, and both backend audits are clean.</td><td>None.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>Correctness (reported by the migration review, not fixed)</h3>
+      <ul>
+        <li><strong>Tracking:</strong> a failed background refetch replaces an open tracking view with the error state, because <code>query.isError</code> is checked before <code>query.data</code>.</li>
+        <li><strong>Customer operations:</strong> Title Case comparisons (<code>'Delivered'</code>, <code>'Cancelled'</code>) never match the lowercase live codes. As a result, Rate is always disabled and Cancel is never disabled in live mode.</li>
+        <li><strong>Live statuses:</strong> customer, dispatch and notification views show raw status codes with no label mapping.</li>
+        <li><strong>Admin workspace:</strong> the <code>vendors</code>, <code>drivers</code>, <code>customers</code> and <code>fleet</code> items return early, so their dedicated views are unreachable. In demo mode, fleet renders the vendor list.</li>
+        <li><strong>Dates:</strong> <code>toISOString()</code> on local midnight shifts the date by one day in IST. This affects the finance settlement start date and the default report range.</li>
+        <li><strong>Vendor fleet:</strong> capacity is labelled "KL" but saved as litres.</li>
+        <li><strong>Partner form:</strong> the partner type and availability values submitted to the API are the English labels, not codes.</li>
+        <li><strong>Invoices:</strong> the "Total paid invoices" label counts all invoices.</li>
+        <li><strong>Dead code:</strong> <code>CustomerTracking</code>, <code>CustomerMembership</code> and <code>CustomerAddresses</code> are not reachable from the workspace.</li>
+        <li><strong>Coupons:</strong> the "expiring this period" count uses a hard-coded date of 2026-12-31.</li>
+        <li><strong>Booking:</strong> the review step formats the amount with <code>toLocaleString</code>, while the summary uses <code>Intl</code> currency formatting, so the two can differ.</li>
+        <li><strong>Footer:</strong> "Empty tanker hire" in the footer and "Empty tanker transport" in the header dropdown.</li>
+        <li><strong>Home:</strong> <code>detectLocation</code> checks the loading state from the render closure, so two quick calls can get past the guard.</li>
+      </ul>
+      <h3>Reliability and operations</h3>
+      <ul>
+        <li>Fixed in this review cycle: dev proxy port mismatch, trailing slash in <code>FRONTEND_ORIGIN</code>, stale chunks after deploy, the duplicated backend test run, and the blank-value config crash.</li>
+        <li>The advisory lock for background sweeps has not been run against a live Postgres.</li>
+        <li>Two development fallbacks point at <code>localhost</code> in the frontend source and need a review before release.</li>
+      </ul>
+      <h3>Maintainability</h3>
+      <ul>
+        <li>Many screens and SCSS partials were written as one-line blocks, which makes review and diffs hard. The content migration has split the screen files, but styles are unchanged.</li>
+        <li>Line endings are mixed across the tree (CRLF and LF), which adds noise to diffs.</li>
+        <li>Unused dependencies: <code>@vis.gl/react-google-maps</code> is installed in the web app but not used.</li>
+        <li>Two public folders: <code>public/</code> for the React build and <code>public_html/</code> for the legacy reference site. This is easy to confuse.</li>
+        <li>Only five frontend test files exist, and there are no component or screen tests. The portal screens were verified by static checks and the typechecker, not by behaviour tests.</li>
+        <li>The git index holds staged versions of some edited files that differ from both HEAD and the working tree. Clear the index before committing.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>6. Recommendations</h2>
+      <ol>
+        <li><strong>Now:</strong> revert the database URL in <code>backend/vitest.config.ts</code>, rotate the credentials listed above, and remove the demo credentials from source.</li>
+        <li><strong>Before launch:</strong> fix the portal correctness items, starting with the customer status comparison and the admin workspace early returns. Add behaviour tests for those views.</li>
+        <li><strong>Before launch:</strong> resolve the cross-site cookie with an API subdomain, and run the Playwright suite against staging.</li>
+        <li><strong>Next:</strong> move the backend's email and SMS templates into content, and decide on the status label map for live views.</li>
+        <li><strong>Next:</strong> add component tests for the portal screens, and tidy the SCSS and line endings.</li>
+        <li><strong>Later:</strong> add a Redis adapter and rate-limit store before scaling beyond one instance, and move the content layer to a headless CMS if the content team needs to edit it directly.</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>7. Limits of This Analysis</h2>
+      <ul>
+        <li>Behaviour was checked for the public screens only, using browser captures. Portal screens were checked by static comparison and the typechecker, because they need signed-in accounts.</li>
+        <li>The Flutter app and the backend's templates were not reviewed in detail.</li>
+        <li>No changes were committed.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,4 +1,51 @@
-import { ArrowRight, Construction, Droplets, Factory, Gauge, Truck, Waves } from 'lucide-react'
+import { ArrowRight, Construction, Droplets, Factory, Gauge, Truck, Waves, type LucideIcon } from 'lucide-react'
 import { useNavigationStore } from '../stores/navigationStore'
-const items = [{ category: 'EVERYDAY ESSENTIALS', name: 'Water tankers', description: 'Domestic, potable and industrial supply from 3 to 16 KL.', icon: Droplets, features: 'Homes, apartments and project sites' }, { category: 'CLEANER SPACES', name: 'Sewage tankers', description: 'Septic cleaning, suction and scheduled wastewater collection.', icon: Waves, features: 'Scheduled collection and septic cleaning' }, { category: 'BELOW THE SURFACE', name: 'Borewell services', description: 'Drilling, inspection and maintenance planned around your property.', icon: Factory, features: 'Drilling, inspection and maintenance' }, { category: 'BUILT FOR PROJECTS', name: 'RMC mixer trucks', description: 'Ready-mix concrete delivered to your construction site.', icon: Construction, features: 'Concrete delivery for active builds' }, { category: 'BEYOND WATER', name: 'Empty tanker hire', description: 'Dedicated tanker hire for your commercial requirements.', icon: Truck, features: 'Flexible commercial tanker capacity' }, { category: 'SITE CARE', name: 'Tank and sump cleaning', description: 'Deep cleaning for domestic, apartment and commercial sites.', icon: Gauge, features: 'Hygienic cleaning and maintenance' }]
-export default function ServicesScreen() { const navigate = useNavigationStore((state) => state.navigate); return <section className="content-screen services-screen"><div className="section-intro"><p className="eyebrow">OUR SERVICES</p><h1>Everything your site needs.</h1><p>One trusted partner for water, sanitation, infrastructure and bulk-liquid logistics.</p></div><div className="service-detail-grid">{items.map(({ category, name, description, icon: Icon, features }) => <article className="service-detail-card" key={name}><div className="service-detail-visual"><span className="service-icon"><Icon size={30} /></span></div><div className="service-detail-body"><p className="service-category">{category}</p><h2>{name}</h2><p>{description}</p><ul><li>{features}</li><li>Clear pricing and booking updates</li></ul><button className="button button-primary" onClick={() => navigate('booking')}>Request service <ArrowRight size={15} /></button></div></article>)}</div></section> }
+import { servicesContent as c } from '../content/services'
+
+type ItemId = (typeof c.items)[number]['id']
+
+const itemIcons: Record<ItemId, LucideIcon> = {
+  water: Droplets,
+  sewage: Waves,
+  borewell: Factory,
+  rmc: Construction,
+  emptyTanker: Truck,
+  tankCleaning: Gauge,
+}
+
+export default function ServicesScreen() {
+  const navigate = useNavigationStore((state) => state.navigate)
+  return (
+    <section className="content-screen services-screen">
+      <div className="section-intro">
+        <p className="eyebrow">{c.intro.eyebrow}</p>
+        <h1>{c.intro.title}</h1>
+        <p>{c.intro.body}</p>
+      </div>
+      <div className="service-detail-grid">
+        {c.items.map((item) => {
+          const Icon = itemIcons[item.id]
+          return (
+            <article className="service-detail-card" key={item.id}>
+              <div className="service-detail-visual">
+                <span className="service-icon"><Icon size={30} /></span>
+              </div>
+              <div className="service-detail-body">
+                <p className="service-category">{item.category}</p>
+                <h2>{item.name}</h2>
+                <p>{item.description}</p>
+                <ul>
+                  <li>{item.features}</li>
+                  <li>{c.sharedFeature}</li>
+                </ul>
+                <button className="button button-primary" onClick={() => navigate('booking')}>
+                  {c.requestService} <ArrowRight size={15} />
+                </button>
+              </div>
+            </article>
+          )
+        })}
+      </div>
+    </section>
+  )
+}

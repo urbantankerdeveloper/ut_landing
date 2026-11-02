@@ -4,6 +4,9 @@ import { Plus } from 'lucide-react'
 import { adminApi, type AdminSmsTemplate } from '../api/admin'
 import { adminQueryKeys, useAdminSmsTemplates } from '../hooks/useAdminData'
 import { Modal } from './WorkspaceInteractive'
+import { adminEntitiesContent as c } from '../content/admin-entities'
+
+const copy = c.smsTemplates
 
 type Draft = { templateKey: string; body: string; isActive: boolean; msg91TemplateId: string; isBuiltIn: boolean; allowedVariables: string[] | null }
 const emptyDraft: Draft = { templateKey: '', body: '', isActive: true, msg91TemplateId: '', isBuiltIn: false, allowedVariables: null }
@@ -35,9 +38,9 @@ export function AdminSmsTemplatesScreen({ onNotice }: { onNotice: (message: stri
     onSuccess: async (saved) => {
       await queryClient.invalidateQueries({ queryKey: adminQueryKeys.smsTemplates })
       setDraft(null)
-      onNotice(`SMS template "${saved.templateKey}" saved.`)
+      onNotice(copy.saved(saved.templateKey))
     },
-    onError: (error) => setFormError(error instanceof Error ? error.message : 'SMS template could not be saved.'),
+    onError: (error) => setFormError(error instanceof Error ? error.message : copy.saveFailed),
   })
 
   function openNew() {
@@ -56,17 +59,17 @@ export function AdminSmsTemplatesScreen({ onNotice }: { onNotice: (message: stri
     event.preventDefault()
     if (!draft) return
     if (isNew && !templateKeyPattern.test(draft.templateKey.trim())) {
-      setFormError('Key must start with a letter and use lowercase letters, numbers and underscores (3-64 characters).')
+      setFormError(copy.keyRule)
       return
     }
     if (!draft.body.trim()) {
-      setFormError('Message body is required.')
+      setFormError(copy.bodyRequired)
       return
     }
     if (draft.allowedVariables) {
       const unknown = placeholdersIn(draft.body).filter((name) => !draft.allowedVariables!.includes(name))
       if (unknown.length) {
-        setFormError(`Remove unknown placeholder(s): ${unknown.map((name) => `{{${name}}}`).join(', ')}`)
+        setFormError(copy.unknownPlaceholders(unknown.map((name) => copy.placeholderToken(name)).join(c.common.listSeparator)))
         return
       }
     }
@@ -74,8 +77,8 @@ export function AdminSmsTemplatesScreen({ onNotice }: { onNotice: (message: stri
     save.mutate(draft)
   }
 
-  if (query.isLoading) return <section className="admin-view-panel"><h2>Loading SMS templates...</h2></section>
-  if (query.isError) return <section className="admin-view-panel"><h2>SMS templates are unavailable.</h2><button className="button button-primary" onClick={() => void query.refetch()}>Retry</button></section>
+  if (query.isLoading) return <section className="admin-view-panel"><h2>{copy.loading}</h2></section>
+  if (query.isError) return <section className="admin-view-panel"><h2>{copy.unavailable}</h2><button className="button button-primary" onClick={() => void query.refetch()}>{copy.retry}</button></section>
 
   const templates = query.data ?? []
 
@@ -83,12 +86,12 @@ export function AdminSmsTemplatesScreen({ onNotice }: { onNotice: (message: stri
     <section className="admin-view-panel admin-sms-templates">
       <div className="view-panel-heading">
         <div>
-          <p className="eyebrow">SMS TEMPLATES</p>
-          <h2>Customer and vendor messages.</h2>
+          <p className="eyebrow">{copy.eyebrow}</p>
+          <h2>{copy.title}</h2>
         </div>
-        <button className="button button-primary" onClick={openNew}><Plus size={16} /> Add template</button>
+        <button className="button button-primary" onClick={openNew}><Plus size={16} /> {copy.addTemplate}</button>
       </div>
-      <p className="admin-sms-note">Wording must match the DLT-approved text in MSG91 exactly, or messages will not be delivered in India.</p>
+      <p className="admin-sms-note">{copy.note}</p>
 
       <div className="admin-entity-list">
         {templates.map((template) => (
@@ -97,49 +100,49 @@ export function AdminSmsTemplatesScreen({ onNotice }: { onNotice: (message: stri
               <b>{template.templateKey}</b>
               <p>{template.body}</p>
               <small>
-                {template.isActive ? 'Active' : 'Inactive'} · {template.isBuiltIn ? 'Built-in' : 'Custom'} · Updated {new Date(template.updatedAt).toLocaleString('en-IN')}
+                {copy.meta(template.isActive ? copy.active : copy.inactive, template.isBuiltIn ? copy.builtIn : copy.custom, new Date(template.updatedAt).toLocaleString('en-IN'))}
               </small>
             </div>
-            <button className="entity-status-button" onClick={() => openEdit(template)}>Edit</button>
+            <button className="entity-status-button" onClick={() => openEdit(template)}>{copy.edit}</button>
           </article>
         ))}
-        {!templates.length && <div className="admin-empty-state">No SMS templates yet.</div>}
+        {!templates.length && <div className="admin-empty-state">{copy.empty}</div>}
       </div>
 
       {draft && (
-        <Modal title={isNew ? 'Add SMS template' : `Edit ${draft.templateKey}`} onClose={() => setDraft(null)}>
+        <Modal title={isNew ? copy.addTitle : copy.editTitle(draft.templateKey)} onClose={() => setDraft(null)}>
           <form className="modal-form" onSubmit={submit}>
             <label>
-              Template key
-              <input required disabled={!isNew} value={draft.templateKey} placeholder="e.g. order_cancelled" onChange={(event) => setDraft({ ...draft, templateKey: event.target.value })} />
-              {isNew && <small>The backend sends a message only when code uses this key.</small>}
+              {copy.templateKey}
+              <input required disabled={!isNew} value={draft.templateKey} placeholder={copy.templateKeyPlaceholder} onChange={(event) => setDraft({ ...draft, templateKey: event.target.value })} />
+              {isNew && <small>{copy.templateKeyHelp}</small>}
             </label>
             <label>
-              Message body
+              {copy.messageBody}
               <textarea required rows={5} value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} />
               <small>
-                {draft.body.length} characters · {segmentCount(draft.body.length)} SMS segment(s)
+                {copy.counter(draft.body.length, segmentCount(draft.body.length))}
               </small>
             </label>
             <div className="admin-sms-variables">
-              <span>Placeholders:</span>
+              <span>{copy.placeholders}</span>
               {draft.allowedVariables
-                ? draft.allowedVariables.map((name) => <code key={name}>{`{{${name}}}`}</code>)
-                : <small>Use {'{{name}}'} style placeholders.</small>}
+                ? draft.allowedVariables.map((name) => <code key={name}>{copy.placeholderToken(name)}</code>)
+                : <small>{copy.placeholderHelp}</small>}
             </div>
             <label>
-              MSG91 template ID
-              <input value={draft.msg91TemplateId} placeholder={draft.isBuiltIn ? 'Blank uses the env config ID' : 'From your DLT-approved MSG91 template'} onChange={(event) => setDraft({ ...draft, msg91TemplateId: event.target.value })} />
-              <small>Needed before a new template can be sent through MSG91.</small>
+              {copy.msg91TemplateId}
+              <input value={draft.msg91TemplateId} placeholder={draft.isBuiltIn ? copy.builtInIdPlaceholder : copy.customIdPlaceholder} onChange={(event) => setDraft({ ...draft, msg91TemplateId: event.target.value })} />
+              <small>{copy.msg91Help}</small>
             </label>
             <label className="admin-sms-active">
               <input type="checkbox" checked={draft.isActive} onChange={(event) => setDraft({ ...draft, isActive: event.target.checked })} />
-              Active
+              {copy.active}
             </label>
             {formError && <p className="admin-form-error" role="alert">{formError}</p>}
             <div className="modal-form-row">
-              <button className="button button-quiet" type="button" onClick={() => setDraft(null)}>Cancel</button>
-              <button className="button button-primary" type="submit" disabled={save.isPending}>{save.isPending ? 'Saving…' : 'Save template'}</button>
+              <button className="button button-quiet" type="button" onClick={() => setDraft(null)}>{copy.cancel}</button>
+              <button className="button button-primary" type="submit" disabled={save.isPending}>{save.isPending ? copy.saving : copy.saveTemplate}</button>
             </div>
           </form>
         </Modal>

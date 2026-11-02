@@ -16,6 +16,7 @@ import { isChennaiDeliveryAddress, lookupDeliveryPoint } from '../services/geoco
 import { BOOKING_DRAFT_KEY, REPEAT_BOOKING_KEY } from '../constants/bookingDraft'
 import { BookingServiceItem, type BookingServiceDraft, type BookingServiceEntry, type BookingServiceField, type BookingServiceFieldErrors } from '../components/booking/BookingServiceItem'
 import { BookingHero, BookingProgress, BookingSection, BookingSummary, type BookingSummaryItem } from '../components/booking/BookingPageSections'
+import { bookingContent as c } from '../content/booking'
 
 const LocationPickerModal = lazyWithRetry(() => import('../components/LocationPickerModal').then((module) => ({ default: module.LocationPickerModal })))
 
@@ -26,13 +27,13 @@ type CouponRecord = { discount_type?: string; discount_value?: number | string; 
 type ServiceFieldErrors = BookingServiceFieldErrors & { deliveryDate?: string; location?: string }
 type ServiceDraft = BookingServiceDraft & { deliveryDate: string; location: string; latitude?: number; longitude?: number }
 const bookingFormSchema = z.object({
-  selectedServices: z.array(z.string()).min(1, 'Select at least one service.'),
+  selectedServices: z.array(z.string()).min(1, c.validation.selectService),
   capacity: z.string().optional(),
-  phone: z.string().regex(/^\d{10}$/, 'Enter a valid 10-digit mobile number.'),
-  notes: z.string().max(500, 'Access notes must be 500 characters or fewer.').optional(),
+  phone: z.string().regex(/^\d{10}$/, c.validation.phone),
+  notes: z.string().max(500, c.validation.accessNotesMax).optional(),
   paymentMethod: z.enum(['wallet', 'gateway', 'cod']),
   couponCode: z.string().optional(),
-  guestName: z.string().trim().max(60, 'Name must be 60 characters or fewer.').optional(),
+  guestName: z.string().trim().max(60, c.validation.guestNameMax).optional(),
 })
 type BookingFormValues = z.infer<typeof bookingFormSchema>
 type BookingDraft = {
@@ -86,31 +87,31 @@ function serviceDraftFor(serviceId: string): ServiceDraft {
 function serviceItemErrors(serviceId: string, values: ServiceDraft): ServiceFieldErrors {
   const errors: ServiceFieldErrors = {}
   if (serviceId === 'water_tanker') {
-    if (!values.capacity) errors.capacity = 'Choose a tanker capacity.'
-    if (!values.waterType) errors.waterType = 'Choose a water type.'
-    if (!values.tankerCount || Number(values.tankerCount) < 1 || Number(values.tankerCount) > 5) errors.tankerCount = 'Enter 1 to 5 tankers.'
+    if (!values.capacity) errors.capacity = c.validation.capacity
+    if (!values.waterType) errors.waterType = c.validation.waterType
+    if (!values.tankerCount || Number(values.tankerCount) < 1 || Number(values.tankerCount) > 5) errors.tankerCount = c.validation.tankerCount
   } else if (['sewage_tanker', 'emergency_water'].includes(serviceId)) {
-    if (!values.serviceType) errors.serviceType = 'Choose a service type.'
-    if (!values.capacity) errors.capacity = 'Choose a tanker capacity.'
-    if (!values.tankerCount || Number(values.tankerCount) < 1 || Number(values.tankerCount) > 5) errors.tankerCount = 'Enter 1 to 5 tankers.'
+    if (!values.serviceType) errors.serviceType = c.validation.serviceType
+    if (!values.capacity) errors.capacity = c.validation.capacity
+    if (!values.tankerCount || Number(values.tankerCount) < 1 || Number(values.tankerCount) > 5) errors.tankerCount = c.validation.tankerCount
   } else if (['drinking_water', 'tank_cleaning'].includes(serviceId)) {
-    if (!values.serviceType) errors.serviceType = 'Choose a service type.'
-    if (!values.quantity || Number(values.quantity) < 1) errors.quantity = 'Enter a quantity greater than zero.'
+    if (!values.serviceType) errors.serviceType = c.validation.serviceType
+    if (!values.quantity || Number(values.quantity) < 1) errors.quantity = c.validation.quantity
   } else if (serviceId === 'borewell_service') {
-    if (!values.serviceType) errors.serviceType = 'Choose a borewell service.'
+    if (!values.serviceType) errors.serviceType = c.validation.borewellService
   } else if (serviceId === 'rmc_mix') {
-    if (!values.grade) errors.grade = 'Choose a concrete grade.'
-    if (!values.quantity || Number(values.quantity) < 1) errors.quantity = 'Enter a concrete quantity greater than zero.'
-    if (!values.pump) errors.pump = 'Choose a pump requirement.'
+    if (!values.grade) errors.grade = c.validation.grade
+    if (!values.quantity || Number(values.quantity) < 1) errors.quantity = c.validation.concreteQuantity
+    if (!values.pump) errors.pump = c.validation.pump
   } else if (serviceId === 'empty_tanker') {
-    if (!values.capacity) errors.capacity = 'Choose a tanker capacity.'
-    if (!values.tankerCount || Number(values.tankerCount) < 1 || Number(values.tankerCount) > 5) errors.tankerCount = 'Enter 1 to 5 tankers.'
-    if (!values.pickupLocation.trim()) errors.pickupLocation = 'Enter a pickup address.'
-    if (!values.materialType.trim()) errors.materialType = 'Enter the material to transport.'
+    if (!values.capacity) errors.capacity = c.validation.capacity
+    if (!values.tankerCount || Number(values.tankerCount) < 1 || Number(values.tankerCount) > 5) errors.tankerCount = c.validation.tankerCount
+    if (!values.pickupLocation.trim()) errors.pickupLocation = c.validation.pickupAddress
+    if (!values.materialType.trim()) errors.materialType = c.validation.materialType
   } else if (values.notes.trim().length < 3) {
-    errors.notes = 'Describe this service in at least 3 characters.'
+    errors.notes = c.validation.serviceNotesMin
   }
-  if (values.notes.length > 1000) errors.notes = 'Service details must be 1,000 characters or fewer.'
+  if (values.notes.length > 1000) errors.notes = c.validation.serviceNotesMax
   return errors
 }
 
@@ -234,10 +235,10 @@ function estimatedServiceAmount(item: BookingServiceDetails, service: { price: n
 
 function formatOfferDiscount(offer: CouponRecord) {
   const value = Number(offer.discount_value ?? offer.discount ?? 0)
-  if (!Number.isFinite(value) || value <= 0) return 'Special offer'
+  if (!Number.isFinite(value) || value <= 0) return c.offers.specialOffer
   return ['percentage', 'percent', '%'].includes(String(offer.discount_type ?? '').toLowerCase())
-    ? `${value}% off`
-    : `INR ${value.toLocaleString('en-IN')} off`
+    ? c.offers.percentOff(value)
+    : c.offers.flatOff(value.toLocaleString('en-IN'))
 }
 
 function currentDateInputValue() {
@@ -341,7 +342,7 @@ export default function BookingScreen() {
   const selectedServices = useMemo(() => serviceEntries.map((entry) => entry.serviceId), [serviceEntries])
   const activeServiceEntries = useMemo(() => serviceEntries.filter((entry) => options.some((option) => option.code === entry.serviceId)), [serviceEntries, options])
   const availableServiceOptions = useMemo(() => options.filter((option) => !activeServiceEntries.some((entry) => entry.serviceId === option.code)), [activeServiceEntries, options])
-  const addServiceLabel = activeServiceEntries.length ? 'Add another service' : 'Add service'
+  const addServiceLabel = activeServiceEntries.length ? c.selectServices.addAnotherService : c.selectServices.addService
   const selectedServiceToAdd = availableServiceOptions.some((option) => option.code === serviceToAdd)
     ? serviceToAdd
     : availableServiceOptions[0]?.code ?? ''
@@ -456,7 +457,7 @@ export default function BookingScreen() {
     setError(null)
   }, [options])
   const removeServiceEntry = useCallback((entryId: string) => {
-    if (serviceEntries.length <= 1) { setError('Keep at least one service in your booking.'); return }
+    if (serviceEntries.length <= 1) { setError(c.errors.keepOneService); return }
     setServiceEntries((current) => current.filter((entry) => entry.id !== entryId))
     setServiceDetails((current) => { const next = { ...current }; delete next[entryId]; return next })
     setServiceFieldErrors((current) => { const next = { ...current }; delete next[entryId]; return next })
@@ -515,11 +516,11 @@ export default function BookingScreen() {
     if (address.trim().length < 3) return false
     setLocationToasts((current) => { const next = { ...current }; delete next[service]; return next })
     if (!isChennaiDeliveryAddress(address.trim())) {
-      const message = 'We currently deliver only within Chennai. Please choose another location inside Chennai.'
+      const message = c.location.outsideChennai
       setLocationEligibility((current) => ({ ...current, [service]: false }))
       setLocationStatus((current) => { const next = { ...current }; delete next[service]; return next })
       setLocationToasts((current) => ({ ...current, [service]: message }))
-      setServiceFieldErrors((current) => ({ ...current, [service]: { ...current[service], location: 'Choose a delivery location inside Chennai.' } }))
+      setServiceFieldErrors((current) => ({ ...current, [service]: { ...current[service], location: c.location.chooseInsideChennai } }))
       return false
     }
     setLocationEligibility((current) => ({ ...current, [service]: true }))
@@ -533,31 +534,31 @@ export default function BookingScreen() {
     setServiceDetails((current) => ({ ...current, ...Object.fromEntries(serviceEntries.map((entry) => [entry.id, { ...emptyServiceDraft(), ...current[entry.id], latitude: point.lat, longitude: point.lng }])) }))
     setLocationEligibility((current) => ({ ...current, ...Object.fromEntries(serviceEntries.map((entry) => [entry.id, true])) }))
     setLocationToasts((current) => ({ ...current, shared: '' }))
-    setLocationStatus((current) => ({ ...current, shared: 'Delivery area selected and will be shared securely with the assigned fleet.' }))
+    setLocationStatus((current) => ({ ...current, shared: c.location.areaSelected }))
   }
   async function updateDetectedLocation(service: string, point: LatLngLiteral) {
-    setLocationStatus((current) => ({ ...current, [service]: 'Finding nearby area…' }))
+    setLocationStatus((current) => ({ ...current, [service]: c.location.findingNearbyArea }))
     try {
       const result = await lookupDeliveryPoint(point)
       if (!result.isInChennai) {
         setLocationStatus((current) => { const next = { ...current }; delete next[service]; return next })
         setLocationEligibility((current) => ({ ...current, [service]: false }))
-        setLocationToasts((current) => ({ ...current, [service]: 'We currently deliver only within Chennai. Please choose another location inside Chennai.' }))
+        setLocationToasts((current) => ({ ...current, [service]: c.location.outsideChennai }))
         return
       }
       updateMapLocation(service, point, result.approximateName)
-      setLocationStatus((current) => ({ ...current, [service]: 'Current location detected and will be shared securely with the assigned fleet.' }))
+      setLocationStatus((current) => ({ ...current, [service]: c.location.currentLocationDetected }))
     } catch (error) {
       setLocationStatus((current) => { const next = { ...current }; delete next[service]; return next })
       setLocationEligibility((current) => ({ ...current, [service]: false }))
-      setLocationToasts((current) => ({ ...current, [service]: 'We could not verify this location. Please choose another location inside Chennai.' }))
+      setLocationToasts((current) => ({ ...current, [service]: c.location.verifyFailed }))
       console.warn(JSON.stringify({ event: 'location.reverse_geocode_failed', error: error instanceof Error ? error.message : 'Unknown error' }))
     }
   }
   function detectLocation(service: string) {
-    if (!navigator.geolocation) { setLocationStatus((current) => ({ ...current, [service]: 'Location detection is not supported by this browser.' })); return }
-    setLocationStatus((current) => ({ ...current, [service]: 'Detecting your current location…' }))
-    navigator.geolocation.getCurrentPosition((position) => { void updateDetectedLocation(service, { lat: position.coords.latitude, lng: position.coords.longitude }) }, (positionError) => { setLocationStatus((current) => ({ ...current, [service]: positionError.code === positionError.PERMISSION_DENIED ? 'Location permission was not granted. Enter the delivery address instead.' : 'Location could not be detected. Enter the delivery address instead.' })) }, { enableHighAccuracy: true, timeout: 10_000, maximumAge: 60_000 })
+    if (!navigator.geolocation) { setLocationStatus((current) => ({ ...current, [service]: c.location.unsupported })); return }
+    setLocationStatus((current) => ({ ...current, [service]: c.location.detectingLocation }))
+    navigator.geolocation.getCurrentPosition((position) => { void updateDetectedLocation(service, { lat: position.coords.latitude, lng: position.coords.longitude }) }, (positionError) => { setLocationStatus((current) => ({ ...current, [service]: positionError.code === positionError.PERMISSION_DENIED ? c.location.permissionDenied : c.location.unavailable })) }, { enableHighAccuracy: true, timeout: 10_000, maximumAge: 60_000 })
   }
   function isPhoneVerified(phoneValue: string) {
     const normalized = phoneValue.replace(/\D/g, '').slice(-10)
@@ -572,7 +573,7 @@ export default function BookingScreen() {
     for (const entry of activeServiceEntries) {
       const values = serviceDetails[entry.id] ?? emptyServiceDraft()
       const errors = serviceItemErrors(entry.serviceId, values)
-      if (!isValidDeliveryDate(sharedDate)) errors.deliveryDate = sharedDate < today ? 'Choose today or a future date.' : 'Choose a valid delivery date.'
+      if (!isValidDeliveryDate(sharedDate)) errors.deliveryDate = sharedDate < today ? c.validation.deliveryDatePast : c.validation.deliveryDateInvalid
       if (Object.keys(errors).length) fieldErrors[entry.id] = errors
     }
     const outsideChennai = activeServiceEntries.map((entry) => {
@@ -581,23 +582,23 @@ export default function BookingScreen() {
     })
     activeServiceEntries.forEach((entry, index) => {
       if (!outsideChennai[index]) return
-      fieldErrors[entry.id] = { ...fieldErrors[entry.id], location: 'Choose a delivery location inside Chennai.' }
+      fieldErrors[entry.id] = { ...fieldErrors[entry.id], location: c.location.chooseInsideChennai }
     })
     setServiceFieldErrors(fieldErrors)
     if (Object.keys(fieldErrors).length) {
-      setError('Please correct the highlighted service details.')
+      setError(c.errors.correctServiceDetails)
       return
     }
     if (!isPhoneVerified(normalizedPhone)) {
-      setError('Verify the shared mobile number with OTP before continuing.')
+      setError(c.errors.verifyPhoneBeforeContinuing)
       return
     }
     if (!(values.guestName ?? '').trim()) {
-      setError('Enter the customer or company name.')
+      setError(c.errors.customerNameRequired)
       return
     }
     if (saveAddressForFuture && isRegisteredCustomer && !savedAddressId && (!addressLabel.trim() || addressCity.trim().length < 2 || !/^\d{4,12}$/.test(addressPincode.trim()))) {
-      setError('Add an address label, city, and valid pincode to save this address.')
+      setError(c.errors.addressDetailsRequired)
       return
     }
     trackEvent('booking.started', { service: servicesForQuote.join(','), capacity: Number(values.capacity) || 0 })
@@ -605,26 +606,26 @@ export default function BookingScreen() {
     setReviewConsent(false)
     setStep('review')
   }
-  async function applyCoupon(selectedCode = getValues('couponCode') ?? '') { const code = selectedCode.trim().toUpperCase(); if (!code) { setCouponMessage('Enter a coupon code.'); return }; setValue('couponCode', code); setCouponMessage(null); try { const result = await couponValidation.mutateAsync({ code, serviceCode: selectedServices[0], amount: subtotal }); const discount = calculateDiscount(result.coupon as CouponRecord, subtotal); if (!result.valid || !discount) { setCouponDiscount(0); setCouponMessage('Coupon is not valid for this booking.'); return }; setCouponDiscount(discount); setCouponMessage(`Coupon applied. You saved INR ${discount.toLocaleString('en-IN')}.`) } catch (validationError) { setCouponDiscount(0); setCouponMessage(validationError instanceof Error ? validationError.message : 'Coupon could not be validated.') } }
+  async function applyCoupon(selectedCode = getValues('couponCode') ?? '') { const code = selectedCode.trim().toUpperCase(); if (!code) { setCouponMessage(c.coupon.enterCode); return }; setValue('couponCode', code); setCouponMessage(null); try { const result = await couponValidation.mutateAsync({ code, serviceCode: selectedServices[0], amount: subtotal }); const discount = calculateDiscount(result.coupon as CouponRecord, subtotal); if (!result.valid || !discount) { setCouponDiscount(0); setCouponMessage(c.coupon.notValid); return }; setCouponDiscount(discount); setCouponMessage(c.coupon.applied(discount.toLocaleString('en-IN'))) } catch (validationError) { setCouponDiscount(0); setCouponMessage(validationError instanceof Error ? validationError.message : c.coupon.validationFailed) } }
   async function requestGuestOtp() {
     const normalizedPhone = getValues('phone').replace(/\D/g, '').slice(-10)
-    if (!/^\d{10}$/.test(normalizedPhone)) { setOtpMessages((current) => ({ ...current, [normalizedPhone]: 'Enter a valid 10-digit mobile number.' })); return }
+    if (!/^\d{10}$/.test(normalizedPhone)) { setOtpMessages((current) => ({ ...current, [normalizedPhone]: c.validation.phone })); return }
     setOtpPendingPhone(normalizedPhone)
     setOtpMessages((current) => ({ ...current, [normalizedPhone]: '' }))
     try {
       const result = await customerApi.requestGuestOtp(normalizedPhone)
       setOtpChallenges((current) => ({ ...current, [normalizedPhone]: result.challengeId }))
       setOtpValues((current) => ({ ...current, [normalizedPhone]: '' }))
-      setOtpMessages((current) => ({ ...current, [normalizedPhone]: 'Verification code sent. It expires in 10 minutes.' }))
+      setOtpMessages((current) => ({ ...current, [normalizedPhone]: c.otp.codeSent }))
     } catch (otpError) {
-      setOtpMessages((current) => ({ ...current, [normalizedPhone]: otpError instanceof Error ? otpError.message : 'We could not send the verification code.' }))
+      setOtpMessages((current) => ({ ...current, [normalizedPhone]: otpError instanceof Error ? otpError.message : c.otp.sendFailed }))
     } finally { setOtpPendingPhone(null) }
   }
   async function verifyGuestOtp() {
     const normalizedPhone = getValues('phone').replace(/\D/g, '').slice(-10)
     const challengeId = otpChallenges[normalizedPhone]
     const otp = otpValues[normalizedPhone] ?? ''
-    if (!challengeId || !/^\d{6}$/.test(otp)) { setOtpMessages((current) => ({ ...current, [normalizedPhone]: 'Enter the 6-digit verification code.' })); return }
+    if (!challengeId || !/^\d{6}$/.test(otp)) { setOtpMessages((current) => ({ ...current, [normalizedPhone]: c.otp.codeRequired })); return }
     setOtpPendingPhone(normalizedPhone)
     setOtpMessages((current) => ({ ...current, [normalizedPhone]: '' }))
     try {
@@ -636,9 +637,9 @@ export default function BookingScreen() {
         signIn(session.user, session.accessToken, session.refreshToken)
       }
       setPhoneChallenges((current) => ({ ...current, [normalizedPhone]: challengeId }))
-      setOtpMessages((current) => ({ ...current, [normalizedPhone]: 'Mobile number verified. This number can be used for each selected service.' }))
+      setOtpMessages((current) => ({ ...current, [normalizedPhone]: c.otp.verified }))
     } catch (otpError) {
-      setOtpMessages((current) => ({ ...current, [normalizedPhone]: otpError instanceof Error ? otpError.message : 'The verification code could not be confirmed.' }))
+      setOtpMessages((current) => ({ ...current, [normalizedPhone]: otpError instanceof Error ? otpError.message : c.otp.verifyFailed }))
     } finally { setOtpPendingPhone(null) }
   }
   async function confirmBooking() {
@@ -646,11 +647,11 @@ export default function BookingScreen() {
     setError(null)
     try {
       const primaryService = serviceItems[0]
-      if (!primaryService) throw new Error('Select at least one available service before confirming.')
+      if (!primaryService) throw new Error(c.errors.selectServiceBeforeConfirm)
       const normalizedPhone = phone.replace(/\D/g, '').slice(-10)
-      if (!/^\d{10}$/.test(normalizedPhone) || !isPhoneVerified(normalizedPhone)) throw new Error('Verify the shared mobile number before confirming.')
+      if (!/^\d{10}$/.test(normalizedPhone) || !isPhoneVerified(normalizedPhone)) throw new Error(c.errors.verifyPhoneBeforeConfirm)
       const primaryDeliveryDate = primaryService.deliveryDate
-      if (!primaryDeliveryDate) throw new Error('Choose a preferred delivery date for each selected service.')
+      if (!primaryDeliveryDate) throw new Error(c.errors.deliveryDateRequired)
       if (saveAddressForFuture && isRegisteredCustomer && !savedAddressId && !customerDemoDataEnabled) {
         await createAddress.mutateAsync({ label: addressLabel.trim(), address: sharedLocation.trim(), city: addressCity.trim(), pincode: addressPincode.trim(), latitude: sharedCoordinates?.lat, longitude: sharedCoordinates?.lng })
         setSaveAddressForFuture(false)
@@ -684,53 +685,53 @@ export default function BookingScreen() {
       sessionStorage.removeItem(BOOKING_DRAFT_KEY)
       setStep('success')
     } catch (paymentError) {
-      setError(paymentError instanceof Error && paymentError.message === 'Payment cancelled' ? 'Payment cancelled. You can retry when you are ready.' : paymentError instanceof Error ? paymentError.message : 'We could not complete this booking. Check your connection and try again.')
+      setError(paymentError instanceof Error && paymentError.message === 'Payment cancelled' ? c.errors.paymentCancelled : paymentError instanceof Error ? paymentError.message : c.errors.bookingFailed)
     } finally { setIsSubmitting(false) }
   }
 
   const summaryItems: BookingSummaryItem[] = serviceItems.map((item, index) => {
     const serviceName = options.find((option) => option.code === item.serviceId)?.label ?? item.serviceId
     const duplicateCount = serviceItems.slice(0, index).filter((other) => other.serviceId === item.serviceId).length
-    const details = [item.serviceType, item.waterType, item.capacity, item.tankerCount ? `${item.tankerCount} tankers` : '', item.quantity, item.depth ? `${item.depth} ft` : '', item.grade].filter(Boolean).join(' · ') || 'Site review'
+    const details = [item.serviceType, item.waterType, item.capacity, item.tankerCount ? c.serviceSummary.tankers(item.tankerCount) : '', item.quantity, item.depth ? c.serviceSummary.depth(item.depth) : '', item.grade].filter(Boolean).join(c.serviceSummary.separator) || c.serviceSummary.emptyDetail
     const serviceOption = options.find((option) => option.code === item.serviceId)
     const unitPrice = serviceOption?.price ?? 0
     const estimatePending = unitPrice <= 0
-    return { id: activeServiceEntries[index]?.id ?? `${item.serviceId}-${index}`, label: duplicateCount ? `${serviceName} ${duplicateCount + 1}` : serviceName, detail: details, amount: estimatedServiceAmount(item, serviceOption), estimatePending }
+    return { id: activeServiceEntries[index]?.id ?? `${item.serviceId}-${index}`, label: duplicateCount ? c.serviceSummary.duplicateLabel(serviceName, duplicateCount + 1) : serviceName, detail: details, amount: estimatedServiceAmount(item, serviceOption), estimatePending }
   })
 
-  if (step === 'success') return <section className="booking-screen"><BookingHero onBack={() => navigate('home')} /><div className="booking-new-shell"><div className="surface booking-success"><span className="success-mark">✓</span><p className="eyebrow">REQUEST CREATED</p><h2>Your combined booking is ready.</h2><p>Reference <strong>{bookingId ?? 'confirmed'}</strong> contains all selected service requests.</p><div className="action-row"><button className="button button-primary" type="button" onClick={() => navigate('home')}>Return home <ArrowRight size={15} /></button></div></div></div></section>
+  if (step === 'success') return <section className="booking-screen"><BookingHero onBack={() => navigate('home')} /><div className="booking-new-shell"><div className="surface booking-success"><span className="success-mark">✓</span><p className="eyebrow">{c.success.eyebrow}</p><h2>{c.success.heading}</h2><p>{c.success.referenceLead} <strong>{bookingId ?? c.success.referenceFallback}</strong> {c.success.referenceTrail}</p><div className="action-row"><button className="button button-primary" type="button" onClick={() => navigate('home')}>{c.success.returnHome} <ArrowRight size={15} /></button></div></div></div></section>
 
   if (step === 'review' || step === 'payment') return <section className="booking-screen">
     <BookingHero onBack={() => navigate('home')} />
     <div className="booking-new-shell"><BookingProgress activeStep={step === 'review' ? 2 : 3} /><div className="booking-new-grid">
       <div className="booking-form">
-        <BookingSection number={step === 'review' ? '✓' : '03'} title={step === 'review' ? 'Review your combined booking' : 'Choose how to pay.'} description={step === 'review' ? 'Confirm every service before creating the request.' : 'Your payment is protected and linked to this booking.'}>
-          <dl className="detail-grid"><div><dt>Deliver to</dt><dd>{sharedDeliveryAddress}</dd></div><div><dt>Contact</dt><dd>{guestName} · {phone}</dd></div><div><dt>Schedule</dt><dd>{sharedDate} · {preferredTime}</dd></div><div><dt>Additional requirements</dt><dd>{details.notes || 'None'}</dd></div></dl>
+        <BookingSection number={step === 'review' ? '✓' : '03'} title={step === 'review' ? c.sections.review.title : c.sections.payment.title} description={step === 'review' ? c.sections.review.description : c.sections.payment.description}>
+          <dl className="detail-grid"><div><dt>{c.review.deliverTo}</dt><dd>{sharedDeliveryAddress}</dd></div><div><dt>{c.review.contact}</dt><dd>{c.review.contactValue(guestName, phone)}</dd></div><div><dt>{c.review.schedule}</dt><dd>{c.review.scheduleValue(sharedDate, preferredTime)}</dd></div><div><dt>{c.review.additionalRequirements}</dt><dd>{details.notes || c.review.none}</dd></div></dl>
           {serviceItems.map((item, index) => {
             const name = options.find((option) => option.code === item.serviceId)?.label ?? item.serviceId
             const duplicateCount = serviceItems.slice(0, index).filter((other) => other.serviceId === item.serviceId).length
             const unitPrice = options.find((option) => option.code === item.serviceId)?.price ?? 0
             const estimatePending = unitPrice <= 0
-            return <div className="review-item" key={activeServiceEntries[index]?.id ?? index}><h3>{duplicateCount ? `${name} ${duplicateCount + 1}` : name}</h3><p>{[item.serviceType, item.waterType, item.capacity, item.tankerCount ? `${item.tankerCount} tankers` : '', item.depth ? `${item.depth} ft` : '', item.quantity, item.grade, item.pump, item.pickupLocation, item.materialType, item.details].filter(Boolean).join(' · ')}</p><p>{estimatePending ? 'Quote pending' : `Estimated ${estimatedServiceAmount(item, options.find((option) => option.code === item.serviceId)).toLocaleString('en-IN')} INR · ${sharedDate} · ${sharedLocation}`}</p></div>
+            return <div className="review-item" key={activeServiceEntries[index]?.id ?? index}><h3>{duplicateCount ? c.serviceSummary.duplicateLabel(name, duplicateCount + 1) : name}</h3><p>{[item.serviceType, item.waterType, item.capacity, item.tankerCount ? c.serviceSummary.tankers(item.tankerCount) : '', item.depth ? c.serviceSummary.depth(item.depth) : '', item.quantity, item.grade, item.pump, item.pickupLocation, item.materialType, item.details].filter(Boolean).join(c.serviceSummary.separator)}</p><p>{estimatePending ? c.serviceSummary.quotePending : c.review.estimatedLine(estimatedServiceAmount(item, options.find((option) => option.code === item.serviceId)).toLocaleString('en-IN'), sharedDate, sharedLocation)}</p></div>
           })}
           {step === 'review' && <>
-            <label className="check-line booking-consent"><input type="checkbox" checked={reviewConsent} onChange={(event) => setReviewConsent(event.target.checked)} /> I confirm these requirements. Final vehicle availability, compatibility and project estimates may require vendor or admin review.</label>
-            <button className="button button-primary booking-review-button" type="button" disabled={!reviewConsent} onClick={() => setStep('payment')}>Continue to payment <ArrowRight size={16} /></button>
+            <label className="check-line booking-consent"><input type="checkbox" checked={reviewConsent} onChange={(event) => setReviewConsent(event.target.checked)} /> {c.review.consent}</label>
+            <button className="button button-primary booking-review-button" type="button" disabled={!reviewConsent} onClick={() => setStep('payment')}>{c.review.continueToPayment} <ArrowRight size={16} /></button>
           </>}
           {step === 'payment' && <>
-            <div className="guest-verification"><p className="eyebrow">MOBILE VERIFICATION</p><p className="verification-success">This shared number is verified and will receive booking updates and delivery OTPs.</p></div>
+            <div className="guest-verification"><p className="eyebrow">{c.verification.eyebrow}</p><p className="verification-success">{c.payment.verifiedNote}</p></div>
             {couponMessage && <p className={couponDiscount ? 'coupon-success' : 'coupon-error'} role="status">{couponMessage}</p>}
-            <div className="booking-price-summary"><div><span>Services</span><b>INR {subtotal.toLocaleString('en-IN')}</b></div><div><span>GST (18%)</span><b>INR {gst.toLocaleString('en-IN')}</b></div>{couponDiscount > 0 && <div><span>Coupon discount</span><b>- INR {couponDiscount.toLocaleString('en-IN')}</b></div>}<div className="booking-price-total"><span>Total</span><b>INR {total.toLocaleString('en-IN')}</b></div></div>
+            <div className="booking-price-summary"><div><span>{c.payment.services}</span><b>{c.payment.inr(subtotal.toLocaleString('en-IN'))}</b></div><div><span>{c.payment.gst}</span><b>{c.payment.inr(gst.toLocaleString('en-IN'))}</b></div>{couponDiscount > 0 && <div><span>{c.payment.couponDiscount}</span><b>{c.payment.couponDiscountAmount(couponDiscount.toLocaleString('en-IN'))}</b></div>}<div className="booking-price-total"><span>{c.payment.total}</span><b>{c.payment.inr(total.toLocaleString('en-IN'))}</b></div></div>
             <div className="payment-choice-list">
-              <label className={paymentMethod === 'wallet' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'wallet'} onChange={() => setValue('paymentMethod', 'wallet')} /><Wallet size={18} /><span><b>Urban Tanker wallet</b><small>Use available balance</small></span></label>
-              <label className={paymentMethod === 'gateway' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'gateway'} onChange={() => setValue('paymentMethod', 'gateway')} /><CreditCard size={18} /><span><b>Card or UPI</b><small>Secure payment gateway</small></span></label>
-              <label className={paymentMethod === 'cod' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'cod'} onChange={() => setValue('paymentMethod', 'cod')} /><Wallet size={18} /><span><b>Cash on delivery</b><small>Pay the driver when your service is completed</small></span></label>
-              <button className="button button-primary button-large" disabled={isSubmitting} onClick={() => void confirmBooking()}>{isSubmitting ? 'Processing...' : `Confirm booking · INR ${total.toLocaleString('en-IN')}`} <Check size={16} /></button>
+              <label className={paymentMethod === 'wallet' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'wallet'} onChange={() => setValue('paymentMethod', 'wallet')} /><Wallet size={18} /><span><b>{c.payment.methods[0].title}</b><small>{c.payment.methods[0].detail}</small></span></label>
+              <label className={paymentMethod === 'gateway' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'gateway'} onChange={() => setValue('paymentMethod', 'gateway')} /><CreditCard size={18} /><span><b>{c.payment.methods[1].title}</b><small>{c.payment.methods[1].detail}</small></span></label>
+              <label className={paymentMethod === 'cod' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'cod'} onChange={() => setValue('paymentMethod', 'cod')} /><Wallet size={18} /><span><b>{c.payment.methods[2].title}</b><small>{c.payment.methods[2].detail}</small></span></label>
+              <button className="button button-primary button-large" disabled={isSubmitting} onClick={() => void confirmBooking()}>{isSubmitting ? c.payment.processing : c.payment.confirmBooking(total.toLocaleString('en-IN'))} <Check size={16} /></button>
             </div>
           </>}
           {error && <p className="login-error" role="alert">{error}</p>}
         </BookingSection>
-        <button className="back-link" type="button" onClick={() => setStep(step === 'payment' ? 'review' : 'details')}><ArrowLeft size={14} /> Back</button>
+        <button className="back-link" type="button" onClick={() => setStep(step === 'payment' ? 'review' : 'details')}><ArrowLeft size={14} /> {c.payment.back}</button>
       </div>
       <BookingSummary items={summaryItems} total={total} />
     </div></div>
@@ -739,55 +740,55 @@ export default function BookingScreen() {
   return <section className="booking-screen">
     <BookingHero onBack={() => navigate('home')} />
     <div className="booking-new-shell"><BookingProgress activeStep={1} />
-      <form noValidate className="booking-new-grid" onSubmit={handleSubmit(review, (invalid) => setError(invalid.selectedServices?.message ?? invalid.phone?.message ?? invalid.notes?.message ?? 'Please complete the required fields.'))}>
+      <form noValidate className="booking-new-grid" onSubmit={handleSubmit(review, (invalid) => setError(invalid.selectedServices?.message ?? invalid.phone?.message ?? invalid.notes?.message ?? c.submit.fallbackError))}>
         <div className="booking-form">
-          <BookingSection number="01" title="Select your services" description="Add one or more requirements to the same booking slot.">
+          <BookingSection number="01" title={c.sections.services.title} description={c.sections.services.description}>
             {activeServiceEntries.map((entry, index) => <BookingServiceItem key={entry.id} entry={entry} index={index} options={options} value={serviceDetails[entry.id] ?? serviceDraftFor(entry.serviceId)} errors={serviceFieldErrors[entry.id]} onServiceChange={changeServiceEntry} onFieldChange={updateServiceDetails} onRemove={removeServiceEntry} />)}
-            {!activeServiceEntries.length && <p className="booking-no-services" role="status">Select at least one service to enter delivery and contact details.</p>}
-            <div className="booking-add-service"><label className="field">{addServiceLabel}<select value={selectedServiceToAdd} onChange={(event) => setServiceToAdd(event.target.value)} disabled={!availableServiceOptions.length}><option value="" disabled>{options.length ? 'All services are already added' : 'No services available'}</option>{availableServiceOptions.map((option) => <option value={option.code} key={option.code}>{option.label}</option>)}</select></label><button className="button button-quiet" type="button" disabled={!availableServiceOptions.length} onClick={() => addServiceEntry()}><Plus size={16} /> {addServiceLabel}</button>{serviceEntries.length > 0 && <button className="button button-quiet booking-remove-all" type="button" onClick={() => setConfirmRemoveAll(true)}><Trash2 size={15} /> Remove all services</button>}</div>
-            {confirmRemoveAll && <div className="booking-remove-all-confirm" role="group" aria-label="Confirm removing all services"><span>Remove all {serviceEntries.length} service items?</span><button className="button button-quiet" type="button" onClick={() => setConfirmRemoveAll(false)}>Keep items</button><button className="button button-danger" type="button" onClick={removeAllServiceEntries}>Remove all</button></div>}
+            {!activeServiceEntries.length && <p className="booking-no-services" role="status">{c.selectServices.noServicesSelected}</p>}
+            <div className="booking-add-service"><label className="field">{addServiceLabel}<select value={selectedServiceToAdd} onChange={(event) => setServiceToAdd(event.target.value)} disabled={!availableServiceOptions.length}><option value="" disabled>{options.length ? c.selectServices.allServicesAdded : c.selectServices.noServicesAvailable}</option>{availableServiceOptions.map((option) => <option value={option.code} key={option.code}>{option.label}</option>)}</select></label><button className="button button-quiet" type="button" disabled={!availableServiceOptions.length} onClick={() => addServiceEntry()}><Plus size={16} /> {addServiceLabel}</button>{serviceEntries.length > 0 && <button className="button button-quiet booking-remove-all" type="button" onClick={() => setConfirmRemoveAll(true)}><Trash2 size={15} /> {c.selectServices.removeAllServices}</button>}</div>
+            {confirmRemoveAll && <div className="booking-remove-all-confirm" role="group" aria-label={c.selectServices.confirmRemoveAllLabel}><span>{c.selectServices.removeAllConfirm(serviceEntries.length)}</span><button className="button button-quiet" type="button" onClick={() => setConfirmRemoveAll(false)}>{c.selectServices.keepItems}</button><button className="button button-danger" type="button" onClick={removeAllServiceEntries}>{c.selectServices.removeAll}</button></div>}
           </BookingSection>
 
-          <BookingSection number="02" title="Contact & delivery location" description="These details apply to every service in this booking.">
-            <label className="field">Customer / company name<input {...register('guestName')} required minLength={2} maxLength={60} placeholder="Your name or company" /></label>
-            <Controller control={control} name="phone" render={({ field }) => <label className="field">Mobile number<span className="input-with-icon"><Phone size={16} /><input {...field} value={field.value ?? ''} aria-invalid={Boolean(errors.phone)} onChange={(event) => { field.onChange(event.target.value.replace(/\D/g, '').slice(0, 10)); setError(null) }} inputMode="numeric" type="tel" required placeholder="10-digit mobile number" /></span>{errors.phone?.message && <small className="booking-field-error" role="alert">{errors.phone.message}</small>}</label>} />
-            {isRegisteredCustomer && <label className="field">Use a saved address<select value={savedAddressId} onChange={(event) => selectSavedAddress(event.target.value)}><option value="">Enter a new address</option>{(addressesQuery.data ?? []).map((address) => <option value={address.id} key={address.id}>{address.label} · {address.address}</option>)}</select></label>}
-            {isRegisteredCustomer && addressesQuery.isLoading && <p className="booking-address-status" role="status">Loading saved addresses…</p>}
-            {isRegisteredCustomer && addressesQuery.isError && <p className="booking-address-status" role="alert">Saved addresses are unavailable. Enter a new address instead.</p>}
-            {savedAddressId && <p className="saved-location-preview">{sharedLocation}, {addressCity} {addressPincode}</p>}
+          <BookingSection number="02" title={c.sections.contact.title} description={c.sections.contact.description}>
+            <label className="field">{c.contact.customerName}<input {...register('guestName')} required minLength={2} maxLength={60} placeholder={c.contact.customerNamePlaceholder} /></label>
+            <Controller control={control} name="phone" render={({ field }) => <label className="field">{c.contact.mobileNumber}<span className="input-with-icon"><Phone size={16} /><input {...field} value={field.value ?? ''} aria-invalid={Boolean(errors.phone)} onChange={(event) => { field.onChange(event.target.value.replace(/\D/g, '').slice(0, 10)); setError(null) }} inputMode="numeric" type="tel" required placeholder={c.contact.mobileNumberPlaceholder} /></span>{errors.phone?.message && <small className="booking-field-error" role="alert">{errors.phone.message}</small>}</label>} />
+            {isRegisteredCustomer && <label className="field">{c.contact.savedAddress}<select value={savedAddressId} onChange={(event) => selectSavedAddress(event.target.value)}><option value="">{c.contact.newAddressOption}</option>{(addressesQuery.data ?? []).map((address) => <option value={address.id} key={address.id}>{c.contact.savedAddressOption(address.label, address.address)}</option>)}</select></label>}
+            {isRegisteredCustomer && addressesQuery.isLoading && <p className="booking-address-status" role="status">{c.contact.savedAddressesLoading}</p>}
+            {isRegisteredCustomer && addressesQuery.isError && <p className="booking-address-status" role="alert">{c.contact.savedAddressesError}</p>}
+            {savedAddressId && <p className="saved-location-preview">{c.contact.savedAddressPreview(sharedLocation, addressCity, addressPincode)}</p>}
             {!savedAddressId && <div className="booking-manual-location">
-              <div className="split-fields"><label className="field">Service region<select value={region} onChange={(event) => setRegion(event.target.value)}><option>South Chennai</option><option>Central Chennai</option><option>North Chennai</option><option>West Chennai</option><option>ECR / OMR</option></select></label><label className="field">Address label<input value={addressLabel} onChange={(event) => setAddressLabel(event.target.value)} placeholder="Home, Office or Site" /></label></div>
-              <label className="field">Full address<textarea rows={3} required value={sharedLocation} onBlur={() => activeServiceEntries.forEach((entry) => validateDeliveryAddress(entry.id, sharedLocation))} onChange={(event) => updateSharedLocation(event.target.value)} placeholder="Door number, street, locality and landmark, Chennai" /></label>
-              <div className="booking-location-tools"><button className="button button-quiet" type="button" aria-label="Choose address on map" title="Choose address on map" onClick={() => setLocationModalOpen(true)}><MapPin size={17} /> <span>Choose on map</span></button><button className="button button-quiet" type="button" aria-label="Use current location" title="Use current location" onClick={() => detectLocation('shared')}><Crosshair size={17} /> <span>Use current location</span></button></div>
+              <div className="split-fields"><label className="field">{c.contact.serviceRegion}<select value={region} onChange={(event) => setRegion(event.target.value)}>{c.contact.regions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label><label className="field">{c.contact.addressLabel}<input value={addressLabel} onChange={(event) => setAddressLabel(event.target.value)} placeholder={c.contact.addressLabelPlaceholder} /></label></div>
+              <label className="field">{c.contact.fullAddress}<textarea rows={3} required value={sharedLocation} onBlur={() => activeServiceEntries.forEach((entry) => validateDeliveryAddress(entry.id, sharedLocation))} onChange={(event) => updateSharedLocation(event.target.value)} placeholder={c.contact.fullAddressPlaceholder} /></label>
+              <div className="booking-location-tools"><button className="button button-quiet" type="button" aria-label={c.contact.chooseOnMapLabel} title={c.contact.chooseOnMapLabel} onClick={() => setLocationModalOpen(true)}><MapPin size={17} /> <span>{c.contact.chooseOnMap}</span></button><button className="button button-quiet" type="button" aria-label={c.contact.useCurrentLocation} title={c.contact.useCurrentLocation} onClick={() => detectLocation('shared')}><Crosshair size={17} /> <span>{c.contact.useCurrentLocation}</span></button></div>
               {(locationToasts.shared || locationToasts[activeServiceEntries[0]?.id ?? '']) && <p className="booking-location-toast" role="alert">{locationToasts.shared || locationToasts[activeServiceEntries[0]?.id ?? '']}</p>}
               {locationStatus.shared && <p className="booking-address-status" role="status">{locationStatus.shared}</p>}
-              {isRegisteredCustomer && <label className="check-line"><input type="checkbox" checked={saveAddressForFuture} onChange={(event) => setSaveAddressForFuture(event.target.checked)} /> Save this address to my account for future bookings.</label>}
-              {saveAddressForFuture && <div className="split-fields booking-save-address-fields"><label className="field">City<input value={addressCity} onChange={(event) => setAddressCity(event.target.value)} required /></label><label className="field">Pincode<input value={addressPincode} onChange={(event) => setAddressPincode(event.target.value.replace(/\D/g, '').slice(0, 12))} inputMode="numeric" maxLength={12} required /></label></div>}
+              {isRegisteredCustomer && <label className="check-line"><input type="checkbox" checked={saveAddressForFuture} onChange={(event) => setSaveAddressForFuture(event.target.checked)} /> {c.contact.saveAddressForFuture}</label>}
+              {saveAddressForFuture && <div className="split-fields booking-save-address-fields"><label className="field">{c.contact.city}<input value={addressCity} onChange={(event) => setAddressCity(event.target.value)} required /></label><label className="field">{c.contact.pincode}<input value={addressPincode} onChange={(event) => setAddressPincode(event.target.value.replace(/\D/g, '').slice(0, 12))} inputMode="numeric" maxLength={12} required /></label></div>}
             </div>}
             <div className="guest-verification">
-              <p className="eyebrow">MOBILE VERIFICATION</p>
-              {isPhoneVerified(phone) ? <p className="verification-success">Mobile number verified. It can be used for all selected services.</p> : <>
-                {user && phoneVerificationQuery.isError && <p className="booking-field-error" role="alert">We couldn't check whether your saved number is verified. Verify it below to continue.</p>}
-                <p>Verify the shared contact number once for this booking.</p>
-                <div className="guest-otp-row"><input value={otpValues[phone.replace(/\D/g, '').slice(-10)] ?? ''} onChange={(event) => setOtpValues((current) => ({ ...current, [phone.replace(/\D/g, '').slice(-10)]: event.target.value.replace(/\D/g, '').slice(0, 6) }))} inputMode="numeric" placeholder="6-digit code" aria-label="Mobile verification code" /><button className="button button-quiet" type="button" aria-label="Send or resend verification code" title="Send or resend verification code" onClick={() => void requestGuestOtp()} disabled={otpPendingPhone !== null}><Phone size={16} /><span>{otpChallenges[phone.replace(/\D/g, '').slice(-10)] ? 'Resend code' : 'Send code'}</span></button><button className="button button-quiet" type="button" aria-label="Verify code" title="Verify code" onClick={() => void verifyGuestOtp()} disabled={otpPendingPhone !== null || !otpChallenges[phone.replace(/\D/g, '').slice(-10)]}><Check size={16} /><span>Verify</span></button></div>
+              <p className="eyebrow">{c.verification.eyebrow}</p>
+              {isPhoneVerified(phone) ? <p className="verification-success">{c.verification.verifiedShared}</p> : <>
+                {user && phoneVerificationQuery.isError && <p className="booking-field-error" role="alert">{c.verification.savedNumberCheckFailed}</p>}
+                <p>{c.verification.verifyPrompt}</p>
+                <div className="guest-otp-row"><input value={otpValues[phone.replace(/\D/g, '').slice(-10)] ?? ''} onChange={(event) => setOtpValues((current) => ({ ...current, [phone.replace(/\D/g, '').slice(-10)]: event.target.value.replace(/\D/g, '').slice(0, 6) }))} inputMode="numeric" placeholder={c.verification.codePlaceholder} aria-label={c.verification.codeLabel} /><button className="button button-quiet" type="button" aria-label={c.verification.sendOrResendLabel} title={c.verification.sendOrResendLabel} onClick={() => void requestGuestOtp()} disabled={otpPendingPhone !== null}><Phone size={16} /><span>{otpChallenges[phone.replace(/\D/g, '').slice(-10)] ? c.verification.resendCode : c.verification.sendCode}</span></button><button className="button button-quiet" type="button" aria-label={c.verification.verifyCodeLabel} title={c.verification.verifyCodeLabel} onClick={() => void verifyGuestOtp()} disabled={otpPendingPhone !== null || !otpChallenges[phone.replace(/\D/g, '').slice(-10)]}><Check size={16} /><span>{c.verification.verify}</span></button></div>
                 {otpMessages[phone.replace(/\D/g, '').slice(-10)] && <p className="verification-message" role="status">{otpMessages[phone.replace(/\D/g, '').slice(-10)]}</p>}
               </>}
             </div>
           </BookingSection>
 
-          <BookingSection number="03" title="Choose one booking slot" description="All selected services are requested for this date and time.">
-            <div className="split-fields"><label className="field">Required date<input type="date" min={currentDateInputValue()} required value={sharedDate} onChange={(event) => setSharedDate(event.target.value)} /></label><label className="field">Preferred time<select value={preferredTime} onChange={(event) => setPreferredTime(event.target.value)}><option value="07:00">7 AM – 10 AM</option><option value="10:00">10 AM – 1 PM</option><option value="14:00">2 PM – 5 PM</option><option value="18:00">6 PM – 9 PM</option></select></label></div>
-            <label className="field">Additional requirements<textarea {...register('notes')} rows={3} placeholder="Access, parking, handling or site instructions" /></label>
-            <div className="booking-coupon-row"><label className="field">Have a coupon?<input {...register('couponCode')} onChange={(event) => setValue('couponCode', event.target.value.toUpperCase())} placeholder="Enter coupon code" /></label><button className="button button-quiet" type="button" onClick={() => void applyCoupon()} disabled={couponValidation.isPending}>{couponValidation.isPending ? 'Checking…' : 'Apply coupon'}</button><p className="coupon-feedback" role="status">{couponMessage ?? ''}</p></div>
-            <div className="booking-coupon-carousel"><div className="coupon-carousel-heading"><span>Available coupons</span></div><div className="booking-coupon-list">{(offersQuery.data ?? []).map((offer) => <button type="button" className={`booking-coupon-card ${couponCode === offer.code ? 'is-selected' : ''}`} key={offer.code} onClick={() => void applyCoupon(offer.code)}><strong>{offer.code}</strong><span>{formatOfferDiscount(offer)}</span><small>{offer.title}{offer.valid_until ? ` · Valid through ${new Date(offer.valid_until).toLocaleDateString()}` : ' · No expiry date'}</small></button>)}</div></div>
+          <BookingSection number="03" title={c.sections.slot.title} description={c.sections.slot.description}>
+            <div className="split-fields"><label className="field">{c.slot.requiredDate}<input type="date" min={currentDateInputValue()} required value={sharedDate} onChange={(event) => setSharedDate(event.target.value)} /></label><label className="field">{c.slot.preferredTime}<select value={preferredTime} onChange={(event) => setPreferredTime(event.target.value)}>{c.slot.timeSlots.map((slot) => <option key={slot.value} value={slot.value}>{slot.label}</option>)}</select></label></div>
+            <label className="field">{c.slot.additionalRequirements}<textarea {...register('notes')} rows={3} placeholder={c.slot.additionalRequirementsPlaceholder} /></label>
+            <div className="booking-coupon-row"><label className="field">{c.slot.haveCoupon}<input {...register('couponCode')} onChange={(event) => setValue('couponCode', event.target.value.toUpperCase())} placeholder={c.slot.couponPlaceholder} /></label><button className="button button-quiet" type="button" onClick={() => void applyCoupon()} disabled={couponValidation.isPending}>{couponValidation.isPending ? c.slot.checkingCoupon : c.slot.applyCoupon}</button><p className="coupon-feedback" role="status">{couponMessage ?? ''}</p></div>
+            <div className="booking-coupon-carousel"><div className="coupon-carousel-heading"><span>{c.slot.availableCoupons}</span></div><div className="booking-coupon-list">{(offersQuery.data ?? []).map((offer) => <button type="button" className={`booking-coupon-card ${couponCode === offer.code ? 'is-selected' : ''}`} key={offer.code} onClick={() => void applyCoupon(offer.code)}><strong>{offer.code}</strong><span>{formatOfferDiscount(offer)}</span><small>{offer.title}{offer.valid_until ? c.slot.validThrough(new Date(offer.valid_until).toLocaleDateString()) : c.slot.noExpiry}</small></button>)}</div></div>
           </BookingSection>
           {error && <p className="login-error" role="alert">{error}</p>}
-          <button className="button button-primary booking-review-button" type="submit" disabled={!canReviewRequest}>Review combined booking <ArrowRight size={16} /></button>
-          {!canReviewRequest && <p className="booking-review-hint" role="status">Complete each service item, enter a Chennai address and valid date, and verify the shared mobile number.</p>}
+          <button className="button button-primary booking-review-button" type="submit" disabled={!canReviewRequest}>{c.submit.reviewButton} <ArrowRight size={16} /></button>
+          {!canReviewRequest && <p className="booking-review-hint" role="status">{c.submit.reviewHint}</p>}
         </div>
         <BookingSummary items={summaryItems} total={total} />
       </form>
     </div>
-    {locationModalOpen && <Suspense fallback={<div className="surface booking-map-loading" role="status">Loading map…</div>}><LocationPickerModal value={sharedCoordinates} onChange={(point, name) => updateMapLocation('shared', point, name)} onClose={() => setLocationModalOpen(false)} /></Suspense>}
+    {locationModalOpen && <Suspense fallback={<div className="surface booking-map-loading" role="status">{c.location.loadingMap}</div>}><LocationPickerModal value={sharedCoordinates} onChange={(point, name) => updateMapLocation('shared', point, name)} onClose={() => setLocationModalOpen(false)} /></Suspense>}
   </section>
 }

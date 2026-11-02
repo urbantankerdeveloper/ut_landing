@@ -2,6 +2,9 @@ import { useState } from 'react'
 import { Camera } from 'lucide-react'
 import { adminApi } from '../api/admin'
 import { Modal } from './WorkspaceInteractive'
+import { adminEntitiesContent as c } from '../content/admin-entities'
+
+const copy = c.customerSelfie
 
 type Props = { customerId: string; customerName: string; onNotice: (message: string) => void }
 
@@ -15,14 +18,14 @@ export function AdminCustomerSelfie({ customerId, customerName, onNotice }: Prop
       const result = await adminApi.customerSelfie(customerId)
       setUrl(result.url)
     } catch {
-      onNotice('Selfie could not be opened. It may not have been captured yet.')
+      onNotice(copy.unavailable)
     } finally {
       setLoading(false)
     }
   }
 
   return <>
-    <button className="icon-action" aria-label={`View selfie of ${customerName}`} disabled={loading} onClick={() => void open()}><Camera size={15} /></button>
-    {url && <Modal title={`${customerName} selfie`} onClose={() => setUrl(null)}><img src={url} alt={`Selfie of ${customerName}`} className="admin-selfie-image" /><p className="meta">The link expires in 5 minutes. Each view is logged.</p></Modal>}
+    <button className="icon-action" aria-label={copy.view(customerName)} disabled={loading} onClick={() => void open()}><Camera size={15} /></button>
+    {url && <Modal title={copy.title(customerName)} onClose={() => setUrl(null)}><img src={url} alt={copy.alt(customerName)} className="admin-selfie-image" /><p className="meta">{copy.note}</p></Modal>}
   </>
 }
