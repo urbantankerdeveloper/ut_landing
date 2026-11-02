@@ -14,7 +14,8 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "npm run db:check && node dist/server.js",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "smtp:test": "tsx src/scripts/smtp-test.ts"
   },
   "dependencies": {
     "@socket.io/redis-adapter": "^8.3.0",
