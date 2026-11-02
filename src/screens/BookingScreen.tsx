@@ -1,4 +1,5 @@
-import { lazy, Suspense, useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
+import { lazyWithRetry } from '../utils/lazyWithRetry'
 import { Controller, useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -16,7 +17,7 @@ import { BOOKING_DRAFT_KEY, REPEAT_BOOKING_KEY } from '../constants/bookingDraft
 import { BookingServiceItem, type BookingServiceDraft, type BookingServiceEntry, type BookingServiceField, type BookingServiceFieldErrors } from '../components/booking/BookingServiceItem'
 import { BookingHero, BookingProgress, BookingSection, BookingSummary, type BookingSummaryItem } from '../components/booking/BookingPageSections'
 
-const LocationPickerModal = lazy(() => import('../components/LocationPickerModal').then((module) => ({ default: module.LocationPickerModal })))
+const LocationPickerModal = lazyWithRetry(() => import('../components/LocationPickerModal').then((module) => ({ default: module.LocationPickerModal })))
 
 const GST_RATE = 0.18
 type Step = 'details' | 'review' | 'payment' | 'success'

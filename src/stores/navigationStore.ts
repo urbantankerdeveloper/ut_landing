@@ -1,10 +1,22 @@
 import { create } from 'zustand'
 import { BOOKING_DRAFT_KEY, REPEAT_BOOKING_KEY } from '../constants/bookingDraft'
+import { CHUNK_RELOAD_FLAG } from '../utils/lazyWithRetry'
 
 export type ScreenId = 'home' | 'services' | 'subscriptions' | 'booking' | 'yearly-contract' | 'coupons' | 'tracking' | 'partner' | 'terms' | 'policy' | 'account' | 'login' | 'about' | 'customer-workspace' | 'vendor-workspace' | 'admin-workspace'
 export type WorkspaceRole = 'customer' | 'vendor' | 'admin' | 'dispatcher'
 type PendingNavigation = { screen: ScreenId; role?: WorkspaceRole; history?: ScreenId[] }
 type NavigationState = { activeScreen: ScreenId; previousScreen: ScreenId | null; history: ScreenId[]; activeRole: WorkspaceRole; mobileMenuOpen: boolean; pendingNavigation: PendingNavigation | null; partnerFormDirty: boolean; navigate: (screen: ScreenId) => void; openWorkspace: (role: WorkspaceRole) => void; goBack: () => void; confirmNavigation: () => void; cancelNavigation: () => void; setPartnerFormDirty: (dirty: boolean) => void; setMobileMenuOpen: (open: boolean) => void }
+
+const LAST_SCREEN_KEY = 'urban-tanker-last-screen'
+
+// After a chunk reload, return to the public screen the user was on instead of home.
+// Workspaces depend on the signed-in role, so they are never restored this way.
+function resumedScreen(): ScreenId {
+  if (typeof window === 'undefined' || !window.sessionStorage.getItem(CHUNK_RELOAD_FLAG)) return 'home'
+  const saved = window.sessionStorage.getItem(LAST_SCREEN_KEY) as ScreenId | null
+  return saved && !saved.endsWith('-workspace') ? saved : 'home'
+}
+const startScreen = resumedScreen()
 
 function resetNavigationView(screen: ScreenId) {
   if (typeof window === 'undefined') return
@@ -23,6 +35,7 @@ function needsLeaveConfirmation(currentScreen: ScreenId, nextScreen: ScreenId, p
 
 function applyNavigation(state: NavigationState, navigation: PendingNavigation): Partial<NavigationState> {
   resetNavigationView(navigation.screen)
+  if (typeof window !== 'undefined') window.sessionStorage.setItem(LAST_SCREEN_KEY, navigation.screen)
   return {
     ...(navigation.role ? { activeRole: navigation.role } : {}),
     activeScreen: navigation.screen,
@@ -35,7 +48,7 @@ function applyNavigation(state: NavigationState, navigation: PendingNavigation):
 }
 
 export const useNavigationStore = create<NavigationState>((set) => ({
-  activeScreen: 'home', previousScreen: null, history: ['home'], activeRole: 'customer', mobileMenuOpen: false, pendingNavigation: null, partnerFormDirty: false,
+  activeScreen: startScreen, previousScreen: null, history: [startScreen], activeRole: 'customer', mobileMenuOpen: false, pendingNavigation: null, partnerFormDirty: false,
   navigate: (screen) => set((state) => {
     const navigation = { screen }
     if (needsLeaveConfirmation(state.activeScreen, screen, state.partnerFormDirty)) return { pendingNavigation: navigation }

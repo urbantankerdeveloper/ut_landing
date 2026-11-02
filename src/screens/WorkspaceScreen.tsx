@@ -1,11 +1,12 @@
-import { lazy, Suspense, useCallback, useState } from 'react'
+import { Suspense, useCallback, useState } from 'react'
+import { lazyWithRetry } from '../utils/lazyWithRetry'
 import { BarChart3, Bell, CalendarCheck, ChevronDown, CircleDollarSign, ClipboardList, FileText, Gauge, House, LayoutDashboard, LogOut, MapPin, Menu, MessageSquare, PanelLeftClose, PanelLeftOpen, Receipt, Repeat, Settings2, Tag, Truck, UserRound, UserPlus, Users, Wallet, X } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
 import { useNavigationStore, type WorkspaceRole } from '../stores/navigationStore'
 import { WorkspaceContentSkeleton } from '../components/ScreenSkeleton'
 import { useVendorOfflineSync } from '../hooks/useVendorData'
 
-const WorkspaceContent = lazy(() => import('./WorkspaceContent').then(({ WorkspaceContent: content }) => ({ default: content })))
+const WorkspaceContent = lazyWithRetry(() => import('./WorkspaceContent').then(({ WorkspaceContent: content }) => ({ default: content })))
 
 type NavItem = { label: string; icon: typeof House; key: string }
 type RoleData = { caption: string; title: string; description: string; nav: NavItem[]; metrics: { label: string; value: string; note: string; icon: typeof ClipboardList }[] }

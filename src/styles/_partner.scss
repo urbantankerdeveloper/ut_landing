@@ -33,8 +33,8 @@
 .service-choice input { position: absolute; opacity: 0; pointer-events: none; }
 .service-choice span { display: inline-flex; gap: 7px; align-items: center; }
 .service-choice-dot { width: 10px; height: 10px; border: 1px solid #007d95; border-radius: 50%; }
-.partner-declaration { display: flex; gap: 10px; align-items: start; padding: 28px 36px 0; color: colors.$muted; font-size: 11px; line-height: 1.5; }
-.partner-declaration input { margin-top: 2px; accent-color: #008ca5; }
+.partner-declaration { display: flex; gap: 10px; align-items: flex-start; padding: 28px 36px 0; color: colors.$muted; font-size: 11px; line-height: 1.5; }
+.partner-declaration input { flex: none; box-sizing: border-box; width: 16px; height: 16px; min-height: 0; margin: 0; padding: 0; accent-color: #008ca5; }
 .partner-submit { margin: 22px 36px 34px; }
 .partner-login-action { margin: 0 36px 34px; }
 .partner-message, .partner-error { margin: 18px 36px 0; font-size: 12px; }

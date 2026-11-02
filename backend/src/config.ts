@@ -12,7 +12,7 @@ const optionalEmail = z.preprocess((value) => value === '' ? undefined : value, 
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(8080),
-  FRONTEND_ORIGIN: z.string().default('http://localhost:5173'),
+  FRONTEND_ORIGIN: z.string().default('http://localhost:5173').transform((value) => value.replace(/\/+$/, '')),
   CORS_ORIGINS: z.string().optional(),
   SUPABASE_URL: z.string().url(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
@@ -54,17 +54,24 @@ const schema = z.object({
   ANALYTICS_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
   ANALYTICS_ANONYMIZE_AFTER_DAYS: z.coerce.number().int().positive().default(7),
 })
-const parsed = schema.parse(process.env)
+// Blank values (for example SUPABASE_SECRET_KEY= in .env.example) mean "not set".
+const environment = Object.fromEntries(Object.entries(process.env).map(([key, value]) => [key, value === '' ? undefined : value]))
+const result = schema.safeParse(environment)
+if (!result.success) {
+  const problems = result.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ')
+  throw new Error(`Invalid backend configuration (${problems}). Copy backend/.env.example to backend/.env and fill in the values, or set them in the host environment.`)
+}
+const parsed = result.data
 const serviceRoleKey = parsed.SUPABASE_SERVICE_ROLE_KEY ?? parsed.SUPABASE_SECRET_KEY
-if (!serviceRoleKey) throw new Error('SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SECRET_KEY is required')
+if (!serviceRoleKey) throw new Error('SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SECRET_KEY is required. Copy backend/.env.example to backend/.env and fill in the values.')
 if (parsed.NODE_ENV === 'production' && !parsed.FRONTEND_ORIGIN.startsWith('https://')) {
-  throw new Error('FRONTEND_ORIGIN must use HTTPS in production')
+  throw new Error('FRONTEND_ORIGIN must use HTTPS in production. For local runs set NODE_ENV=development in backend/.env.local.')
 }
 if (parsed.NODE_ENV === 'production' && parsed.USE_DEFAULT_VERIFICATION_CODE) {
-  throw new Error('USE_DEFAULT_VERIFICATION_CODE must be false in production')
+  throw new Error('USE_DEFAULT_VERIFICATION_CODE must be false in production. For local runs set NODE_ENV=development in backend/.env.local.')
 }
 if (parsed.NODE_ENV === 'production' && parsed.SUPABASE_DB_URL && !parsed.DB_SSL_CA) {
-  throw new Error('DB_SSL_CA is required in production so the database TLS certificate is verified')
+  throw new Error('DB_SSL_CA is required in production so the database TLS certificate is verified. For local runs set NODE_ENV=development in backend/.env.local.')
 }
 export const config = {
   ...parsed,

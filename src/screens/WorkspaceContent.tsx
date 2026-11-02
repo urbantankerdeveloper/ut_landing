@@ -1,28 +1,29 @@
-import { lazy, memo } from 'react'
+import { memo } from 'react'
+import { lazyWithRetry } from '../utils/lazyWithRetry'
 import { ArrowRight, Bell, CheckCircle2, CircleDollarSign, ClipboardList, FileText, MapPin, PackageCheck, Plus, Search, Settings2, Truck, UserRound, Users } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { WorkspaceRole } from '../stores/navigationStore'
-const AdminWorkspaceContent = lazy(() => import('./AdminWorkspaceContent').then((module) => ({ default: module.AdminWorkspaceContent })))
-const CustomerInvoicesScreen = lazy(() => import('./CustomerInvoicesScreen'))
-const VendorOperationsPanel = lazy(() => import('./VendorOperationsPanel').then((module) => ({ default: module.VendorOperationsPanel })))
-const VendorOrderPanel = lazy(() => import('./VendorOrderPanel'))
-const VendorManagementPanel = lazy(() => import('./VendorManagementPanel').then((module) => ({ default: module.VendorManagementPanel })))
-const VendorFleetPanel = lazy(() => import('./VendorFleetPanel').then((module) => ({ default: module.VendorFleetPanel })))
-const VendorComplaintsPanel = lazy(() => import('./VendorComplaintsPanel').then((module) => ({ default: module.VendorComplaintsPanel })))
-const VendorServicesPanel = lazy(() => import('./VendorServicesPanel').then((module) => ({ default: module.VendorServicesPanel })))
-const VendorDocumentsPanel = lazy(() => import('./VendorDocumentsPanel').then((module) => ({ default: module.VendorDocumentsPanel })))
-const VendorPayoutPanel = lazy(() => import('./VendorPayoutPanel').then((module) => ({ default: module.VendorPayoutPanel })))
-const VendorLocationPanel = lazy(() => import('./VendorLocationPanel').then((module) => ({ default: module.VendorLocationPanel })))
-const CustomerOperationsPanel = lazy(() => import('./CustomerOperationsPanel').then((module) => ({ default: module.CustomerOperationsPanel })))
-const CustomerSupportPanel = lazy(() => import('./CustomerSupportPanel').then((module) => ({ default: module.CustomerSupportPanel })))
-const BookingScreen = lazy(() => import('./BookingScreen'))
-const CustomerUsagePanel = lazy(() => import('./CustomerUsagePanel').then((module) => ({ default: module.CustomerUsagePanel })))
-const VendorOfflineConflicts = lazy(() => import('../components/VendorOfflineConflicts').then((module) => ({ default: module.VendorOfflineConflicts })))
+const AdminWorkspaceContent = lazyWithRetry(() => import('./AdminWorkspaceContent').then((module) => ({ default: module.AdminWorkspaceContent })))
+const CustomerInvoicesScreen = lazyWithRetry(() => import('./CustomerInvoicesScreen'))
+const VendorOperationsPanel = lazyWithRetry(() => import('./VendorOperationsPanel').then((module) => ({ default: module.VendorOperationsPanel })))
+const VendorOrderPanel = lazyWithRetry(() => import('./VendorOrderPanel'))
+const VendorManagementPanel = lazyWithRetry(() => import('./VendorManagementPanel').then((module) => ({ default: module.VendorManagementPanel })))
+const VendorFleetPanel = lazyWithRetry(() => import('./VendorFleetPanel').then((module) => ({ default: module.VendorFleetPanel })))
+const VendorComplaintsPanel = lazyWithRetry(() => import('./VendorComplaintsPanel').then((module) => ({ default: module.VendorComplaintsPanel })))
+const VendorServicesPanel = lazyWithRetry(() => import('./VendorServicesPanel').then((module) => ({ default: module.VendorServicesPanel })))
+const VendorDocumentsPanel = lazyWithRetry(() => import('./VendorDocumentsPanel').then((module) => ({ default: module.VendorDocumentsPanel })))
+const VendorPayoutPanel = lazyWithRetry(() => import('./VendorPayoutPanel').then((module) => ({ default: module.VendorPayoutPanel })))
+const VendorLocationPanel = lazyWithRetry(() => import('./VendorLocationPanel').then((module) => ({ default: module.VendorLocationPanel })))
+const CustomerOperationsPanel = lazyWithRetry(() => import('./CustomerOperationsPanel').then((module) => ({ default: module.CustomerOperationsPanel })))
+const CustomerSupportPanel = lazyWithRetry(() => import('./CustomerSupportPanel').then((module) => ({ default: module.CustomerSupportPanel })))
+const BookingScreen = lazyWithRetry(() => import('./BookingScreen'))
+const CustomerUsagePanel = lazyWithRetry(() => import('./CustomerUsagePanel').then((module) => ({ default: module.CustomerUsagePanel })))
+const VendorOfflineConflicts = lazyWithRetry(() => import('../components/VendorOfflineConflicts').then((module) => ({ default: module.VendorOfflineConflicts })))
 import { demoDataEnabled, customerDemoDataEnabled } from '../constants/demo'
 import { useAdminOrders } from '../hooks/useAdminData'
 import { useCustomerBookings } from '../hooks/useCustomerData'
 import { useVendorOrders } from '../hooks/useVendorData'
-const CustomerBookingsTable = lazy(() => import('./CustomerBookingsTable').then((module) => ({ default: module.CustomerBookingsTable })))
+const CustomerBookingsTable = lazyWithRetry(() => import('./CustomerBookingsTable').then((module) => ({ default: module.CustomerBookingsTable })))
 
 type Props = { role: WorkspaceRole; item: string; onNavigate: (screen: 'booking' | 'bookings' | 'offers' | 'home') => void; onNotice: (message: string) => void }
 const bookingRows = customerDemoDataEnabled ? [{ id: 'UT-2408', service: 'Water tanker · 9 KL', place: 'ECR, Chennai', status: 'In progress', amount: '₹1,850' }, { id: 'UT-2394', service: 'Tank & sump cleaning', place: 'Adyar, Chennai', status: 'Delivered', amount: '₹2,400' }, { id: 'UT-2388', service: 'Sewage tanker', place: 'Velachery, Chennai', status: 'Scheduled', amount: '₹3,100' }] : []

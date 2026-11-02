@@ -8,6 +8,8 @@ export default defineConfig({
       NODE_ENV: 'test',
       SUPABASE_URL: 'https://example.supabase.co',
       SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
+      // Blank so a developer's .env.local cannot switch on the database CA guard in tests.
+      SUPABASE_DB_URL: 'postgresql://postgres.qlotsoputalbqkbkezlt:Urbantanker14edc@aws-0-ap-south-1.pooler.supabase.com:5432/postgres',
     },
   },
 })

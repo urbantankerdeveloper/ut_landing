@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Urban Tanker Server Deployment Readiness Report</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+      color: #172033;
+      background: #f4f7fb;
+    }
+
+    body {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 2rem 1rem 4rem;
+    }
+
+    header,
+    section {
+      background: #fff;
+      border: 1px solid #dbe3ef;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgb(23 32 51 / 6%);
+    }
+
+    header {
+      margin-bottom: 1.5rem;
+      padding: 1.5rem;
+    }
+
+    h1,
+    h2 {
+      margin-top: 0;
+    }
+
+    h1 {
+      margin-bottom: 0.5rem;
+    }
+
+    h2 {
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid #e6ebf2;
+    }
+
+    h3 {
+      margin-bottom: 0.25rem;
+      font-size: 1rem;
+    }
+
+    section {
+      margin-bottom: 1.25rem;
+      padding: 1.25rem 1.5rem;
+    }
+
+    ol,
+    ul {
+      margin: 0;
+      padding-left: 1.75rem;
+    }
+
+    li {
+      margin: 0.7rem 0;
+      padding-left: 0.25rem;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 0.75rem;
+      margin: 1rem 0 0;
+    }
+
+    .stat {
+      padding: 0.9rem 1rem;
+      border: 1px solid #e6ebf2;
+      border-radius: 10px;
+      background: #fbfcfe;
+    }
+
+    .stat strong {
+      display: block;
+      font-size: 1.6rem;
+      line-height: 1.1;
+    }
+
+    .stat span {
+      font-size: 0.85rem;
+      color: #4b5a72;
+    }
+
+    .pill {
+      display: inline-block;
+      margin-right: 0.4rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      vertical-align: 0.08em;
+      white-space: nowrap;
+    }
+
+    .blocker { color: #8a1c1c; background: #fde2e2; }
+    .high { color: #7a4b00; background: #fff0c7; }
+    .pass { color: #14532d; background: #dcfce7; }
+    .fail { color: #8a1c1c; background: #fde2e2; }
+    .notrun { color: #4d3d76; background: #eee7ff; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+    }
+
+    th,
+    td {
+      padding: 0.55rem 0.6rem;
+      border-bottom: 1px solid #e6ebf2;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f7f9fc;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #4b5a72;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    .muted {
+      color: #4b5a72;
+      font-size: 0.92rem;
+    }
+
+    .evidence {
+      margin-top: 0.35rem;
+      font-size: 0.88rem;
+      color: #4b5a72;
+    }
+
+    code {
+      padding: 0.1rem 0.3rem;
+      border-radius: 4px;
+      background: #eef2f7;
+      font-size: 0.88em;
+      word-break: break-word;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Urban Tanker Server Deployment Readiness Report</h1>
+    <p><strong>Application:</strong> <code>ut_landing</code> (React/Vite frontend, Express + Socket.io backend, Supabase Postgres)</p>
+    <p><strong>Perspective:</strong> Forward deployment engineering, server deployment of the remaining implementation.</p>
+    <p><strong>Report date:</strong> 2 November 2026</p>
+    <p><strong>Basis:</strong> Repository state at commit <code>23aef91</code> plus uncommitted changes to <code>package.json</code> and <code>package-lock.json</code>. Local checks were run on this machine. Playwright E2E was not run.</p>
+
+    <div class="stats">
+      <div class="stat"><strong>15</strong><span>Remaining backlog items, all gated on external validation</span></div>
+      <div class="stat"><strong>6</strong><span>Go-live blockers</span></div>
+      <div class="stat"><strong>58 / 58</strong><span>Backend tests passing (with env stubs)</span></div>
+      <div class="stat"><strong>15 / 15</strong><span>Frontend unit tests passing</span></div>
+      <div class="stat"><strong>1</strong><span>Failing quality gate (lint)</span></div>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>1. Executive Summary</h2>
+      <p><strong>Status update (2 Nov 2026):</strong> the blockers and high-risk items are remediated in code for the split hosting setup (Hostinger frontend, Render API). Sections 2 to 4 give the current state. The sections marked "initial review" describe the original findings. Launch still needs the external inputs and decisions listed in section 4.</p>
+      <p>The code base is close to deployable as a build. The frontend type-checks and builds, the backend type-checks, and the unit tests pass. The remaining work is mostly external: provider credentials, live Razorpay and SMS validation, and staging checks. That is consistent with the latest backlog.</p>
+      <p>Six items must be settled before a production go-live. The first is that the deployment topology is not decided. The repository references Render, Hostinger, and Netlify at the same time, and the domain is inconsistent. The others are a broken lint gate, uncommitted dependency changes, a default Content Security Policy that will likely block the Razorpay checkout script, two backend dependency vulnerabilities, and backend tests that fail without environment variables.</p>
+      <p>Two security settings need attention before launch. <code>USE_DEFAULT_VERIFICATION_CODE</code> must be <code>false</code> in production, and the database connection currently disables TLS certificate verification.</p>
+    </section>
+
+    <section>
+      <h2>2. Remediation Status</h2>
+      <p class="muted">Status after the remediation pass on 2 November 2026. "Resolved" means fixed in code and verified locally. Items marked open need an external input or a team decision.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Item</th><th>Status</th><th>What was done / what remains</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>B1 Hosting topology</td><td><span class="pill pass">RESOLVED (SPLIT)</span></td><td>Hostinger serves the frontend from <code>public_html</code>; Render runs the API. <code>.env.production</code> points at the Render origin, <code>render.yaml</code> defines the API service, and <code>FRONTEND_ORIGIN</code> and <code>CORS_ORIGINS</code> are env-driven. Open: attach the final domain and set <code>FRONTEND_ORIGIN</code> to it.</td></tr>
+            <tr><td>B2 Lint gate</td><td><span class="pill pass">RESOLVED</span></td><td>Restored <code>@eslint/js</code> to ^10.0.1 and <code>typescript-eslint</code> to ^8.x. <code>npm run lint</code> exits 0.</td></tr>
+            <tr><td>B3 jsPDF upgrade</td><td><span class="pill pass">RESOLVED</span></td><td>The calls in <code>src/utils/pdf.ts</code> were run under jsPDF 4 and produce a valid PDF. The upgrade is kept. Open: commit <code>package.json</code> and the lock file.</td></tr>
+            <tr><td>B4 Content Security Policy</td><td><span class="pill pass">RESOLVED</span></td><td>The frontend CSP is in <code>public/.htaccess</code>, which Hostinger serves. It allows Razorpay, Google Fonts, OpenStreetMap tiles, and the Render API origin. The API has its own CSP in <code>backend/src/server.ts</code>. Open: exercise Razorpay payment and map tiles against live services.</td></tr>
+            <tr><td>B5 Backend audit</td><td><span class="pill pass">RESOLVED</span></td><td><code>npm audit fix</code> applied. Production audit reports 0 vulnerabilities for both packages.</td></tr>
+            <tr><td>B6 Tests and CI</td><td><span class="pill pass">RESOLVED</span></td><td>Backend test env stubs in <code>backend/vitest.config.ts</code>. CI added at <code>.github/workflows/ci.yml</code>. Smoke test reads <code>SMOKE_API_URL</code>. Open: Playwright E2E has not been run against a live stack.</td></tr>
+            <tr><td>H1 Fixed verification code</td><td><span class="pill pass">RESOLVED</span></td><td>Startup guard refuses <code>USE_DEFAULT_VERIFICATION_CODE=true</code> in production. Covered by tests.</td></tr>
+            <tr><td>H2 Destructive installer</td><td><span class="pill high">PARTIAL</span></td><td><code>db:migrate</code> removed. Reset refuses in production. README corrected to <code>db:update</code>. Open: a forward-only migration process for future schema changes.</td></tr>
+            <tr><td>H3 Database TLS</td><td><span class="pill high">PARTIAL</span></td><td>Production requires <code>DB_SSL_CA</code> and verifies the certificate. Open: paste the real Supabase CA certificate into the host's secrets.</td></tr>
+            <tr><td>H4 Single-instance assumptions</td><td><span class="pill high">PARTIAL</span></td><td>Background sweeps are guarded by a Postgres advisory lock. Not yet tested against a live database. Open: Socket.io Redis adapter. Until then, run one instance.</td></tr>
+            <tr><td>H5 Config drift</td><td><span class="pill pass">RESOLVED</span></td><td><code>RAZORPAY_WEBHOOK_SECRET</code> and <code>DB_SSL_CA</code> added to the schema. Unused keys removed and duplicates cleaned from <code>.env.example</code>.</td></tr>
+            <tr><td>H6 Scaffolding</td><td><span class="pill pass">RESOLVED</span></td><td>Node 22 pinned in <code>.nvmrc</code>, <code>engines</code>, and <code>render.yaml</code>. <code>render.yaml</code> defines the API service with health check and secrets marked for dashboard entry. CI added. Open: check the Render plan keeps one warm instance.</td></tr>
+            <tr><td>New: cross-site refresh cookie</td><td><span class="pill high">OPEN</span></td><td>The refresh cookie is <code>SameSite=None; Secure</code> because Hostinger and Render are different sites. Browsers that block third-party cookies can drop it. Fix: serve the API from a subdomain of the frontend domain (for example <code>api.&lt;domain&gt;</code>) on Render.</td></tr>
+            <tr><td>H7 Conflicting backlogs</td><td><span class="pill pass">RESOLVED</span></td><td><code>IMPLEMENTATION_BACKLOG.html</code> is canonical. The Markdown file is marked superseded and its stale Razorpay line is flagged.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="muted"><strong>Still external:</strong> live Razorpay credentials and webhook, SMS and WhatsApp templates and sender IDs, the Supabase CA certificate, the production host and domain, and a staging E2E run.</p>
+    </section>
+
+    <section>
+      <h2>3. Changes in This Revision</h2>
+      <p class="muted">Changes made after the remediation pass, to match the confirmed hosting split: the frontend on Hostinger (<code>public_html</code>) and the API on Render. Nothing in this revision is committed.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Area</th><th>Change</th><th>Files</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Topology</td><td>Reverted the same-origin default. <code>.env.production</code> points <code>VITE_API_BASE_URL</code> and <code>VITE_REALTIME_URL</code> at the Render origin.</td><td><code>.env.production</code></td></tr>
+            <tr><td>Hostinger hosting</td><td>New <code>.htaccess</code> copied into <code>dist/</code>: single-page-app fallback so <code>/track/&lt;token&gt;</code> loads, security headers, a CSP whose <code>connect-src</code> names the Render API, and cache rules (hashed assets immutable, <code>index.html</code> not cached).</td><td><code>public/.htaccess</code></td></tr>
+            <tr><td>Render hosting</td><td>New blueprint: builds <code>backend/</code> with <code>npm ci &amp;&amp; npm run build</code>, starts with <code>npm start</code>, health check on <code>/health</code>, Node 22, and every secret marked for dashboard entry.</td><td><code>render.yaml</code></td></tr>
+            <tr><td>CORS</td><td>Allowed origins now come from <code>FRONTEND_ORIGIN</code> plus an optional comma-separated <code>CORS_ORIGINS</code>. The hard-coded <code>urbantanker.in</code> and Render entries are removed. Localhost origins are allowed only outside production.</td><td><code>backend/src/server.ts</code>, <code>backend/src/config.ts</code></td></tr>
+            <tr><td>Build scripts</td><td><code>build:hostinger</code> now builds only the frontend. <code>build:backend</code> and <code>build:all</code> added. CI runs <code>build:all</code>.</td><td><code>package.json</code>, <code>.github/workflows/ci.yml</code></td></tr>
+            <tr><td>Backend build and tests</td><td>Found a defect: Vitest ran the compiled copies of the tests in <code>dist/</code> as well, so the suite doubled to 123 tests. Tests are now run only from <code>src/</code>, and <code>tsconfig.build.json</code> keeps test files out of the production build. Current count: 62 tests in 13 files.</td><td><code>backend/vitest.config.ts</code>, <code>backend/tsconfig.build.json</code>, <code>backend/package.json</code></td></tr>
+            <tr><td>Tests</td><td>Config guard tests now cover the CORS origin list (four guard tests in total).</td><td><code>backend/src/config.guard.test.ts</code></td></tr>
+            <tr><td>Documentation</td><td>README production section rewritten for the split topology. Pending-work list and this report updated.</td><td><code>README.md</code>, <code>docs/DEPLOYMENT_READINESS_REPORT.html</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>Verification for this revision</h3>
+      <ul>
+        <li>Backend: typecheck (including tests) passes; 62/62 tests in 13 files pass; <code>npm run build</code> succeeds with no test files in <code>dist/</code>.</li>
+        <li>Frontend: <code>npm run build:hostinger</code> succeeds; <code>dist/.htaccess</code> is generated; the bundle contains the Render API URL.</li>
+        <li>Frontend lint and tests were last run before this revision. The changes since then are to scripts and env files only, so they have not been re-run.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>4. Pending Work</h2>
+      <p class="muted">Consolidated list of open items. "Blocks launch" means the item must be done before real customers use the site.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>#</th><th>Item</th><th>Owner</th><th>Blocks launch</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>1</td><td>Attach the final domain. Set <code>FRONTEND_ORIGIN</code> to its HTTPS origin on Render. Add <code>CORS_ORIGINS</code> for any other host (for example <code>www</code>, or <code>urbantanker.in</code> if it is used).</td><td>Team</td><td><span class="pill blocker">YES</span></td></tr>
+            <tr><td>2</td><td>Enter every secret marked <code>sync: false</code> in <code>render.yaml</code>. Include <code>DB_SSL_CA</code> with the Supabase CA certificate. The API refuses to start in production without it.</td><td>Ops</td><td><span class="pill blocker">YES</span></td></tr>
+            <tr><td>3</td><td>Deploy the Render blueprint. Confirm <code>GET /health</code> and <code>GET /health/ready</code> return 200, and keep one instance running.</td><td>Ops</td><td><span class="pill blocker">YES</span></td></tr>
+            <tr><td>4</td><td>Build the frontend with <code>npm ci &amp;&amp; npm run build</code>. Upload the contents of <code>dist/</code> to <code>public_html</code>, including <code>.htaccess</code>.</td><td>Ops</td><td><span class="pill blocker">YES</span></td></tr>
+            <tr><td>5</td><td>Check the live headers with <code>curl -I</code> (CSP, X-Frame-Options, Permissions-Policy). Check that <code>/track/test</code> returns the app shell, not a 404.</td><td>Ops</td><td><span class="pill blocker">YES</span></td></tr>
+            <tr><td>6</td><td>Confirm that <code>connect-src</code> in <code>public/.htaccess</code> still matches the Render origin. Update it and <code>.env.production</code> together if the API origin changes.</td><td>Dev</td><td><span class="pill high">CONDITIONAL</span></td></tr>
+            <tr><td>7</td><td>Decide on an API subdomain (for example <code>api.&lt;domain&gt;</code> pointed at Render). This makes the refresh cookie first-party and removes the third-party cookie risk.</td><td>Team</td><td><span class="pill high">RECOMMENDED</span></td></tr>
+            <tr><td>8</td><td>Live Razorpay test payment. Register <code>https://&lt;render-host&gt;/api/payment/razorpay/webhook</code> with the webhook secret. Confirm the CSP allows checkout and its iframe.</td><td>Ops</td><td><span class="pill blocker">YES</span></td></tr>
+            <tr><td>9</td><td>Add <code>https://&lt;domain&gt;/login</code> to the Supabase Auth redirect list. Confirm customer login and refresh work on the live domain.</td><td>Ops</td><td><span class="pill blocker">YES</span></td></tr>
+            <tr><td>10</td><td>SMS: DLT-approved MSG91 templates and sender ID for the six template variables. WhatsApp is not wired into the config schema yet.</td><td>External</td><td><span class="pill blocker">YES (OTP)</span></td></tr>
+            <tr><td>11</td><td>Supabase production project. Apply schema changes only with <code>npm run db:update</code> (idempotent). Never run <code>db:reset</code> against data. Enable backups and test a restore.</td><td>Ops</td><td><span class="pill blocker">YES</span></td></tr>
+            <tr><td>12</td><td>Run the advisory-lock path of the background sweeps against a live Postgres. It is written but has not been exercised.</td><td>Dev</td><td><span class="pill high">YES</span></td></tr>
+            <tr><td>13</td><td>Run the Playwright suite against staging (the smoke test reads <code>SMOKE_API_URL</code>; the browser base URL is still localhost in <code>playwright.config.ts</code>).</td><td>Dev</td><td><span class="pill blocker">YES</span></td></tr>
+            <tr><td>14</td><td>Realtime: add a Redis Socket.io adapter before running more than one API instance. Until then, one instance only.</td><td>Dev</td><td><span class="pill notrun">NO (single instance)</span></td></tr>
+            <tr><td>15</td><td>Review and commit the working-tree changes, including the <code>jspdf</code> 4 upgrade and the lock files. Nothing has been committed yet.</td><td>Dev</td><td><span class="pill blocker">YES</span></td></tr>
+            <tr><td>16</td><td>Forward-only migration process for future schema changes, replacing the current incremental blocks.</td><td>Dev</td><td><span class="pill notrun">NO</span></td></tr>
+            <tr><td>17</td><td>Mobile app (<code>urban_tanker_app</code>): turn on Windows Developer Mode so Flutter plugins can build, then finish <code>pub get</code>, <code>flutter analyze</code>, tests and the endpoint check. Replace the placeholder release-signing fallback with real keystore configuration.</td><td>Dev</td><td><span class="pill blocker">YES (mobile release)</span></td></tr>
+            <tr><td>18</td><td>Play Store listing URL in the footer. It currently points at the generic Play Store page.</td><td>Product</td><td><span class="pill notrun">NO</span></td></tr>
+            <tr><td>19</td><td>Confirm what should be deployed from <code>public_html/</code>. It is kept as the legacy reference site for later verification and is not part of the React build.</td><td>Team</td><td><span class="pill notrun">NO</span></td></tr>
+            <tr><td>20</td><td>Future full move to Hostinger: the API is configured only through environment variables, but the CSP origin in <code>.htaccess</code> and the <code>VITE_*</code> values must then be changed with it.</td><td>Dev</td><td><span class="pill notrun">LATER</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>5. Local Verification Results (initial review)</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Check</th><th>Command</th><th>Result</th><th>Notes</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Frontend typecheck</td><td><code>npx tsc -b</code></td>
+              <td><span class="pill pass">PASS</span></td><td>No errors.</td>
+            </tr>
+            <tr>
+              <td>Frontend production build</td><td><code>npx vite build</code></td>
+              <td><span class="pill pass">PASS</span></td><td>Built in 1.61 s. Output in <code>dist/</code>, which is git-ignored.</td>
+            </tr>
+            <tr>
+              <td>Frontend unit tests</td><td><code>npx vitest run</code></td>
+              <td><span class="pill pass">PASS</span></td><td>15 of 15 tests in 5 files. The backlog HTML states 8/8, which is out of date.</td>
+            </tr>
+            <tr>
+              <td>Frontend lint</td><td><code>npx eslint .</code></td>
+              <td><span class="pill fail">FAIL</span></td><td>ESLint crashes with <code>TypeError: scopeManager.addGlobals is not a function</code>. ESLint is 10.14.0 and <code>@eslint/js</code> is 9.39.5. See blocker B2.</td>
+            </tr>
+            <tr>
+              <td>Backend dependencies</td><td><code>npm ci</code> (backend)</td>
+              <td><span class="pill pass">PASS</span></td><td><code>backend/node_modules</code> was missing and has now been installed. This changes the local environment only, not the repository.</td>
+            </tr>
+            <tr>
+              <td>Backend typecheck</td><td><code>npx tsc -p tsconfig.json --noEmit</code></td>
+              <td><span class="pill pass">PASS</span></td><td>Passes after dependencies are installed. Before the install, it failed with missing-module errors.</td>
+            </tr>
+            <tr>
+              <td>Backend tests, no env</td><td><code>npx vitest run</code></td>
+              <td><span class="pill fail">FAIL</span></td><td>5 of 12 files fail at import, because <code>config.ts</code> parses <code>process.env</code> on load and requires <code>SUPABASE_URL</code>.</td>
+            </tr>
+            <tr>
+              <td>Backend tests, stubbed env</td><td><code>SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… npx vitest run</code></td>
+              <td><span class="pill pass">PASS</span></td><td>12 of 12 files and 58 of 58 tests pass. The backlog HTML states 40/40, which is out of date.</td>
+            </tr>
+            <tr>
+              <td>Frontend production dependency audit</td><td><code>npm audit --omit=dev</code></td>
+              <td><span class="pill pass">PASS</span></td><td>0 vulnerabilities.</td>
+            </tr>
+            <tr>
+              <td>Backend production dependency audit</td><td><code>npm audit --omit=dev</code></td>
+              <td><span class="pill fail">FAIL</span></td><td><code>body-parser</code> 2.0.0 to 2.3.0 (high) and <code>qs</code> 6.7.0 to 6.16.0 (moderate). A fix is available.</td>
+            </tr>
+            <tr>
+              <td>Playwright E2E</td><td><code>npm run test:e2e</code></td>
+              <td><span class="pill notrun">NOT RUN</span></td><td>Needs a running stack and browsers. <code>tests/production-smoke.spec.ts</code> hard-codes <code>http://localhost:8080</code>.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>6. Go-Live Blockers (initial review)</h2>
+      <p class="muted">These must be resolved before a production deployment. They are ordered by severity.</p>
+      <ol>
+        <li>
+          <span class="pill blocker">B1</span><strong>Deployment topology is not decided.</strong>
+          The repository points at several hosts at once. <code>.env.production</code> sets the API to <code>https://urban-tanker-backend.onrender.com</code>. <code>package.json</code> has a <code>build:hostinger</code> script. <code>public_html/netlify.toml</code> and <code>public/_headers</code> are Netlify artifacts. The CORS allow-list in <code>backend/src/server.ts</code> includes <code>urbantanker.in</code>, while the canonical link in <code>index.html</code> is <code>urbantanker.com</code>, which appears 18 times against 6 for <code>.in</code>.
+          <div class="evidence">Impact: <code>VITE_API_BASE_URL</code> and <code>VITE_REALTIME_URL</code> are baked into the bundle at build time. CORS, cookie domains, Supabase redirect URLs, and the Razorpay webhook URL all depend on this choice. Also, <code>public_html/netlify.toml</code> publishes the legacy static prototype, not the React app.<br>Decision needed: choose one of (A) Express serves the SPA and API from one host, or (B) a static frontend host with a separate API host. Then set the domain and <code>VITE_*</code> values to match.</div>
+        </li>
+        <li>
+          <span class="pill blocker">B2</span><strong>The lint gate is broken, probably by an uncommitted change.</strong>
+          The working-tree <code>package.json</code> lowers <code>@eslint/js</code> from <code>^10.0.1</code> to <code>^9.39.5</code> and <code>typescript-eslint</code> from <code>^8.69.0</code> to <code>^8.14.0</code>, while ESLint resolves to 10.14.0. That version mismatch matches the crash.
+          <div class="evidence">Action: restore the committed versions or align <code>@eslint/js</code> to the ESLint 10 line, then re-run <code>npx eslint .</code>. This has not been tested yet.</div>
+        </li>
+        <li>
+          <span class="pill blocker">B3</span><strong>Uncommitted dependency changes are unreviewed.</strong>
+          <code>jspdf</code> moves from <code>^2.5.2</code> to <code>^4.2.1</code>, a major version change. It is used by <code>src/utils/pdf.ts</code> for invoices and PDFs. <code>package-lock.json</code> has a 2,952-line insertion and a 1,652-line deletion.
+          <div class="evidence">Action: verify generated invoice and contract PDFs against the current output, then commit <code>package.json</code> and the lock file together so the build is reproducible.</div>
+        </li>
+        <li>
+          <span class="pill blocker">B4</span><strong>No custom Content Security Policy, so the Helmet default applies.</strong>
+          <code>backend/src/server.ts</code> calls <code>helmet()</code> with no options. When Express serves the SPA, the default policy sets <code>script-src 'self'</code> and <code>img-src 'self' data:</code>. Those directives would likely block the Razorpay checkout script loaded in <code>src/hooks/useFrontendFeatures.ts</code> and the external map tiles.
+          <div class="evidence">This is not yet confirmed in a browser. Action: define a CSP that allows <code>checkout.razorpay.com</code>, Google Fonts, the OpenStreetMap tile and Nominatim hosts, and the Socket.io connection, then check it in staging. The backlog item "CSP review" also remains open.</div>
+        </li>
+        <li>
+          <span class="pill blocker">B5</span><strong>Backend has production dependency vulnerabilities.</strong>
+          <code>body-parser</code> (high) and <code>qs</code> (moderate) are both reported by <code>npm audit --omit=dev</code>. The Express request body parser depends on them.
+          <div class="evidence">Action: run <code>npm audit fix</code> in <code>backend/</code>, re-run the backend tests, and commit the updated lock file.</div>
+        </li>
+        <li>
+          <span class="pill blocker">B6</span><strong>Tests and CI are not deployment-ready.</strong>
+          Backend tests fail at import unless <code>SUPABASE_URL</code> and a service-role key are set. There is no <code>.github/</code> directory, so no pipeline runs the build, tests, or audit. The backend <code>lint</code> script refers to ESLint, but ESLint is not installed in <code>backend/</code>.
+          <div class="evidence">Action: add a Vitest setup file or <code>.env.test</code> that stubs the required variables, add a CI workflow with build, test, audit, and smoke steps, and make the Playwright base URL configurable.</div>
+        </li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>7. High-Priority Risks (initial review)</h2>
+      <ol>
+        <li>
+          <span class="pill high">H1</span><strong>A fixed verification code can bypass guest booking OTP.</strong>
+          When <code>USE_DEFAULT_VERIFICATION_CODE=true</code>, SMS is skipped and <code>DEFAULT_VERIFICATION_CODE</code> is accepted. The fallback value is <code>123456</code>. The default for the flag is <code>false</code>, but nothing stops production from enabling it.
+          <div class="evidence">Action: set it to <code>false</code> on the host. Add a startup guard in <code>backend/src/config.ts</code> that refuses to start when <code>NODE_ENV=production</code> and the flag is <code>true</code>.</div>
+        </li>
+        <li>
+          <span class="pill high">H2</span><strong>The database installer is destructive, and the README points to a missing file.</strong>
+          <code>backend/supabase/001_initial.sql</code> contains 21 <code>DROP</code> statements. It is the canonical installer, which resets the <code>public</code> schema. <code>db:migrate</code> and <code>db:reset</code> both run <code>reset-database.ts</code>. The script is guarded by <code>CONFIRM_DATABASE_RESET=URBAN_TANKER_RESET</code>. The README tells operators to apply <code>backend/supabase/012_booking_service_details.sql</code>, which does not exist.
+          <div class="evidence">Action: never run the installer against a database with data. Add numbered, forward-only migrations for production. Rename <code>db:migrate</code> so it does not suggest a safe migration. Take a backup before any schema change.</div>
+        </li>
+        <li>
+          <span class="pill high">H3</span><strong>Database TLS certificate verification is disabled.</strong>
+          <code>backend/src/database.ts</code> sets <code>ssl: { rejectUnauthorized: false }</code>. That permits a man-in-the-middle on the Postgres connection.
+          <div class="evidence">Action: pin the Supabase CA certificate and set <code>rejectUnauthorized: true</code>, or confirm with the provider that this is acceptable.</div>
+        </li>
+        <li>
+          <span class="pill high">H4</span><strong>The backend assumes a single instance.</strong>
+          Socket.io uses the default in-memory adapter, with no Redis adapter in the dependencies. Background jobs in <code>backend/src/services/jobs.ts</code> run on <code>setInterval</code> with no advisory lock. The <code>express-rate-limit</code> store is in memory.
+          <div class="evidence">Impact: scaling past one instance would duplicate jobs and notifications, drop realtime events, and make rate limits per instance. Action: run one instance at launch, or add a Redis adapter and Postgres advisory locks first.</div>
+        </li>
+        <li>
+          <span class="pill high">H5</span><strong>Configuration has drifted from the schema.</strong>
+          <code>WHATSAPP_FROM_NUMBER</code>, <code>SUPABASE_JWKS_URL</code>, and <code>SUPABASE_PUBLISHABLE_KEY</code> appear in <code>backend/.env.example</code> but are not used in <code>backend/src</code>. <code>RAZORPAY_WEBHOOK_SECRET</code> is read directly from <code>process.env</code> and is not in the zod schema. <code>SUPABASE_URL</code>, <code>SUPABASE_DB_URL</code>, <code>DB_POOL_MAX</code>, and <code>SUPABASE_SERVICE_ROLE_KEY</code> each appear twice in <code>.env.example</code>.
+          <div class="evidence">Action: add every required variable to the zod schema so missing values fail at startup, remove unused keys, and de-duplicate the example file.</div>
+        </li>
+        <li>
+          <span class="pill high">H6</span><strong>Deployment scaffolding is missing.</strong>
+          There is no Dockerfile, Procfile, <code>render.yaml</code>, <code>.nvmrc</code>, or <code>engines</code> field. Development uses Node v26.13.0, which has not been checked against the host. The <code>start</code> script runs <code>db:check</code> before the server, so a database outage stops the process from starting. That is reasonable, but it should be expected by the host's restart policy.
+          <div class="evidence">Action: pin a supported Node LTS in <code>engines</code> and <code>.nvmrc</code>, and document the start command, health check paths, and restart behaviour.</div>
+        </li>
+        <li>
+          <span class="pill high">H7</span><strong>Status documents disagree.</strong>
+          <code>docs/IMPLEMENTATION_BACKLOG.md</code> lists 33 items, 28 IN PROGRESS and 5 PENDING. <code>docs/IMPLEMENTATION_BACKLOG.html</code> lists 15 items, all EXTERNAL, and is dated 15 October 2026. The Markdown version still lists Razorpay webhook verification as missing, but <code>backend/src/routes/payments.ts</code> implements an HMAC-verified webhook.
+          <div class="evidence">Action: keep one backlog as the source of truth. This report uses the 15-item HTML view, checked against the code.</div>
+        </li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>8. Remaining Implementation, Deployment View</h2>
+      <p class="muted">The 15 items come from the latest backlog, <code>docs/IMPLEMENTATION_BACKLOG.html</code>. Every item is EXTERNAL, meaning repository work is in place and provider, staging, or production validation remains. The last column is the deployment action and whether the item blocks go-live.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>#</th><th>Area</th><th>Remaining validation</th><th>Deployment action</th><th>Blocks go-live</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td><td>Customer auth and role restoration</td>
+              <td>Staging validation; session recovery checks.</td>
+              <td>Set <code>SUPABASE_URL</code> and the service-role or secret key. Add <code>${FRONTEND_ORIGIN}/login</code> to the Supabase Auth redirect list. Confirm refresh-cookie <code>Secure</code> and <code>SameSite</code> behaviour behind the HTTPS proxy. <code>trust proxy</code> is already set to 1.</td>
+              <td><span class="pill blocker">YES</span></td>
+            </tr>
+            <tr>
+              <td>2</td><td>Payment checkout and verification</td>
+              <td>Live Razorpay credentials and webhook verification.</td>
+              <td>Set <code>RAZORPAY_KEY_ID</code>, <code>RAZORPAY_KEY_SECRET</code>, and <code>RAZORPAY_WEBHOOK_SECRET</code>. Register <code>https://&lt;api-host&gt;/api/payment/razorpay/webhook</code> for <code>payment.captured</code>, <code>payment.authorized</code>, and <code>payment.failed</code>. Allow <code>checkout.razorpay.com</code> in the CSP (B4).</td>
+              <td><span class="pill blocker">YES</span></td>
+            </tr>
+            <tr>
+              <td>3</td><td>Live tracking and geolocation</td>
+              <td>Browser permission, continuous driver tracking, production realtime checks.</td>
+              <td>The host must support WebSockets. Use sticky sessions if more than one instance runs (H4). <code>Permissions-Policy: geolocation=(self)</code> is set only in the Netlify headers files, not by Express. Add it to Express if the API serves the SPA.</td>
+              <td><span class="pill blocker">YES</span></td>
+            </tr>
+            <tr>
+              <td>4</td><td>Wallet, invoices, membership, contracts, offers</td>
+              <td>Live payment-provider validation.</td>
+              <td>Same Razorpay setup as item 2. Verify invoice PDF output after the <code>jspdf</code> upgrade (B3).</td>
+              <td><span class="pill blocker">YES</span></td>
+            </tr>
+            <tr>
+              <td>5</td><td>Customer notification center</td>
+              <td>SMS and push provider configuration; delivery validation.</td>
+              <td>Set <code>VAPID_PUBLIC_KEY</code> and <code>VAPID_PRIVATE_KEY</code> for web push. Set <code>ONESIGNAL_APP_ID</code> and <code>ONESIGNAL_REST_API_KEY</code> if OneSignal is used. Serve <code>service-worker.js</code> with no caching.</td>
+              <td>Partial. Push can ship later.</td>
+            </tr>
+            <tr>
+              <td>6</td><td>Vendor auth and dashboard API</td>
+              <td>Staging permissions and profile validation.</td>
+              <td>Seed vendor profiles in the production database. Confirm role claims are set on the users.</td>
+              <td><span class="pill blocker">YES</span></td>
+            </tr>
+            <tr>
+              <td>7</td><td>OTP and proof flow</td>
+              <td>Twilio sender configuration; SMS delivery; storage provider setup.</td>
+              <td>Choose <code>SMS_PROVIDER</code> (<code>msg91</code> is the default). Set the MSG91 keys and the six <code>MSG91_TEMPLATE_ID_*</code> values, or the <code>TWILIO_*</code> values. Set <code>USE_DEFAULT_VERIFICATION_CODE=false</code> (H1). Create the Supabase Storage buckets.</td>
+              <td><span class="pill blocker">YES</span></td>
+            </tr>
+            <tr>
+              <td>8</td><td>Admin auth, role permissions, workspace restoration</td>
+              <td>Production permission review.</td>
+              <td>Set <code>ADMIN_REGISTRATION_KEY</code> to a strong secret, or remove it after the first admin is created. Review the role matrix.</td>
+              <td><span class="pill blocker">YES</span></td>
+            </tr>
+            <tr>
+              <td>9</td><td>Finance, payments, refunds, vendor payouts</td>
+              <td>Razorpay, webhook, and reconciliation validation.</td>
+              <td>Test refunds in Razorpay test mode first. Back up finance tables before go-live.</td>
+              <td><span class="pill blocker">YES</span></td>
+            </tr>
+            <tr>
+              <td>10</td><td>Supabase database and RLS</td>
+              <td>Live policy validation; backup and restore validation.</td>
+              <td>Use reviewed forward migrations (H2). Run the installer only on an empty project. Enable Supabase backups. Test a restore with <code>backend/src/scripts/backup-postgres.ts</code>.</td>
+              <td><span class="pill blocker">YES</span></td>
+            </tr>
+            <tr>
+              <td>11</td><td>Realtime WebSocket integration</td>
+              <td>Continuous driver tracking; production realtime verification.</td>
+              <td>Single instance at launch (H4). The Socket.io CORS list uses the same allow-list as the API, so B1 decides it.</td>
+              <td><span class="pill blocker">YES</span></td>
+            </tr>
+            <tr>
+              <td>12</td><td>File storage</td>
+              <td>Storage bucket and provider lifecycle.</td>
+              <td>Create private buckets with size and MIME limits. Confirm signed-upload expiry in <code>backend/src/routes/uploads.ts</code>. Set up a cleanup policy.</td>
+              <td><span class="pill blocker">YES</span></td>
+            </tr>
+            <tr>
+              <td>13</td><td>Email, SMS OTP, WhatsApp, reminders</td>
+              <td>Provider credentials; approved sender and templates; delivery validation.</td>
+              <td>Set <code>SMTP_USER</code>, <code>SMTP_PASSWORD</code>, and <code>MAIL_FROM</code>. Gmail SMTP needs an app password. Consider a dedicated transactional email provider for production volume. WhatsApp: <code>WHATSAPP_FROM_NUMBER</code> is not wired into the config schema (H5).</td>
+              <td>Email and SMS: <span class="pill blocker">YES</span>. WhatsApp: no.</td>
+            </tr>
+            <tr>
+              <td>14</td><td>Automated quality gates</td>
+              <td>Staging E2E; wider component, accessibility, and MSW coverage.</td>
+              <td>Fix lint (B2) and the backend test environment (B6). Add CI. Make the smoke-test base URL configurable.</td>
+              <td><span class="pill blocker">YES</span></td>
+            </tr>
+            <tr>
+              <td>15</td><td>Production operations and analytics</td>
+              <td>Credentials, monitoring and alerts, CSP review, backups, rollback, live validation.</td>
+              <td>Complete the CSP (B4). Wire <code>/health</code> and <code>/health/ready</code> into the host health check. Log output is structured JSON, so ship it to a log store. Confirm <code>ANALYTICS_RETENTION_DAYS</code> (default 90) and <code>ANALYTICS_ANONYMIZE_AFTER_DAYS</code> (default 7). Write the rollback plan.</td>
+              <td><span class="pill blocker">YES</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>9. Environment Variable Checklist</h2>
+      <p class="muted">Names only. Values belong in each host's secret store, never in the repository.</p>
+      <h3>Frontend, Hostinger (build time, compiled into the bundle)</h3>
+      <ul>
+        <li><code>VITE_API_BASE_URL</code> and <code>VITE_REALTIME_URL</code> are set in <code>.env.production</code> to the Render origin. Rebuild after any change.</li>
+        <li>The Content-Security-Policy <code>connect-src</code> in <code>public/.htaccess</code> must list the same origin.</li>
+      </ul>
+      <h3>API, Render (runtime, set in the dashboard from <code>render.yaml</code>)</h3>
+      <ul>
+        <li><strong>Set by the blueprint:</strong> <code>NODE_ENV=production</code>, <code>NODE_VERSION=22</code>, <code>USE_DEFAULT_VERIFICATION_CODE=false</code>, <code>SMS_PROVIDER=msg91</code>, <code>DB_POOL_MAX=10</code>, <code>JWT_EXPIRES_IN=15m</code>, <code>REFRESH_TOKEN_EXPIRES_IN=30d</code>, analytics retention values.</li>
+        <li><strong>Required, entered in the dashboard:</strong> <code>FRONTEND_ORIGIN</code> (HTTPS, the Hostinger domain), <code>SUPABASE_URL</code>, <code>SUPABASE_SERVICE_ROLE_KEY</code> (or <code>SUPABASE_SECRET_KEY</code>), <code>SUPABASE_DB_URL</code>, <code>DB_SSL_CA</code>, <code>ADMIN_REGISTRATION_KEY</code>.</li>
+        <li><strong>Origins:</strong> <code>CORS_ORIGINS</code> (optional, comma-separated extra origins).</li>
+        <li><strong>Payments:</strong> <code>RAZORPAY_KEY_ID</code>, <code>RAZORPAY_KEY_SECRET</code>, <code>RAZORPAY_WEBHOOK_SECRET</code>.</li>
+        <li><strong>Email:</strong> <code>SMTP_USER</code>, <code>SMTP_PASSWORD</code>, <code>MAIL_FROM</code>. <code>SMTP_HOST</code>, <code>SMTP_PORT</code>, and <code>SMTP_SECURE</code> default to Gmail.</li>
+        <li><strong>SMS:</strong> the <code>MSG91_*</code> keys and six template IDs, or the <code>TWILIO_*</code> keys if switched.</li>
+        <li><strong>Push:</strong> <code>VAPID_PUBLIC_KEY</code>, <code>VAPID_PRIVATE_KEY</code>, <code>ONESIGNAL_APP_ID</code>, <code>ONESIGNAL_REST_API_KEY</code>.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>10. Recommended Deployment Sequence (Split: Hostinger frontend, Render API)</h2>
+      <ol>
+        <li><strong>Confirm the open decisions.</strong> Final domain, and whether to use an API subdomain (section 11).</li>
+        <li><strong>Provision the database.</strong> Create the production Supabase project. Copy its CA certificate for <code>DB_SSL_CA</code>. For an empty project, apply the full installer once; for an existing database, use <code>npm run db:update</code>. Never run <code>db:reset</code> against data. Enable backups.</li>
+        <li><strong>Deploy the API to Render.</strong> Create the service from <code>render.yaml</code>. Enter the dashboard secrets, set <code>FRONTEND_ORIGIN</code>, and deploy. Confirm <code>GET /health</code> and <code>GET /health/ready</code>.</li>
+        <li><strong>Build the frontend.</strong> Run <code>npm ci</code> and <code>npm run build</code> from the repository root. This reads <code>.env.production</code>.</li>
+        <li><strong>Upload to Hostinger.</strong> Copy the contents of <code>dist/</code> into <code>public_html</code>, including <code>.htaccess</code>.</li>
+        <li><strong>Check the headers and routing.</strong> <code>curl -I https://&lt;domain&gt;/</code> should show the CSP and X-Frame-Options. <code>https://&lt;domain&gt;/track/test</code> should return the app shell. <code>https://&lt;render-host&gt;/api/admin/orders</code> without a token should return 401.</li>
+        <li><strong>Connect the providers.</strong> Register the Razorpay webhook at <code>https://&lt;render-host&gt;/api/payment/razorpay/webhook</code>. Add <code>https://&lt;domain&gt;/login</code> to the Supabase Auth redirect list.</li>
+        <li><strong>Smoke test in a browser on the live domain.</strong> The landing page loads. Login, refresh and booking work. The console shows no CORS or CSP errors. Run a Razorpay test-mode payment. The live tracking map and realtime updates connect.</li>
+        <li><strong>Rollback plan.</strong> Keep the previous <code>dist/</code> upload so it can be restored. In Render, roll back to the previous deploy. Take a database backup before every schema change.</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>11. Decisions Needed From the Team</h2>
+      <p>These cannot be settled from the repository alone.</p>
+      <ol>
+        <li><strong>Final domain.</strong> <code>urbantanker.com</code> or <code>urbantanker.in</code>, and whether <code>www</code> is used. This sets <code>FRONTEND_ORIGIN</code> and <code>CORS_ORIGINS</code>.</li>
+        <li><strong>API subdomain.</strong> Serve Render at <code>api.&lt;domain&gt;</code> so the refresh cookie is first-party. The current setup relies on <code>SameSite=None; Secure</code>, which some browsers block.</li>
+        <li><strong>Is <code>public_html/</code> to be deployed for verification?</strong> The current assumption is that it stays as the legacy reference site. It is not part of the React build.</li>
+        <li><strong>Is a single API instance acceptable at launch?</strong> The current assumption is yes. If not, the Redis adapter (pending item 14) comes first.</li>
+      </ol>
+      <p class="muted">Resolved since the initial review: the hosting split (Hostinger frontend, Render API) and the source of truth for the backlog (the HTML file).</p>
+    </section>
+
+    <section>
+      <h2>12. Scope and Limits</h2>
+      <ul>
+        <li><strong>Verified locally:</strong> frontend and backend builds, typechecks, unit tests (frontend 15, backend 62), frontend lint, production dependency audits (both zero), and a browser run of the built app served by the backend. The browser run found no CSP violations on the home, login and booking screens.</li>
+        <li><strong>Not verified:</strong> the <code>.htaccess</code> on Hostinger's Apache, the Render blueprint in a live deploy, Razorpay payments, SMS, Supabase, the advisory lock against a live Postgres, the Playwright E2E suite, and the live map tiles.</li>
+        <li><strong>Mobile app:</strong> <code>urban_tanker_app</code> has not been verified. Flutter <code>pub get</code> is blocked until Windows Developer Mode is enabled.</li>
+        <li><strong>Repository state:</strong> all changes are uncommitted. <code>package.json</code> and the lock files include the <code>jspdf</code> 4 upgrade and a <code>typescript-eslint</code> version bump.</li>
+        <li><strong>Hostinger tools:</strong> the Hostinger MCP connectors were available during this revision but were not used. No DNS, domain or hosting changes were made.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

@@ -28,4 +28,22 @@ describe('production configuration guards', () => {
     const { config } = await import('./config.js')
     expect(config.CORS_ORIGINS).toEqual(['https://urbantanker.com', 'https://www.urbantanker.com'])
   })
+
+  it('treats blank values from .env.example as unset', async () => {
+    process.env = { ...original, ...base, SUPABASE_SECRET_KEY: '', SUPABASE_DB_URL: '', ADMIN_REGISTRATION_KEY: '' }
+    const { config } = await import('./config.js')
+    expect(config.SUPABASE_DB_URL).toBeUndefined()
+    expect(config.SUPABASE_SERVICE_ROLE_KEY).toBe('k')
+  })
+
+  it('drops a trailing slash from FRONTEND_ORIGIN so it matches the browser Origin header', async () => {
+    process.env = { ...original, ...base, NODE_ENV: 'production', FRONTEND_ORIGIN: 'https://urbantanker.in/' }
+    const { config } = await import('./config.js')
+    expect(config.FRONTEND_ORIGIN).toBe('https://urbantanker.in')
+  })
+
+  it('explains how to fix a missing required variable', async () => {
+    process.env = { ...original, SUPABASE_URL: '', SUPABASE_SERVICE_ROLE_KEY: 'k' }
+    await expect(import('./config.js')).rejects.toThrow('Copy backend/.env.example to backend/.env')
+  })
 })
