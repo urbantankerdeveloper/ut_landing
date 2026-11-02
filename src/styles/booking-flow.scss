@@ -525,3 +525,5 @@
     .booking-screen .field .input-with-icon input { min-height: 47px; padding: 11px 0; margin-top: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
     .booking-screen .booking-summary .summary-line > div, .booking-screen .booking-summary .summary-line > strong { min-width: 0; overflow-wrap: anywhere; }
 }
+.check-line { display: flex; align-items: flex-start; gap: 10px; line-height: 1.5; cursor: pointer; }
+.check-line input { flex: none; width: 16px; height: 16px; min-height: 0; margin: 2px 0 0; accent-color: #008ca5; }
