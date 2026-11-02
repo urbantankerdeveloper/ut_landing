@@ -96,8 +96,8 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
     onNavigate('booking')
   }
 
-  if (!customerDemoDataEnabled && query.isLoading) return <section className="workspace-view-panel customer-operation-panel"><p className="eyebrow">{c.bookingsTable.eyebrow}</p><h2>{c.bookingsTable.loading}</h2></section>
-  if (!customerDemoDataEnabled && query.isError) return <section className="workspace-view-panel customer-operation-panel"><p className="eyebrow">{c.bookingsTable.eyebrow}</p><h2>{c.bookingsTable.unavailable}</h2><button className="button button-primary" onClick={() => query.refetch()}>{c.bookingsTable.retry}</button></section>
+  if (!customerDemoDataEnabled && query.isLoading) return <section className="workspace-view-panel customer-operation-panel" role="status"><p className="eyebrow">{c.bookingsTable.eyebrow}</p><h2>{c.bookingsTable.loading}</h2></section>
+  if (!customerDemoDataEnabled && query.isError) return <section className="workspace-view-panel customer-operation-panel" role="alert"><p className="eyebrow">{c.bookingsTable.eyebrow}</p><h2>{c.bookingsTable.unavailable}</h2><button className="button button-primary" onClick={() => query.refetch()}>{c.bookingsTable.retry}</button></section>
 
   return <>
     <section className="workspace-view-panel customer-operation-panel customer-bookings-table-panel">
@@ -111,7 +111,7 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
       </div>
       <div className="customer-booking-table-wrap">
         <table className="customer-booking-table">
-          <thead><tr><th>{c.bookingsTable.headers.booking}</th><th>{c.bookingsTable.headers.service}</th><th>{c.bookingsTable.headers.location}</th><th>{c.bookingsTable.headers.status}</th><th>{c.bookingsTable.headers.amount}</th><th>{c.bookingsTable.headers.action}</th></tr></thead>
+          <thead><tr><th scope="col">{c.bookingsTable.headers.booking}</th><th scope="col">{c.bookingsTable.headers.service}</th><th scope="col">{c.bookingsTable.headers.location}</th><th scope="col">{c.bookingsTable.headers.status}</th><th scope="col">{c.bookingsTable.headers.amount}</th><th scope="col">{c.bookingsTable.headers.action}</th></tr></thead>
           <tbody>{visibleRows.map((booking) => <tr key={booking.id}>
             <td><b>{booking.id}</b></td>
             <td>{booking.service}</td>

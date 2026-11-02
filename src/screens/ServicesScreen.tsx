@@ -1,5 +1,5 @@
 import { ArrowRight, Construction, Droplets, Factory, Gauge, Truck, Waves, type LucideIcon } from 'lucide-react'
-import { useNavigationStore } from '../stores/navigationStore'
+import { useAppNavigation } from '../routing/useAppNavigation'
 import { servicesContent as c } from '../content/services'
 
 type ItemId = (typeof c.items)[number]['id']
@@ -14,7 +14,7 @@ const itemIcons: Record<ItemId, LucideIcon> = {
 }
 
 export default function ServicesScreen() {
-  const navigate = useNavigationStore((state) => state.navigate)
+  const { navigate } = useAppNavigation()
   return (
     <section className="content-screen services-screen">
       <div className="section-intro">

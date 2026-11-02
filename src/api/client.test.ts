@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, apiFetch } from './client'
 import { useAuthStore } from '../stores/authStore'
+import { useServerStatusStore } from '../stores/serverStatusStore'
 
 describe('apiFetch', () => {
   beforeEach(() => {
@@ -68,5 +69,77 @@ describe('apiFetch', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204 })))
 
     await expect(apiFetch('/customer/profile', { method: 'DELETE' })).resolves.toBeUndefined()
+  })
+})
+
+describe('apiFetch retries and slow requests', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    vi.stubGlobal('window', globalThis)
+    useAuthStore.setState({ user: null, accessToken: null })
+    useServerStatusStore.setState({ slowRequests: 0 })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('retries an idempotent GET after a network failure', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const request = apiFetch<{ ok: boolean }>('/customer/profile')
+    await vi.runAllTimersAsync()
+
+    await expect(request).resolves.toEqual({ ok: true })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('gives up on a GET after three attempts', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const request = apiFetch('/customer/profile')
+    const assertion = expect(request).rejects.toThrow(TypeError)
+    await vi.runAllTimersAsync()
+
+    await assertion
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('does not retry a POST after a network failure', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(apiFetch('/customer/bookings', { method: 'POST', body: '{}' })).rejects.toThrow(TypeError)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not retry an HTTP error response', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 503 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(apiFetch('/customer/profile')).rejects.toMatchObject(new ApiError('Request failed: 503', 503))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('flags a request that is still pending after three seconds, then clears it', async () => {
+    vi.useFakeTimers()
+    let resolveFetch: (response: Response) => void = () => undefined
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => { resolveFetch = resolve })))
+
+    const request = apiFetch<{ ok: boolean }>('/customer/profile')
+    await vi.advanceTimersByTimeAsync(2_999)
+    expect(useServerStatusStore.getState().slowRequests).toBe(0)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(useServerStatusStore.getState().slowRequests).toBe(1)
+
+    resolveFetch(new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    await expect(request).resolves.toEqual({ ok: true })
+    expect(useServerStatusStore.getState().slowRequests).toBe(0)
   })
 })

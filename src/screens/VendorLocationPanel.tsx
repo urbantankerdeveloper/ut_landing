@@ -8,8 +8,8 @@ type Props = { onNotice: (message: string) => void }
 
 export function VendorLocationPanel({ onNotice }: Props) {
   const profile = useQuery({ queryKey: ['vendor', 'profile'], queryFn: vendorApi.profile })
-  if (profile.isLoading) return <section className="workspace-view-panel"><h2>{c.location.loading}</h2></section>
-  if (profile.isError || !profile.data) return <section className="workspace-view-panel"><h2>{c.location.unavailable}</h2><button className="button button-primary" onClick={() => void profile.refetch()}>{c.common.retry}</button></section>
+  if (profile.isLoading) return <section className="workspace-view-panel" role="status"><h2>{c.location.loading}</h2></section>
+  if (profile.isError || !profile.data) return <section className="workspace-view-panel" role="alert"><h2>{c.location.unavailable}</h2><button className="button button-primary" onClick={() => void profile.refetch()}>{c.common.retry}</button></section>
   return <VendorLocationEditor key={`${profile.data.latitude ?? ''}:${profile.data.longitude ?? ''}`} profile={profile.data} onNotice={onNotice} />
 }
 

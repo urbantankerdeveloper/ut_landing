@@ -2,6 +2,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import { customerApi, type CreateBookingPayload, type CreateSupportRequestPayload } from '../api/customer'
 import { customerDemoDataEnabled } from '../constants/demo'
 import { useRealtimeInvalidation } from './useRealtimeInvalidation'
+import { useRealtimeConnected } from '../stores/realtimeStore'
 import { loadRazorpayWidget } from './useFrontendFeatures'
 
 const customerQueryOptions = { enabled: !customerDemoDataEnabled, staleTime: 60_000 }
@@ -16,7 +17,11 @@ export function useCreateCustomerAddress() { const queryClient = useQueryClient(
 export function useDeleteCustomerAddress() { const queryClient = useQueryClient(); return useMutation({ mutationFn: (id: string) => customerApi.deleteAddress(id), onSuccess: () => queryClient.invalidateQueries({ queryKey: customerQueryKeys.addresses }) }) }
 export function useCustomerSubscriptions() { const query = useQuery({ queryKey: customerQueryKeys.subscriptions, queryFn: customerApi.subscriptions, ...customerQueryOptions }); useRealtimeInvalidation(customerQueryKeys.subscriptions); return query }
 export function useCustomerInvoices() { const query = useQuery({ queryKey: customerQueryKeys.invoices, queryFn: customerApi.invoices, ...customerQueryOptions }); useRealtimeInvalidation(customerQueryKeys.invoices); return query }
-export function useCustomerTracking(orderId: string | null) { return useQuery({ queryKey: orderId ? customerQueryKeys.tracking(orderId) : ['customer', 'tracking', 'empty'], queryFn: () => customerApi.tracking(orderId as string), enabled: Boolean(orderId) && !customerDemoDataEnabled, staleTime: 10_000, refetchInterval: 15_000 }) }
+export function useCustomerTracking(orderId: string | null) {
+  const realtimeConnected = useRealtimeConnected()
+  useRealtimeInvalidation(['customer', 'tracking'])
+  return useQuery({ queryKey: orderId ? customerQueryKeys.tracking(orderId) : ['customer', 'tracking', 'empty'], queryFn: () => customerApi.tracking(orderId as string), enabled: Boolean(orderId) && !customerDemoDataEnabled, staleTime: 10_000, refetchOnWindowFocus: true, refetchInterval: realtimeConnected ? false : 60_000, refetchIntervalInBackground: false })
+}
 export function useCustomerDeliveryOtp() { return useMutation({ mutationFn: (orderId: string) => customerApi.requestDeliveryOtp(orderId) }) }
 export function useCustomerSupportRequests() { return useQuery({ queryKey: customerQueryKeys.support, queryFn: customerApi.support, ...customerQueryOptions }) }
 export function useCustomerProfile() { const query = useQuery({ queryKey: customerQueryKeys.profile, queryFn: customerApi.profile, ...customerQueryOptions }); useRealtimeInvalidation(customerQueryKeys.profile); return query }

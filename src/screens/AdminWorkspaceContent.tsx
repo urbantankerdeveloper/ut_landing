@@ -51,8 +51,8 @@ export function AdminWorkspaceContent({ item, onNotice }: Props) {
 function AdminAnalyticsScreen() {
   const query = useAdminAnalyticsSummary()
   const copy = ws.analytics
-  if (query.isLoading) return <section className="admin-view-panel"><p className="eyebrow">{copy.eyebrow}</p><h2>{copy.loading}</h2></section>
-  if (query.isError) return <section className="admin-view-panel"><p className="eyebrow">{copy.eyebrow}</p><h2>{copy.unavailable}</h2><p>{copy.unavailableBody}</p></section>
+  if (query.isLoading) return <section className="admin-view-panel" role="status"><p className="eyebrow">{copy.eyebrow}</p><h2>{copy.loading}</h2></section>
+  if (query.isError) return <section className="admin-view-panel" role="alert"><p className="eyebrow">{copy.eyebrow}</p><h2>{copy.unavailable}</h2><p>{copy.unavailableBody}</p></section>
   const summary = query.data
   const rates = summary?.funnel.rates ?? {}
   const warning = (value: number | undefined, threshold: number) => value !== undefined && value < threshold
@@ -77,5 +77,5 @@ function AlertsView({ open, finish }: { open: (dialog: DialogState) => void; fin
   })} cards={[[copy.cards.orders.title, copy.cards.orders.detail, ClipboardList], [copy.cards.applications.title, copy.cards.applications.detail, Users], [copy.cards.enquiries.title, copy.cards.enquiries.detail, UserRound]]} />
 }
 function AdminPanel({ eyebrow, title, action, onAction, cards }: { eyebrow: string; title: string; action: string; onAction: () => void; cards: [string, string, ComponentType<{ size?: number } >][] }) { return <section className="admin-view-panel"><PanelHeading eyebrow={eyebrow} title={title} action={action} onAction={onAction} /><div className="admin-card-grid">{cards.map(([label, detail, Icon]) => <article className="admin-card" key={label}><span className="admin-record-icon"><Icon size={18} /></span><b>{label}</b><p>{detail}</p><ArrowRight size={15} /></article>)}</div></section> }
-function AdminTable({ headers, rows, action }: { headers: string[]; rows: string[][]; action: (row: string[]) => void }) { return <div className="admin-table-wrap"><table className="admin-table"><thead><tr>{headers.map((header) => <th key={header}>{header}</th>)}<th /></tr></thead><tbody>{rows.map((row) => <tr key={row[0]}>{row.map((value) => <td key={value}>{value}</td>)}<td><button className="text-button" onClick={() => action(row)}>{ws.common.review} <ArrowRight size={13} /></button></td></tr>)}</tbody></table></div> }
+function AdminTable({ headers, rows, action }: { headers: string[]; rows: string[][]; action: (row: string[]) => void }) { return <div className="admin-table-wrap"><table className="admin-table"><thead><tr>{headers.map((header) => <th scope="col" key={header}>{header}</th>)}<th scope="col"><span className="visually-hidden">{ws.common.actionColumn}</span></th></tr></thead><tbody>{rows.map((row) => <tr key={row[0]}>{row.map((value) => <td key={value}>{value}</td>)}<td><button className="text-button" onClick={() => action(row)}>{ws.common.review} <ArrowRight size={13} /></button></td></tr>)}</tbody></table></div> }
 function PanelHeading({ eyebrow, title, action, onAction }: { eyebrow: string; title: string; action: string; onAction: () => void }) { return <div className="view-panel-heading"><div><p className="eyebrow">{eyebrow}</p><h2>{title}</h2></div><button className="button button-primary" onClick={onAction}>{action}<ArrowRight size={14} /></button></div> }

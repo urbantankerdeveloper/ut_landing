@@ -374,6 +374,7 @@ export const adminEntitiesContent = {
     common: {
       retry: 'Retry',
       review: 'Review',
+      actionColumn: 'Action',
       awaitingVendor: 'Awaiting vendor',
       exportCsv: 'Export CSV',
     },

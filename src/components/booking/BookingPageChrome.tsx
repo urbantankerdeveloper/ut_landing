@@ -1,15 +1,15 @@
-import { useNavigationStore } from '../../stores/navigationStore'
+import { useAppNavigation } from '../../routing/useAppNavigation'
 import { useAuthStore } from '../../stores/authStore'
 import { bookingContent as c } from '../../content/booking'
 
 export function BookingPageHeader() {
-  const navigate = useNavigationStore((state) => state.navigate)
-  const openWorkspace = useNavigationStore((state) => state.openWorkspace)
+  const { navigate } = useAppNavigation()
+  const { openWorkspace } = useAppNavigation()
   const user = useAuthStore((state) => state.user)
 
   return <header className="booking-page-header">
     <button className="booking-page-brand" type="button" aria-label={c.chrome.brandHome} onClick={() => navigate('home')}>
-      <img className="brand-wordmark booking-wordmark" src="/urban-tanker-wordmark.png" alt={c.chrome.brandAlt} />
+      <img className="brand-wordmark booking-wordmark" src="/urban-tanker-wordmark.webp" width={380} height={59} decoding="async" alt={c.chrome.brandAlt} />
     </button>
     <nav className="booking-page-nav" aria-label={c.chrome.mainNav}>
       {c.chrome.navigation.map((item) => <button key={item.id} type="button" onClick={() => navigate(item.id)}>{item.label}</button>)}
@@ -19,11 +19,11 @@ export function BookingPageHeader() {
 }
 
 export function BookingPageFooter() {
-  const navigate = useNavigationStore((state) => state.navigate)
+  const { navigate } = useAppNavigation()
 
   return <footer className="booking-page-footer">
     <button className="booking-page-brand" type="button" aria-label={c.chrome.brandHome} onClick={() => navigate('home')}>
-      <img className="brand-wordmark booking-wordmark" src="/urban-tanker-wordmark.png" alt={c.chrome.brandAlt} />
+      <img className="brand-wordmark booking-wordmark" src="/urban-tanker-wordmark.webp" width={380} height={59} loading="lazy" decoding="async" alt={c.chrome.brandAlt} />
     </button>
     <p>{c.chrome.copyright}</p>
     <nav aria-label={c.chrome.footerNav}>

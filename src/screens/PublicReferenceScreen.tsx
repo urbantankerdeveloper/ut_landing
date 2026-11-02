@@ -1,13 +1,13 @@
 import { ArrowRight, FileText, Tag, type LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { useNavigationStore } from '../stores/navigationStore'
+import { useAppNavigation } from '../routing/useAppNavigation'
 import { CustomerTrackingPanel } from './CustomerTrackingPanel'
 import { legalContent as l } from '../content/legal'
 import { referenceContent as r } from '../content/reference'
 
 export default function PublicReferenceScreen() {
-  const screen = useNavigationStore((state) => state.activeScreen)
-  const navigate = useNavigationStore((state) => state.navigate)
+  const { activeScreen: screen } = useAppNavigation()
+  const { navigate } = useAppNavigation()
   if (screen === 'tracking') return <section className="content-screen public-reference-screen"><PageIntro eyebrow={r.tracking.eyebrow} title={<>{r.tracking.titleLead} <em>{r.tracking.titleEmphasis}</em></>} copy={r.tracking.copy} /><CustomerTrackingPanel onNotice={() => undefined} /></section>
   if (screen === 'terms' || screen === 'policy') {
     const legal = screen === 'terms' ? l.terms : l.privacy

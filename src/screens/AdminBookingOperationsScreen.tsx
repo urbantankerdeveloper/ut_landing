@@ -111,8 +111,8 @@ export function AdminBookingOperationsScreen({ onNotice }: { onNotice: (message:
     onError: (error) => onNotice(error instanceof Error ? error.message : c.bookings.notices.assignFailed),
   })
 
-  if (query.isLoading) return <section className="admin-view-panel"><h2>{c.bookings.loading}</h2></section>
-  if (query.isError) return <section className="admin-view-panel"><h2>{c.bookings.unavailable}</h2><p role="status">{query.error instanceof Error ? query.error.message : c.common.apiRequestFailed}</p><button className="button button-primary" onClick={() => query.refetch()}>{c.common.retry}</button></section>
+  if (query.isLoading) return <section className="admin-view-panel" role="status"><h2>{c.bookings.loading}</h2></section>
+  if (query.isError) return <section className="admin-view-panel"><h2>{c.bookings.unavailable}</h2><p role="alert">{query.error instanceof Error ? query.error.message : c.common.apiRequestFailed}</p><button className="button button-primary" onClick={() => query.refetch()}>{c.common.retry}</button></section>
 
   function cancel() {
     if (!selected || reason.trim().length < 2) return
@@ -134,7 +134,7 @@ export function AdminBookingOperationsScreen({ onNotice }: { onNotice: (message:
       </div>
       <div className="customer-booking-table-wrap">
         <table className="customer-booking-table admin-booking-table">
-          <thead><tr><th>{c.bookings.tableHeaders.booking}</th><th>{c.bookings.tableHeaders.service}</th><th>{c.bookings.tableHeaders.location}</th><th>{c.bookings.tableHeaders.status}</th><th>{c.bookings.tableHeaders.amount}</th></tr></thead>
+          <thead><tr><th scope="col">{c.bookings.tableHeaders.booking}</th><th scope="col">{c.bookings.tableHeaders.service}</th><th scope="col">{c.bookings.tableHeaders.location}</th><th scope="col">{c.bookings.tableHeaders.status}</th><th scope="col">{c.bookings.tableHeaders.amount}</th></tr></thead>
           <tbody>{visibleRows.map((booking) => {
             const id = booking.reference || booking.id
             const amount = booking.quoted_amount_paise !== undefined ? booking.quoted_amount_paise / 100 : booking.amount

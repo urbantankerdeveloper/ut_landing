@@ -3,7 +3,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { lazyWithRetry } from '../utils/lazyWithRetry'
 import { BarChart3, Bell, CalendarCheck, ChevronDown, CircleDollarSign, ClipboardList, FileText, Gauge, House, LayoutDashboard, LogOut, MapPin, Menu, MessageSquare, PanelLeftClose, PanelLeftOpen, Receipt, Repeat, Settings2, Tag, Truck, UserRound, UserPlus, Users, Wallet, X } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
-import { useNavigationStore, type WorkspaceRole } from '../stores/navigationStore'
+import { type WorkspaceRole } from '../stores/navigationStore'
+import { useAppNavigation } from '../routing/useAppNavigation'
 import { WorkspaceContentSkeleton } from '../components/ScreenSkeleton'
 import { useVendorOfflineSync } from '../hooks/useVendorData'
 import { authApi } from '../api/auth'
@@ -39,8 +40,8 @@ const roleData: Record<WorkspaceRole, RoleData> = {
 }
 
 export default function WorkspaceScreen() {
-  const activeRole = useNavigationStore((state) => state.activeRole)
-  const navigate = useNavigationStore((state) => state.navigate)
+  const { activeRole } = useAppNavigation()
+  const { navigate } = useAppNavigation()
   useVendorOfflineSync(activeRole === 'vendor')
   const user = useAuthStore((state) => state.user)
   const signOut = useAuthStore((state) => state.signOut)
@@ -84,7 +85,7 @@ export default function WorkspaceScreen() {
   </>
   return <section className={`workspace-app workspace-app-${activeRole} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
     <aside className={`workspace-sidebar-new ${sidebarOpen ? 'is-open' : ''}`}>
-      <div className="sidebar-brand"><button className="brand" onClick={() => navigate('home')} aria-label={w.shell.homeAria}><img className="brand-wordmark workspace-wordmark" src="/urban-tanker-wordmark-white.png" alt={w.shell.brandAlt} /></button><button className="sidebar-collapse-toggle" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} aria-label={sidebarCollapsed ? w.shell.expandSidebar : w.shell.collapseSidebar} title={sidebarCollapsed ? w.shell.expandSidebar : w.shell.collapseSidebar}>{sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button><button className="sidebar-close" onClick={() => setSidebarOpen(false)} aria-label={w.shell.closeSidebar}><X size={17} /></button></div>
+      <div className="sidebar-brand"><button className="brand" onClick={() => navigate('home')} aria-label={w.shell.homeAria}><img className="brand-wordmark workspace-wordmark" src="/urban-tanker-wordmark-white.webp" width={380} height={59} decoding="async" alt={w.shell.brandAlt} /></button><button className="sidebar-collapse-toggle" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} aria-label={sidebarCollapsed ? w.shell.expandSidebar : w.shell.collapseSidebar} title={sidebarCollapsed ? w.shell.expandSidebar : w.shell.collapseSidebar}>{sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button><button className="sidebar-close" onClick={() => setSidebarOpen(false)} aria-label={w.shell.closeSidebar}><X size={17} /></button></div>
       <p className="workspace-caption-new">{data.caption}</p>
       <nav className="workspace-nav-new" aria-label={w.shell.workspacePagesAria(activeRole)}>
         {activeRole === 'admin' || activeRole === 'vendor' || activeRole === 'dispatcher'

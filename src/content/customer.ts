@@ -1,6 +1,7 @@
 export const customerContent = {
   common: {
     retry: 'Retry',
+    preparingPdf: 'Preparing PDF…',
     saving: 'Saving…',
     closeDialog: 'Close dialog',
     closeSymbol: '×',
@@ -310,6 +311,7 @@ export const customerContent = {
     demoUpdated: 'Yearly plan estimate updated.',
     downloadQuotation: 'Download quotation',
     quotationDownloaded: 'Quotation downloaded.',
+    downloadFailed: 'Quotation could not be downloaded.',
     quotationPrefix: 'QUOTE-',
     yearlyService: (type: string) => `${type} yearly contract`,
     planTitle: (type: string) => `${type} plan`,

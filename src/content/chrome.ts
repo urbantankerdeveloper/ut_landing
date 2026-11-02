@@ -1,4 +1,7 @@
 export const chromeContent = {
+  serverStatus: {
+    wakingUp: 'Waking up the server, please wait...',
+  },
   header: {
     homeLabel: 'Urban Tanker home',
     logoAlt: 'Urban Tanker',
@@ -99,6 +102,26 @@ export const chromeContent = {
       vendorWorkspace: 'Vendor workspace | Urban Tanker',
       adminWorkspace: 'Admin workspace | Urban Tanker',
       dispatcherWorkspace: 'Dispatch workspace | Urban Tanker',
+    },
+    metaDescriptions: {
+      fallback: 'One app for every water service.',
+      home: 'Water, sanitation, tanker, cleaning and infrastructure services for homes, businesses and project sites. Book online with Urban Tanker.',
+      services: 'Browse Urban Tanker water tanker, sewage, tank cleaning, borewell and infrastructure services.',
+      subscriptions: 'Recurring water and cleaning plans from Urban Tanker for homes and businesses.',
+      booking: 'Book a water, sewage or cleaning tanker from Urban Tanker in a few steps.',
+      'yearly-contract': 'Plan a yearly water and cleaning contract for your property with Urban Tanker.',
+      coupons: 'Current Urban Tanker offers and coupon codes.',
+      tracking: 'Track your Urban Tanker booking with live status updates.',
+      partner: 'Apply to become an Urban Tanker service partner with your vehicles and drivers.',
+      terms: 'Terms and conditions for using Urban Tanker services.',
+      policy: 'How Urban Tanker collects, uses and protects your personal information.',
+      about: 'About Urban Tanker, one app for every water service.',
+      account: 'Manage your Urban Tanker account.',
+      login: 'Sign in to your Urban Tanker account.',
+      'customer-workspace': 'Customer workspace for Urban Tanker bookings, invoices and subscriptions.',
+      'vendor-workspace': 'Vendor workspace for Urban Tanker orders, vehicles and drivers.',
+      'admin-workspace': 'Admin workspace for Urban Tanker operations.',
+      'dispatcher-workspace': 'Dispatch workspace for Urban Tanker live operations.',
     },
     leavePartner: {
       title: 'Leave partner application?',

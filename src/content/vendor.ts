@@ -316,6 +316,8 @@ export const vendorContent = {
       { value: 'resolved', label: 'Resolved' },
     ],
     resolutionPlaceholder: 'Add resolution or response',
+    statusLabel: 'Complaint status',
+    resolutionLabel: 'Resolution',
     updated: 'Complaint updated.',
     updateFailed: 'Complaint could not be updated.',
     demoRows: [

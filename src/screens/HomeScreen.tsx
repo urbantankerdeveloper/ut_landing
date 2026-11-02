@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import { ArrowRight, Check, Construction, Droplets, LocateFixed, ShieldCheck, Truck, Waves, type LucideIcon } from 'lucide-react'
-import { useNavigationStore } from '../stores/navigationStore'
+import { useAppNavigation } from '../routing/useAppNavigation'
 import { reverseGeocodeApproximate } from '../services/geocoding'
 import { homeContent as c } from '../content/home'
 
 type ServiceId = (typeof c.services)[number]['id']
 type BenefitId = (typeof c.benefits)[number]['id']
+
+const heroSrc = '/assets/urban-tanker-hero-1920.webp'
+const heroSrcSet = '/assets/urban-tanker-hero-960.webp 960w, /assets/urban-tanker-hero-1280.webp 1280w, /assets/urban-tanker-hero-1920.webp 1920w'
 
 const serviceIcons: Record<ServiceId, LucideIcon> = {
   water: Droplets,
@@ -22,7 +25,7 @@ const benefitIcons: Record<BenefitId, LucideIcon> = {
 }
 
 export default function HomeScreen() {
-  const navigate = useNavigationStore((state) => state.navigate)
+  const { navigate } = useAppNavigation()
   const supportsGeolocation = typeof navigator !== 'undefined' && Boolean(navigator.geolocation)
   const [locationLabel, setLocationLabel] = useState<string>(c.location.defaultLabel)
   const [locationState, setLocationState] = useState<'idle' | 'loading' | 'ready' | 'unavailable'>('idle')
@@ -49,7 +52,9 @@ export default function HomeScreen() {
 
   return (
     <div className="home-screen">
+      <link rel="preload" as="image" href={heroSrc} imageSrcSet={heroSrcSet} imageSizes="100vw" fetchPriority="high" />
       <section className="hero hero-photo">
+        <img className="hero-image" src={heroSrc} srcSet={heroSrcSet} sizes="100vw" width={1920} height={960} fetchPriority="high" decoding="async" alt="" />
         <div className="hero-copy">
           <button
             type="button"

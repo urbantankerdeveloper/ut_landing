@@ -8,13 +8,13 @@
 .partner-hero-stats { display: grid; grid-template-columns: repeat(3, 1fr); overflow: hidden; background: #fff; border: 1px solid colors.$line; border-radius: 24px; box-shadow: 0 15px 35px rgba(15, 61, 68, .08); }
 .partner-hero-stats span { display: grid; gap: 5px; place-items: center; padding: 27px 12px; text-align: center; border-right: 1px solid colors.$line; }
 .partner-hero-stats span:last-child { border-right: 0; }
-.partner-hero-stats b { color: #04a1bd; font-size: 16px; }
+.partner-hero-stats b { color: #007c91; font-size: 16px; }
 .partner-hero-stats small { color: colors.$muted; font-size: 10px; }
 .partner-application-shell { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, .7fr); align-items: start; gap: 28px; max-width: 1240px; padding: 0 28px 80px; margin: 0 auto; }
 .partner-application { overflow: hidden; background: #fff; border-radius: 26px; box-shadow: 0 18px 45px rgba(15, 61, 68, .09); }
 .partner-form-intro { display: flex; align-items: end; justify-content: space-between; gap: 22px; padding: 34px 36px; color: #fff; background: #073149; }
 .partner-form-intro h2 { margin: 0 0 8px; color: #fff; font-size: 30px; }
-.partner-form-intro p:not(.eyebrow) { margin: 0; color: #b9e4ec; font-size: 12px; }
+.partner-form-intro p:not(.eyebrow) { margin: 0; color: #b9e4ec; font-size: 12px; }.partner-form-intro .eyebrow { color: #9ee3ec; }
 .partner-form-intro > span { padding: 10px 14px; color: #d0f1f4; border: 1px solid rgba(208,241,244,.35); border-radius: 20px; font-size: 10px; white-space: nowrap; }
 .partner-form-section { padding: 38px 36px; border-bottom: 1px solid colors.$line; }
 .partner-step { display: flex; gap: 16px; align-items: center; margin-bottom: 26px; }

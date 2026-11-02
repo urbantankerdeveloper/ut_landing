@@ -61,8 +61,8 @@ export function AdminNotificationsPanel({ onNotice }: Props) {
     }
   }
 
-  if (query.isLoading) return <section className="admin-view-panel"><h2>{copy.loading}</h2></section>
-  if (query.isError) return <section className="admin-view-panel"><h2>{copy.unavailable}</h2><button className="button button-primary" onClick={() => query.refetch()}>{copy.retry}</button></section>
+  if (query.isLoading) return <section className="admin-view-panel" role="status"><h2>{copy.loading}</h2></section>
+  if (query.isError) return <section className="admin-view-panel" role="alert"><h2>{copy.unavailable}</h2><button className="button button-primary" onClick={() => query.refetch()}>{copy.retry}</button></section>
 
   return <section className="admin-view-panel admin-notifications-panel">
     <div className="view-panel-heading">

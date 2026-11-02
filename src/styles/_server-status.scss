@@ -1,0 +1,2 @@
+.server-waking-notice { position:fixed; left:50%; bottom:20px; z-index:1000; transform:translateX(-50%); max-width:calc(100% - 32px); padding:10px 16px; border-radius:999px; color:#fff; background:#103b42; box-shadow:0 10px 30px rgba(16,59,66,.25); font-size:14px; line-height:1.4; }
+.server-waking-notice[hidden] { display:none; }

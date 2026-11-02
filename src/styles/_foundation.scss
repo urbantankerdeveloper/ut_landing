@@ -12,7 +12,7 @@ html { scroll-behavior: smooth; text-size-adjust: 100%; }
 body { min-width: 320px; margin: 0; color: colors.$ink; background: colors.$paper; font: 500 15px/1.6 typography.$font-body; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
 button, input, select, textarea { font: inherit; }
 button, select { cursor: pointer; }
-button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, summary:focus-visible { outline: 3px solid colors.$yellow; outline-offset: 3px; }
+button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, summary:focus-visible { outline: 3px solid colors.$aqua-dark; outline-offset: 3px; }
 button, a { -webkit-tap-highlight-color: transparent; }
 button { border: 0; }
 img, video, svg { max-width: 100%; }

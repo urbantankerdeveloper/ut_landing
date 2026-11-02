@@ -77,8 +77,8 @@ export function AdminSmsTemplatesScreen({ onNotice }: { onNotice: (message: stri
     save.mutate(draft)
   }
 
-  if (query.isLoading) return <section className="admin-view-panel"><h2>{copy.loading}</h2></section>
-  if (query.isError) return <section className="admin-view-panel"><h2>{copy.unavailable}</h2><button className="button button-primary" onClick={() => void query.refetch()}>{copy.retry}</button></section>
+  if (query.isLoading) return <section className="admin-view-panel" role="status"><h2>{copy.loading}</h2></section>
+  if (query.isError) return <section className="admin-view-panel" role="alert"><h2>{copy.unavailable}</h2><button className="button button-primary" onClick={() => void query.refetch()}>{copy.retry}</button></section>
 
   const templates = query.data ?? []
 

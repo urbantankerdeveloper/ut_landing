@@ -12,7 +12,7 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
   useEffect(() => {
     const previousFocus = document.activeElement as HTMLElement | null
     const firstFocusable = dialogRef.current?.querySelector<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])')
-    ;(firstFocusable ?? dialogRef.current)?.focus()
+    if (!dialogRef.current?.contains(document.activeElement)) (firstFocusable ?? dialogRef.current)?.focus()
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') { event.preventDefault(); onCloseRef.current(); return }
       if (event.key !== 'Tab' || !dialogRef.current) return
@@ -20,8 +20,10 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
       if (!focusable.length) return
       const first = focusable[0]
       const last = focusable[focusable.length - 1]
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+      const active = document.activeElement
+      if (!dialogRef.current.contains(active)) { event.preventDefault(); first.focus() }
+      else if (event.shiftKey && active === first) { event.preventDefault(); last.focus() }
+      else if (!event.shiftKey && active === last) { event.preventDefault(); first.focus() }
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => { document.removeEventListener('keydown', handleKeyDown); previousFocus?.focus() }

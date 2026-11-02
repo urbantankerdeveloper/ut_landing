@@ -4,4 +4,8 @@ Disallow: /api/
 Disallow: /admin/
 Disallow: /vendor/
 Disallow: /customer/
+Disallow: /workspace/
+Disallow: /account
+Disallow: /login
+Disallow: /track/
 Sitemap: https://urbantanker.com/sitemap.xml

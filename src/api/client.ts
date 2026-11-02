@@ -1,4 +1,5 @@
 import { useAuthStore } from '../stores/authStore'
+import { useServerStatusStore } from '../stores/serverStatusStore'
 
 export class ApiError extends Error {
   status: number
@@ -7,6 +8,11 @@ export class ApiError extends Error {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api'
 const REQUEST_TIMEOUT_MS = 12_000
+// Render's free tier sleeps between requests, so the first call after a sleep can fail or be slow. Only idempotent GETs are retried.
+const MAX_GET_ATTEMPTS = 3
+const RETRY_BASE_DELAY_MS = 800
+// A request still pending after this long shows the "waking up the server" notice.
+const SLOW_REQUEST_MS = 3_000
 let refreshInFlight: Promise<string | null> | null = null
 
 function authHeaders() {
@@ -53,7 +59,50 @@ async function refreshSession() {
   return refreshInFlight
 }
 
+function isNetworkFailure(error: unknown) {
+  if (error instanceof ApiError) return false
+  return error instanceof TypeError || (error instanceof DOMException && error.name === 'TimeoutError')
+}
+
+function waitBeforeRetry(delayMs: number, signal?: AbortSignal | null) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason)
+    const onAbort = () => {
+      window.clearTimeout(timer)
+      reject(signal?.reason)
+    }
+    const timer = window.setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, delayMs)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
 export async function apiFetch<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
+  const isIdempotent = (init.method ?? 'GET').toUpperCase() === 'GET'
+  let slow = false
+  const slowTimer = window.setTimeout(() => {
+    slow = true
+    useServerStatusStore.getState().markSlow()
+  }, SLOW_REQUEST_MS)
+  try {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await apiFetchOnce<T>(path, init, retry)
+      } catch (error) {
+        const canRetry = isIdempotent && attempt < MAX_GET_ATTEMPTS && isNetworkFailure(error) && !init.signal?.aborted
+        if (!canRetry) throw error
+        await waitBeforeRetry(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1), init.signal)
+      }
+    }
+  } finally {
+    window.clearTimeout(slowTimer)
+    if (slow) useServerStatusStore.getState().markSettled()
+  }
+}
+
+async function apiFetchOnce<T>(path: string, init: RequestInit, retry: boolean): Promise<T> {
   const timed = createTimedSignal(init.signal)
   try {
     const headers = new Headers(init.headers)
@@ -63,7 +112,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}, retry = 
     const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers, credentials: 'include', signal: timed.signal })
     if (response.status === 401 && retry && !path.startsWith('/auth/')) {
       try {
-        if (await refreshSession()) return await apiFetch<T>(path, init, false)
+        if (await refreshSession()) return await apiFetchOnce<T>(path, init, false)
       } catch (error) {
         if (timed.signal.aborted) throw timed.signal.reason ?? error
         // Preserve the original authorization response if refresh fails.

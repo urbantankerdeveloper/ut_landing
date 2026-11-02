@@ -1,14 +1,15 @@
 import { useState, type FormEvent } from 'react'
 import { ArrowRight, Check } from 'lucide-react'
 import { useNavigationStore } from '../stores/navigationStore'
+import { useAppNavigation } from '../routing/useAppNavigation'
 import { useAuthStore } from '../stores/authStore'
 import { partnerApi, type PartnerDocument } from '../api/partner'
 import { useFileUpload } from '../hooks/useFrontendFeatures'
 import { partnerContent as p } from '../content/partner'
 
 export default function PartnerApplicationScreen() {
-  const navigate = useNavigationStore((state) => state.navigate)
-  const openWorkspace = useNavigationStore((state) => state.openWorkspace)
+  const { navigate } = useAppNavigation()
+  const { openWorkspace } = useAppNavigation()
   const setPartnerFormDirty = useNavigationStore((state) => state.setPartnerFormDirty)
   const user = useAuthStore((state) => state.user)
   const fileUpload = useFileUpload()

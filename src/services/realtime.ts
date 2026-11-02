@@ -1,5 +1,6 @@
 import { io, type Socket } from 'socket.io-client'
 import { useAuthStore } from '../stores/authStore'
+import { useRealtimeStore } from '../stores/realtimeStore'
 
 export type RealtimeMessage = { type: string; payload: unknown }
 type RealtimeListener = (message: RealtimeMessage) => void
@@ -57,7 +58,11 @@ export class VendorRealtimeClient {
     })
     this.socket = socket
     socket.onAny((type, payload) => this.onMessage({ type, payload }))
-    socket.on('connect', () => this.bookingIds.forEach((bookingId) => socket.emit('booking:join', bookingId)))
+    socket.on('connect', () => {
+      useRealtimeStore.getState().setConnected(true)
+      this.bookingIds.forEach((bookingId) => socket.emit('booking:join', bookingId))
+    })
+    socket.on('disconnect', () => useRealtimeStore.getState().setConnected(false))
     socket.on('connect_error', () => {
       if (!useAuthStore.getState().accessToken) this.disconnect()
     })
@@ -65,5 +70,5 @@ export class VendorRealtimeClient {
   joinBooking(bookingId: string) { this.bookingIds.add(bookingId); this.socket?.emit('booking:join', bookingId) }
   leaveBooking(bookingId: string) { this.bookingIds.delete(bookingId); this.socket?.emit('booking:leave', bookingId) }
   joinVendor(vendorId: string) { this.socket?.emit('vendor:join', vendorId) }
-  disconnect() { this.socket?.disconnect(); this.socket = null }
+  disconnect() { this.socket?.disconnect(); this.socket = null; useRealtimeStore.getState().setConnected(false) }
 }

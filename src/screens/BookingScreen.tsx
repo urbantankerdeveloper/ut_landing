@@ -4,7 +4,7 @@ import { Controller, useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { ArrowLeft, ArrowRight, Check, CreditCard, Crosshair, MapPin, Phone, Plus, Trash2, Wallet } from 'lucide-react'
-import { useNavigationStore } from '../stores/navigationStore'
+import { useAppNavigation } from '../routing/useAppNavigation'
 import { useCreateCustomerAddress, useCreateCustomerBooking, useCustomerAddresses, useCustomerOffers, useCustomerPhoneVerification, useCustomerServices } from '../hooks/useCustomerData'
 import { useCouponValidation, useRazorpayPayment } from '../hooks/useFrontendFeatures'
 import { useAuthStore } from '../stores/authStore'
@@ -273,7 +273,7 @@ const DRAFT_PERSIST_DELAY_MS = 300
 
 export default function BookingScreen() {
   const [draft] = useState(loadBookingDraft)
-  const navigate = useNavigationStore((state) => state.navigate)
+  const { navigate } = useAppNavigation()
   const createBooking = useCreateCustomerBooking()
   const servicesQuery = useCustomerServices()
   const razorpay = useRazorpayPayment()
@@ -769,7 +769,7 @@ export default function BookingScreen() {
             {!savedAddressId && <div className="booking-manual-location">
               <div className="split-fields"><label className="field">{c.contact.serviceRegion}<select value={region} onChange={(event) => setRegion(event.target.value)}>{c.contact.regions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label><label className="field">{c.contact.addressLabel}<input value={addressLabel} onChange={(event) => setAddressLabel(event.target.value)} placeholder={c.contact.addressLabelPlaceholder} /></label></div>
               <label className="field">{c.contact.fullAddress}<textarea rows={3} required value={sharedLocation} onBlur={() => activeServiceEntries.forEach((entry) => validateDeliveryAddress(entry.id, sharedLocation))} onChange={(event) => updateSharedLocation(event.target.value)} placeholder={c.contact.fullAddressPlaceholder} /></label>
-              <div className="booking-location-tools"><button className="button button-quiet" type="button" aria-label={c.contact.chooseOnMapLabel} title={c.contact.chooseOnMapLabel} onClick={() => setLocationModalOpen(true)}><MapPin size={17} /> <span>{c.contact.chooseOnMap}</span></button><button className="button button-quiet" type="button" aria-label={c.contact.useCurrentLocation} title={c.contact.useCurrentLocation} onClick={() => detectLocation('shared')}><Crosshair size={17} /> <span>{c.contact.useCurrentLocation}</span></button></div>
+              <div className="booking-location-tools"><button className="button button-quiet" type="button" title={c.contact.chooseOnMapLabel} onClick={() => setLocationModalOpen(true)}><MapPin size={17} /> <span>{c.contact.chooseOnMap}</span></button><button className="button button-quiet" type="button" aria-label={c.contact.useCurrentLocation} title={c.contact.useCurrentLocation} onClick={() => detectLocation('shared')}><Crosshair size={17} /> <span>{c.contact.useCurrentLocation}</span></button></div>
               {(locationToasts.shared || locationToasts[activeServiceEntries[0]?.id ?? '']) && <p className="booking-location-toast" role="alert">{locationToasts.shared || locationToasts[activeServiceEntries[0]?.id ?? '']}</p>}
               {locationStatus.shared && <p className="booking-address-status" role="status">{locationStatus.shared}</p>}
               {isRegisteredCustomer && <label className="check-line"><input type="checkbox" checked={saveAddressForFuture} onChange={(event) => setSaveAddressForFuture(event.target.checked)} /> {c.contact.saveAddressForFuture}</label>}
@@ -780,7 +780,7 @@ export default function BookingScreen() {
               {isPhoneVerified(phone) ? <p className="verification-success">{c.verification.verifiedShared}</p> : <>
                 {user && phoneVerificationQuery.isError && <p className="booking-field-error" role="alert">{c.verification.savedNumberCheckFailed}</p>}
                 <p>{c.verification.verifyPrompt}</p>
-                <div className="guest-otp-row"><input value={otpValues[phone.replace(/\D/g, '').slice(-10)] ?? ''} onChange={(event) => setOtpValues((current) => ({ ...current, [phone.replace(/\D/g, '').slice(-10)]: event.target.value.replace(/\D/g, '').slice(0, 6) }))} inputMode="numeric" placeholder={c.verification.codePlaceholder} aria-label={c.verification.codeLabel} /><button className="button button-quiet" type="button" aria-label={c.verification.sendOrResendLabel} title={c.verification.sendOrResendLabel} onClick={() => void requestGuestOtp()} disabled={otpPendingPhone !== null}><Phone size={16} /><span>{otpChallenges[phone.replace(/\D/g, '').slice(-10)] ? c.verification.resendCode : c.verification.sendCode}</span></button><button className="button button-quiet" type="button" aria-label={c.verification.verifyCodeLabel} title={c.verification.verifyCodeLabel} onClick={() => void verifyGuestOtp()} disabled={otpPendingPhone !== null || !otpChallenges[phone.replace(/\D/g, '').slice(-10)]}><Check size={16} /><span>{c.verification.verify}</span></button></div>
+                <div className="guest-otp-row"><input value={otpValues[phone.replace(/\D/g, '').slice(-10)] ?? ''} onChange={(event) => setOtpValues((current) => ({ ...current, [phone.replace(/\D/g, '').slice(-10)]: event.target.value.replace(/\D/g, '').slice(0, 6) }))} inputMode="numeric" placeholder={c.verification.codePlaceholder} aria-label={c.verification.codeLabel} /><button className="button button-quiet" type="button" title={c.verification.sendOrResendLabel} onClick={() => void requestGuestOtp()} disabled={otpPendingPhone !== null}><Phone size={16} /><span>{otpChallenges[phone.replace(/\D/g, '').slice(-10)] ? c.verification.resendCode : c.verification.sendCode}</span></button><button className="button button-quiet" type="button" aria-label={c.verification.verifyCodeLabel} title={c.verification.verifyCodeLabel} onClick={() => void verifyGuestOtp()} disabled={otpPendingPhone !== null || !otpChallenges[phone.replace(/\D/g, '').slice(-10)]}><Check size={16} /><span>{c.verification.verify}</span></button></div>
                 {otpMessages[phone.replace(/\D/g, '').slice(-10)] && <p className="verification-message" role="status">{otpMessages[phone.replace(/\D/g, '').slice(-10)]}</p>}
               </>}
             </div>

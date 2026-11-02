@@ -1,5 +1,5 @@
 import { ArrowRight, CalendarClock, PauseCircle, ShieldCheck, type LucideIcon } from 'lucide-react'
-import { useNavigationStore } from '../stores/navigationStore'
+import { useAppNavigation } from '../routing/useAppNavigation'
 import { subscriptionsContent as c } from '../content/subscriptions'
 
 type FeatureId = (typeof c.features)[number]['id']
@@ -11,7 +11,7 @@ const featureIcons: Record<FeatureId, LucideIcon> = {
 }
 
 export default function SubscriptionsScreen() {
-  const navigate = useNavigationStore((state) => state.navigate)
+  const { navigate } = useAppNavigation()
   return (
     <section className="content-screen subscriptions-screen">
       <div className="section-intro">
