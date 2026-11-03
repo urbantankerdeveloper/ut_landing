@@ -3,9 +3,10 @@ import { z } from 'zod'
 import rateLimit from 'express-rate-limit'
 import crypto from 'node:crypto'
 import { supabase } from '../supabase.js'
+import { limiterStore } from '../services/scaling.js'
 
 const router = Router()
-const partnerApplicationLimit = rateLimit({ windowMs: 60 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many partner applications from this address. Try again later.' } })
+const partnerApplicationLimit = rateLimit({ windowMs: 60 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:partner:', 'open'), passOnStoreError: true, message: { error: 'Too many partner applications from this address. Try again later.' } })
 const phone = z.string().regex(/^\d{10}$/, 'Enter a valid 10-digit phone number.')
 const allowedServices = z.enum(['Water tanker', 'Sewage suction', 'Drinking water supply', 'Tank and sump cleaning', 'Borewell services', 'RMC mix / ready-mix concrete', 'Empty tanker and bulk-liquid transport', 'Emergency water and sewage'])
 const partnerDocumentPrefix = 'partner-applications/'

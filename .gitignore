@@ -171,3 +171,6 @@ vite.config.ts.timestamp-*
 *.md
 IMPLEMENTATION_BACKLOG.md
 !HOSTINGER_DEPLOYMENT.md
+!docs/api_consumers.md
+!docs/performance_baseline.md
+!backend/scripts/bench/README.md

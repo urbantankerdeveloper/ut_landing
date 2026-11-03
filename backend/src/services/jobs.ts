@@ -2,9 +2,22 @@ import { supabase } from '../supabase.js'
 import { config } from '../config.js'
 import { databasePool } from '../database.js'
 import { runAnalyticsRetentionSweep } from '../routes/analytics.js'
-export async function runReminderSweep() { const cutoff = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); const { data, error } = await supabase.from('bookings').select('id,customer_id,scheduled_for').eq('status', 'accepted').lte('scheduled_for', cutoff); if (error) throw new Error(`Reminder sweep failed: ${error.message}`); return data?.length ?? 0 }
-export async function runDocumentExpirySweep() { const cutoff = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10); const { data, error } = await supabase.from('documents').select('id,owner_id,expires_on').lte('expires_on', cutoff); if (error) throw new Error(`Document expiry sweep failed: ${error.message}`); return data?.length ?? 0 }
-export async function runStorageCleanupSweep() { const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(); const { data, error: scanError } = await supabase.from('documents').select('id,object_key,created_at').eq('verification', 'rejected').lt('created_at', cutoff).limit(100); if (scanError) throw new Error(`Storage cleanup sweep failed: ${scanError.message}`); let removed = 0; let failed = 0; const failures: string[] = []; for (const document of data ?? []) { const { error } = await supabase.storage.from('urban-tanker-documents').remove([document.object_key]); if (!error) { await supabase.from('documents').delete().eq('id', document.id); removed += 1 } else { failed += 1; failures.push(document.id) } } return { scanned: data?.length ?? 0, removed, failed, failures } }
+export async function runReminderSweep() { const cutoff = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); const { count, error } = await supabase.from('bookings').select('id', { count: 'exact', head: true }).eq('status', 'accepted').lte('scheduled_for', cutoff); if (error) throw new Error(`Reminder sweep failed: ${error.message}`); return count ?? 0 }
+export async function runDocumentExpirySweep() { const cutoff = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10); const { count, error } = await supabase.from('documents').select('id', { count: 'exact', head: true }).lte('expires_on', cutoff); if (error) throw new Error(`Document expiry sweep failed: ${error.message}`); return count ?? 0 }
+export async function runStorageCleanupSweep() {
+  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+  const { data, error: scanError } = await supabase.from('documents').select('id,object_key,created_at').eq('verification', 'rejected').lt('created_at', cutoff).limit(100)
+  if (scanError) throw new Error(`Storage cleanup sweep failed: ${scanError.message}`)
+  const batch = data ?? []
+  if (batch.length === 0) return { scanned: 0, removed: 0, failed: 0, failures: [] as string[] }
+  // Removing an object that is already gone is not an error, so a successful remove means every row in the batch can go.
+  const { error: removeError } = await supabase.storage.from('urban-tanker-documents').remove(batch.map((document) => document.object_key))
+  if (removeError) return { scanned: batch.length, removed: 0, failed: batch.length, failures: batch.map((document) => document.id) }
+  const ids = batch.map((document) => document.id)
+  const { error: deleteError } = await supabase.from('documents').delete().in('id', ids)
+  if (deleteError) return { scanned: batch.length, removed: 0, failed: batch.length, failures: ids }
+  return { scanned: batch.length, removed: batch.length, failed: 0, failures: [] as string[] }
+}
 const JOBS_LOCK_KEY = 728341
 // Several API instances can share one database; the advisory lock makes sure only one of them runs the sweeps per cycle.
 // In production the sweeps do not run without the lock, so two instances can never both run them.

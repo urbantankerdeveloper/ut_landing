@@ -31,9 +31,13 @@ import { supabase } from './supabase.js'
 import { setRealtimeServer } from './services/realtime.js'
 import { closeRedisPair, createRedisPair, rateLimitStoreFor, socketAdapterFor, warnIfSingleInstanceInProduction } from './services/scaling.js'
 import { requestObservability } from './middleware/observability.js'
-import { checkDatabaseConnection } from './database.js'
+import { createHealthRouter } from './routes/health.js'
 const redis = await createRedisPair()
 const app = express(); const httpServer = createServer(app)
+// Keep-alive above the load balancer's idle timeout avoids reused-connection resets. The request timeout bounds slow clients.
+httpServer.keepAliveTimeout = config.HTTP_KEEP_ALIVE_TIMEOUT_MS
+httpServer.headersTimeout = config.HTTP_HEADERS_TIMEOUT_MS
+httpServer.requestTimeout = config.HTTP_REQUEST_TIMEOUT_MS
 const frontendDist = resolve(dirname(fileURLToPath(import.meta.url)), '../../dist')
 // The frontend is deployed to Hostinger, so on Render there is no build here. Serve it only when one is present.
 const serveFrontend = existsSync(resolve(frontendDist, 'index.html'))
@@ -63,12 +67,8 @@ app.use(helmet({
     },
   },
 })); app.use(cors(corsOptions)); app.use(compression()); app.use(rateLimit({ windowMs: 60_000, limit: 120, store: rateLimitStoreFor(redis), passOnStoreError: true, skip: (request) => request.path === '/health' || request.path === '/health/ready' || (request.method === 'GET' && !request.path.startsWith('/api/') && !request.path.startsWith('/socket.io')) })); app.use(express.json({ limit: '2mb', verify: (request, _response, buffer) => { (request as typeof request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer) } }))
-app.use(requestObservability)
-app.get('/health', (_request, response) => response.json({ ok: true, service: 'urban-tanker-api' }))
-app.get('/health/ready', async (_request, response) => {
-  const databaseReady = await checkDatabaseConnection()
-  response.status(databaseReady ? 200 : 503).json({ ok: databaseReady, service: 'urban-tanker-api', database: databaseReady ? 'ready' : 'unavailable' })
-})
+app.use(requestObservability(config.SLOW_REQUEST_MS))
+app.use(createHealthRouter({ redisConfigured: Boolean(config.REDIS_URL) }))
 app.use('/api/auth', authRoutes); app.use('/api/devices', deviceRoutes); app.use('/api/public', publicTrackingRoutes); app.use('/api/customer', customerRoutes); app.use('/api/customer', customerExtendedRoutes); app.use('/api/vendor', vendorRoutes); app.use('/api/vendor', vendorExtendedRoutes); app.use('/api/admin', adminRoutes); app.use('/api/admin', adminExtendedRoutes); app.use('/api/admin', adminSmsTemplateRoutes); app.use('/api/payment', paymentRoutes); app.use('/api/uploads', uploadRoutes); app.use('/api/support', supportRoutes); app.use('/api/analytics', analyticsRoutes); app.use('/api/partner', partnerRoutes); app.use(errorHandler)
 if (serveFrontend) app.use(express.static(frontendDist, { index: 'index.html', setHeaders: (response, filePath) => {
   if (filePath.endsWith('index.html')) {
