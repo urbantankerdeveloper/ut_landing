@@ -128,6 +128,16 @@ Impact is an estimate from the code paths, not a measurement. Risk covers compat
 - Verified: smoke-tested against a throwaway local mock (not the backend). It exercises login, role tokens, skip logic, and the output files.
 - Metrics note: autocannon 8 reports p50, p97.5 and p99, but not p95. The table reports p97.5 in place of p95 and the column header says so. DB calls per request need a server-side counter (Phase 1).
 
+## Client bugs surfaced by the audit (not performance)
+
+Reported by the consumer audit. Only item 1 was re-checked against both sides in this phase. Items 2 to 5 are from the audit agent and need a check before anyone fixes them.
+
+1. **Vendor orders fail in the Flutter app (verified).** The server returns `{rows, nextOffset}` (`backend/src/routes/vendor.ts:103`). The app's `vendorOrders()` calls `parseList`, which throws `FormatException` on any non-array body (`urban_tanker_app/lib/services/api/api_decode.dart:36-40`, `vendor_api.dart:26-29`). `vendorOrdersProvider` (`lib/app/providers.dart:203-205`) feeds `vendor_operations_screen.dart`. The web app accepts both shapes. Fix on the **app side** (accept the object form, as the web does). Do not change the server, because old app versions in the field depend on the array contract. Note: this is the committed working tree on `ui-redesign`; check the released app version too.
+2. **Coupon validation always fails in the booking form (reported, not re-checked).** The app expects a `coupon` object (`customer_api.dart:436-440`). The server returns `{valid: true}` (`customer.ts:87`, `customerExtended.ts:34`).
+3. **Rating with a blank review returns 400 (reported, not re-checked).** The app sends `"review": null` (`booking_details_screen.dart:506`), which the server schema rejects (`customerExtended.ts:20`).
+4. **Three listened realtime events have no emitter (reported, not re-checked).** `booking.rejected`, `booking.vendor_accepted` and `booking.delivered` (`home_shell.dart:73-75`) are only analytics names on the server. Customer cancel and reschedule emit nothing.
+5. **Any token refresh failure signs the user out (reported, not re-checked).** That includes a network error, not only an invalid refresh token.
+
 ## Blocking questions
 
 1. **Supabase JWT signing mode.** Is the project on asymmetric signing keys (JWKS), or still on the legacy HS256 secret? Phase 2 cannot start without this. (I can't read the Supabase dashboard from here.)
