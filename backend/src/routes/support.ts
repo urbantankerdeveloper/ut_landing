@@ -3,10 +3,12 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { requireAuth } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
+import { listWindow, sendList, type ListWindow } from '../lib/listParams.js'
 
+const exactCount = (range: ListWindow) => (range.mode === 'paged' ? { count: 'exact' as const } : undefined)
 const router = Router()
 router.use(requireAuth)
-router.get('/requests', async (request, response) => { const { data, error } = await supabase.from('complaints').select('*').eq('customer_id', request.authUser!.id).is('vendor_id', null).order('created_at', { ascending: false }); if (error) return databaseFailure(response, 'support.database_error', error, 500); response.json((data ?? []).map((item) => ({ id: item.id, subject: item.subject, message: item.message, status: item.status, response: item.response ?? null, createdAt: item.created_at, updatedAt: item.updated_at ?? item.created_at }))) })
+router.get('/requests', async (request, response) => { const listRange = listWindow(request.query); const { data, error, count } = await supabase.from('complaints').select('*', exactCount(listRange)).eq('customer_id', request.authUser!.id).is('vendor_id', null).order('created_at', { ascending: false }).range(listRange.from, listRange.to); if (error) return databaseFailure(response, 'support.database_error', error, 500); sendList(response, listRange, (data ?? []).map((item) => ({ id: item.id, subject: item.subject, message: item.message, status: item.status, response: item.response ?? null, createdAt: item.created_at, updatedAt: item.updated_at ?? item.created_at })), count) })
 router.get('/requests/:id', async (request, response) => {
   const { data, error } = await supabase
     .from('complaints')

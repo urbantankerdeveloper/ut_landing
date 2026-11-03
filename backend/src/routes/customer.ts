@@ -15,8 +15,12 @@ import { config } from '../config.js'
 import { toE164IndianMobile } from '../lib/phone.js'
 import { databaseFailure, failure } from '../lib/httpErrors.js'
 import { PricingError } from '../services/pricingMath.js'
+import { listWindow, sendList } from '../lib/listParams.js'
+import { cachedCatalog } from '../services/catalogCache.js'
+import { limiterStore } from '../services/scaling.js'
 const router = Router()
-const quoteLimit = rateLimit({ windowMs: 10 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false, keyGenerator: (request) => request.authUser!.id, message: { error: 'Too many quote requests. Try again later.' } })
+const catalogCacheControl = 'private, max-age=30, stale-while-revalidate=120'
+const quoteLimit = rateLimit({ windowMs: 10 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:customer:quote:', 'open'), passOnStoreError: true, keyGenerator: (request) => request.authUser!.id, message: { error: 'Too many quote requests. Try again later.' } })
 const phoneVerificationWindowMs = 15 * 60 * 1000
 function recentVerificationCutoff() { return new Date(Date.now() - phoneVerificationWindowMs).toISOString() }
 function bookingReference() { return `UT-${crypto.randomBytes(5).toString('hex').toUpperCase()}` }
@@ -82,8 +86,36 @@ function notifyNearbyVendors(vendors: Awaited<ReturnType<typeof findNearbyVendor
     emitRealtimeToVendor(vendor.id, 'vendor.order.created', { vendorId: vendor.id, bookingId: booking.id, reference: booking.reference, distanceKm: vendor.distance_km })
   }
 }
-router.get('/services', async (_request, response) => { const { data, error } = await supabase.from('service_catalog').select('code,name,description,base_price_paise,is_active,config').eq('is_active', true).order('name'); if (error) return databaseFailure(response, 'customer.database_error', error, 500); response.json(data ?? []) })
-router.get('/offers', async (_request, response) => { const { data, error } = await supabase.from('coupons').select('id,code,title,discount_type,discount_value,valid_until').eq('is_active', true).or('valid_until.is.null,valid_until.gte.' + new Date().toISOString()).order('created_at', { ascending: false }); if (error) return databaseFailure(response, 'customer.database_error', error, 500); response.json(data ?? []) })
+// The loaders throw the Supabase error so a failed read is not cached.
+async function loadServices() {
+  const { data, error } = await supabase.from('service_catalog').select('code,name,description,base_price_paise,is_active,config').eq('is_active', true).order('name')
+  if (error) throw error
+  return data ?? []
+}
+async function loadOffers() {
+  const { data, error } = await supabase.from('coupons').select('id,code,title,discount_type,discount_value,valid_until').eq('is_active', true).or('valid_until.is.null,valid_until.gte.' + new Date().toISOString()).order('created_at', { ascending: false })
+  if (error) throw error
+  return data ?? []
+}
+router.get('/services', async (_request, response) => {
+  try {
+    const services = await cachedCatalog('customer.services', loadServices)
+    response.setHeader('Cache-Control', catalogCacheControl)
+    response.json(services)
+  } catch (error) {
+    return databaseFailure(response, 'customer.database_error', error, 500)
+  }
+})
+// Offers filter on the current time. The 60 s TTL means an offer can stay listed up to 60 s after valid_until (accepted by product).
+router.get('/offers', async (_request, response) => {
+  try {
+    const offers = await cachedCatalog('customer.offers', loadOffers, 60_000)
+    response.setHeader('Cache-Control', catalogCacheControl)
+    response.json(offers)
+  } catch (error) {
+    return databaseFailure(response, 'customer.database_error', error, 500)
+  }
+})
 router.post('/coupons/validate', async (request, response) => { const parsed = z.object({ code: z.string().min(2).max(80), serviceCode: z.string().optional(), amount: z.number().nonnegative() }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid coupon request' }); const { data, error } = await supabase.from('coupons').select('id').eq('code', parsed.data.code.toUpperCase()).eq('is_active', true).or('valid_until.is.null,valid_until.gte.' + new Date().toISOString()).maybeSingle(); if (error) return failure(response, 500, 'Coupon could not be checked.', 'customer.coupon_validate_failed', error); if (!data) return response.status(404).json({ error: 'Coupon is not available' }); response.json({ valid: true }) })
 router.use(requireAuth)
 router.get('/phone-verification', async (request, response) => {
@@ -276,13 +308,23 @@ router.post('/orders/quote-preview', quoteLimit, async (request, response) => {
     return quoteFailure(response, error)
   }
 })
-router.get('/invoices', async (request, response) => { const { data, error } = await supabase.from('invoices').select('*').eq('customer_id', request.authUser!.id).order('issued_at', { ascending: false }); if (error) return databaseFailure(response, 'customer.database_error', error, 500); response.json(data ?? []) })
+router.get('/invoices', async (request, response) => {
+  const list = listWindow(request.query)
+  const { data, error, count } = await supabase.from('invoices').select('*', { count: list.mode === 'paged' ? 'exact' : undefined }).eq('customer_id', request.authUser!.id).order('issued_at', { ascending: false }).range(list.from, list.to)
+  if (error) return databaseFailure(response, 'customer.database_error', error, 500)
+  sendList(response, list, data ?? [], count)
+})
 router.get('/invoices/:invoiceId/download', async (request, response) => { const { data, error } = await supabase.from('invoices').select('*').eq('id', request.params.invoiceId).eq('customer_id', request.authUser!.id).single(); if (error || !data) return response.status(404).json({ error: 'Invoice not found' }); response.json(data) })
 router.get('/addresses', async (request, response) => { const { data, error } = await supabase.from('saved_addresses').select('*').eq('user_id', request.authUser!.id).order('is_default', { ascending: false }).order('created_at', { ascending: false }); if (error) return databaseFailure(response, 'customer.database_error', error, 500); response.json(data ?? []) })
 router.post('/addresses', async (request, response) => { const parsed = z.object({ label: z.string().min(1).max(60), address: z.string().min(3).max(240), city: z.string().min(2).max(80), pincode: z.string().min(4).max(12), latitude: z.number().optional(), longitude: z.number().optional(), isDefault: z.boolean().default(false) }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid address' }); if (parsed.data.isDefault) await supabase.from('saved_addresses').update({ is_default: false }).eq('user_id', request.authUser!.id); const { data, error } = await supabase.from('saved_addresses').insert({ user_id: request.authUser!.id, label: parsed.data.label, address: parsed.data.address, city: parsed.data.city, pincode: parsed.data.pincode, latitude: parsed.data.latitude, longitude: parsed.data.longitude, is_default: parsed.data.isDefault }).select().single(); if (error) return databaseFailure(response, 'customer.database_error', error, 400); response.status(201).json(data) })
 router.patch('/addresses/:id', async (request, response) => { const parsed = z.object({ label: z.string().min(1).max(60).optional(), address: z.string().min(3).max(240).optional(), city: z.string().min(2).max(80).optional(), pincode: z.string().min(4).max(12).optional(), isDefault: z.boolean().optional() }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid address update' }); if (parsed.data.isDefault === true) await supabase.from('saved_addresses').update({ is_default: false }).eq('user_id', request.authUser!.id); const update = Object.fromEntries(Object.entries({ label: parsed.data.label, address: parsed.data.address, city: parsed.data.city, pincode: parsed.data.pincode, is_default: parsed.data.isDefault }).filter(([, value]) => value !== undefined)); const { data, error } = await supabase.from('saved_addresses').update(update).eq('id', request.params.id).eq('user_id', request.authUser!.id).select().single(); if (error) return databaseFailure(response, 'customer.database_error', error, 400); response.json(data) })
 router.delete('/addresses/:id', async (request, response) => { const { error } = await supabase.from('saved_addresses').delete().eq('id', request.params.id).eq('user_id', request.authUser!.id); if (error) return databaseFailure(response, 'customer.database_error', error, 400); response.status(204).send() })
-router.get('/subscriptions', async (request, response) => { const { data, error } = await supabase.from('subscriptions').select('*').eq('customer_id', request.authUser!.id).order('created_at', { ascending: false }); if (error) return databaseFailure(response, 'customer.database_error', error, 500); response.json(data ?? []) })
+router.get('/subscriptions', async (request, response) => {
+  const list = listWindow(request.query)
+  const { data, error, count } = await supabase.from('subscriptions').select('*', { count: list.mode === 'paged' ? 'exact' : undefined }).eq('customer_id', request.authUser!.id).order('created_at', { ascending: false }).range(list.from, list.to)
+  if (error) return databaseFailure(response, 'customer.database_error', error, 500)
+  sendList(response, list, data ?? [], count)
+})
 router.get('/profile', async (request, response) => { const { data, error } = await supabase.from('profiles').select('full_name, phone_e164').eq('id', request.authUser!.id).single(); if (error) return databaseFailure(response, 'customer.database_error', error, 500); response.json({ name: data.full_name, email: request.authUser!.email ?? '', phone: String(data.phone_e164 ?? '').replace(/\D/g, '').slice(-10) }) })
 router.post('/profile/selfie', express.raw({ type: 'image/jpeg', limit: selfieMaxBytes }), async (request, response) => {
   const customerId = request.authUser!.id

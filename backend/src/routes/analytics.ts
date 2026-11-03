@@ -4,9 +4,10 @@ import { supabase } from '../supabase.js'
 import { analyticsEventSchema, summarizeAnalyticsEvents } from '../lib/analytics.js'
 import { config } from '../config.js'
 import rateLimit from 'express-rate-limit'
+import { limiterStore } from '../services/scaling.js'
 
 const router = Router()
-const analyticsEventLimit = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many analytics events. Try again later.' } })
+const analyticsEventLimit = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:analytics:', 'open'), passOnStoreError: true, message: { error: 'Too many analytics events. Try again later.' } })
 
 router.post('/events', analyticsEventLimit, async (request, response) => {
   const parsed = analyticsEventSchema.safeParse(request.body)

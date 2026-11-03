@@ -12,6 +12,7 @@ import { sendTemplateSms } from '../services/sms.js'
 import { passwordResetEmail, signupConfirmationEmail } from '../services/signupEmail.js'
 import { hashOtp, otpMatches } from '../services/otp.js'
 import { config } from '../config.js'
+import { limiterStore } from '../services/scaling.js'
 
 const router = Router()
 const minute = 60 * 1000
@@ -22,16 +23,16 @@ const incorrectCodeMessage = 'The verification code is incorrect.'
 const verificationFailedMessage = 'The verification could not be completed. Try again shortly.'
 const signupFailedMessage = 'Registration could not be completed. Check your details or sign in to an existing account.'
 
-const otpRequestLimit = rateLimit({ windowMs: 10 * minute, limit: 5, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many OTP requests. Try again later.' } })
-const otpPhoneLimit = rateLimit({ windowMs: 10 * minute, limit: 3, standardHeaders: true, legacyHeaders: false, keyGenerator: (request) => `phone:${phoneLimitKey(request.body?.phone)}`, message: { error: 'Too many OTP requests for this number. Try again later.' } })
-const loginLimit = rateLimit({ windowMs: 15 * minute, limit: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many login attempts. Try again later.' } })
-const loginAccountLimit = rateLimit({ windowMs: 15 * minute, limit: 10, skipSuccessfulRequests: true, standardHeaders: true, legacyHeaders: false, keyGenerator: (request) => `account:${loginAccountKey(request.body)}`, message: { error: 'Too many login attempts for this account. Try again later.' } })
-const signupLimit = rateLimit({ windowMs: 15 * minute, limit: 5, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many registration attempts. Try again later.' } })
-const signupEmailLimit = rateLimit({ windowMs: 60 * minute, limit: 3, standardHeaders: true, legacyHeaders: false, keyGenerator: (request) => `signup:${normalizeIdentifier(request.body?.email)}`, message: { error: 'Too many registration emails for this address. Try again later.' } })
-const passwordResetLimit = rateLimit({ windowMs: 15 * minute, limit: 5, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many password reset requests. Try again later.' } })
-const passwordResetEmailLimit = rateLimit({ windowMs: 60 * minute, limit: 3, standardHeaders: true, legacyHeaders: false, keyGenerator: (request) => `reset:${normalizeIdentifier(request.body?.email)}`, handler: (_request, response) => { response.status(202).json({ accepted: true }) } })
-const passwordUpdateLimit = rateLimit({ windowMs: 15 * minute, limit: 10, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many password update attempts. Try again later.' } })
-const phoneOtpVerifyLimit = rateLimit({ windowMs: 15 * minute, limit: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many verification attempts. Try again later.' } })
+const otpRequestLimit = rateLimit({ windowMs: 10 * minute, limit: 5, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:otp-request:', 'memory'), message: { error: 'Too many OTP requests. Try again later.' } })
+const otpPhoneLimit = rateLimit({ windowMs: 10 * minute, limit: 3, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:otp-phone:', 'memory'), keyGenerator: (request) => `phone:${phoneLimitKey(request.body?.phone)}`, message: { error: 'Too many OTP requests for this number. Try again later.' } })
+const loginLimit = rateLimit({ windowMs: 15 * minute, limit: 20, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:login:', 'memory'), message: { error: 'Too many login attempts. Try again later.' } })
+const loginAccountLimit = rateLimit({ windowMs: 15 * minute, limit: 10, skipSuccessfulRequests: true, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:login-account:', 'memory'), keyGenerator: (request) => `account:${loginAccountKey(request.body)}`, message: { error: 'Too many login attempts for this account. Try again later.' } })
+const signupLimit = rateLimit({ windowMs: 15 * minute, limit: 5, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:signup:', 'memory'), message: { error: 'Too many registration attempts. Try again later.' } })
+const signupEmailLimit = rateLimit({ windowMs: 60 * minute, limit: 3, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:signup-email:', 'memory'), keyGenerator: (request) => `signup:${normalizeIdentifier(request.body?.email)}`, message: { error: 'Too many registration emails for this address. Try again later.' } })
+const passwordResetLimit = rateLimit({ windowMs: 15 * minute, limit: 5, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:password-reset:', 'memory'), message: { error: 'Too many password reset requests. Try again later.' } })
+const passwordResetEmailLimit = rateLimit({ windowMs: 60 * minute, limit: 3, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:password-reset-email:', 'memory'), keyGenerator: (request) => `reset:${normalizeIdentifier(request.body?.email)}`, handler: (_request, response) => { response.status(202).json({ accepted: true }) } })
+const passwordUpdateLimit = rateLimit({ windowMs: 15 * minute, limit: 10, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:password-update:', 'memory'), message: { error: 'Too many password update attempts. Try again later.' } })
+const phoneOtpVerifyLimit = rateLimit({ windowMs: 15 * minute, limit: 20, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:phone-otp-verify:', 'memory'), message: { error: 'Too many verification attempts. Try again later.' } })
 
 function normalizeIdentifier(value: unknown) {
   return typeof value === 'string' ? value.trim().toLowerCase() : ''

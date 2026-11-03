@@ -52,6 +52,12 @@ const schema = z.object({
   ANALYTICS_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
   ANALYTICS_ANONYMIZE_AFTER_DAYS: z.coerce.number().int().positive().default(7),
   OTP_HMAC_SECRET: z.string().min(32, 'OTP_HMAC_SECRET must be at least 32 characters').optional(),
+  // Keep-alive must stay above the load balancer's idle timeout, or reused connections get reset (502s).
+  HTTP_KEEP_ALIVE_TIMEOUT_MS: z.coerce.number().int().positive().default(65_000),
+  HTTP_HEADERS_TIMEOUT_MS: z.coerce.number().int().positive().default(66_000),
+  HTTP_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  SLOW_REQUEST_MS: z.coerce.number().int().nonnegative().default(800),
+  CATALOG_CACHE_TTL_SECONDS: z.coerce.number().int().nonnegative().default(60),
 })
 // Blank values (for example SUPABASE_SECRET_KEY= in .env.example) mean "not set".
 const environment = Object.fromEntries(Object.entries(process.env).map(([key, value]) => [key, value === '' ? undefined : value]))
