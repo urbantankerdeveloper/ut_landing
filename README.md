@@ -30,11 +30,11 @@ npm run reference:list
 
 The reference server intentionally fails when port `4174` is occupied instead of switching ports silently.
 
-## Booking service details
+## Database setup
 
-For an existing database, run `npm run db:update` in `backend/` before deploying the API. It applies the idempotent incremental blocks in `backend/supabase/001_initial.sql`, including the JSONB column that stores each service's details under the same booking record. Fresh installs get the same column from the full `001_initial.sql` installer.
+The canonical install, including security hardening, is `backend/supabase/001_initial.sql`. `npm run db:reset` in `backend/` applies it by dropping and recreating the `public` schema; application data is deleted, while Supabase-managed authentication data is preserved. Use it only for a disposable/test database. The reset script requires `NODE_ENV=test`, an explicitly allowed project ref, and `CONFIRM_DATABASE_RESET=URBAN_TANKER_RESET`.
 
-Never run `npm run db:reset` against a database that holds data. It drops and recreates the `public` schema, and it refuses to run when `NODE_ENV=production`.
+There is no incremental database update command. Do not run the reset against an existing database whose data must be retained.
 
 ## Production deployment
 

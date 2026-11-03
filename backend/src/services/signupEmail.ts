@@ -17,6 +17,19 @@ export function signupConfirmationEmail(name: string, actionLink: string) {
   }
 }
 
+export function emailCodeEmail(code: string, purpose: 'sign_in' | 'signup' | 'link') {
+  const intro = {
+    sign_in: 'Use this code to sign in to Urban Tanker.',
+    signup: 'Use this code to confirm your email address and finish creating your account.',
+    link: 'Use this code to confirm the new email address on your Urban Tanker account.',
+  }[purpose]
+  const subject = purpose === 'sign_in' ? 'Your Urban Tanker sign-in code' : 'Your Urban Tanker verification code'
+  return {
+    subject,
+    html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#173b35"><h1>Your verification code</h1><p>${intro}</p><p style="margin:28px 0;font-size:28px;letter-spacing:6px;font-weight:bold">${escapeHtml(code)}</p><p>This code expires in 10 minutes. Do not share it with anyone.</p><p>If you did not request this, you can ignore this email.</p></div>`,
+  }
+}
+
 export function passwordResetEmail(actionLink: string) {
   const safeActionLink = escapeHtml(actionLink)
   return {

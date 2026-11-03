@@ -9,7 +9,7 @@ import { clientPlatformFromHeader, credentialsSchema, themeModeSchema } from '..
 import { decodeSelfieJpeg, selfieBucket, selfieObjectPath } from '../services/selfie.js'
 import { isEmailConfigured, sendEmail } from '../services/providers.js'
 import { sendTemplateSms } from '../services/sms.js'
-import { passwordResetEmail, signupConfirmationEmail } from '../services/signupEmail.js'
+import { emailCodeEmail, passwordResetEmail } from '../services/signupEmail.js'
 import { hashOtp, otpMatches } from '../services/otp.js'
 import { config } from '../config.js'
 import { limiterStore } from '../services/scaling.js'
@@ -33,6 +33,10 @@ const passwordResetLimit = rateLimit({ windowMs: 15 * minute, limit: 5, standard
 const passwordResetEmailLimit = rateLimit({ windowMs: 60 * minute, limit: 3, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:password-reset-email:', 'memory'), keyGenerator: (request) => `reset:${normalizeIdentifier(request.body?.email)}`, handler: (_request, response) => { response.status(202).json({ accepted: true }) } })
 const passwordUpdateLimit = rateLimit({ windowMs: 15 * minute, limit: 10, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:password-update:', 'memory'), message: { error: 'Too many password update attempts. Try again later.' } })
 const phoneOtpVerifyLimit = rateLimit({ windowMs: 15 * minute, limit: 20, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:phone-otp-verify:', 'memory'), message: { error: 'Too many verification attempts. Try again later.' } })
+const emailOtpRequestLimit = rateLimit({ windowMs: 10 * minute, limit: 10, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:email-otp-request:', 'memory'), message: { error: 'Too many code requests. Try again later.' } })
+const emailOtpEmailLimit = rateLimit({ windowMs: 15 * minute, limit: 5, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:email-otp-email:', 'memory'), keyGenerator: (request) => `email:${normalizeIdentifier(request.body?.email)}`, message: { error: 'Too many codes requested for this email. Try again later.' } })
+const emailOtpVerifyLimit = rateLimit({ windowMs: 15 * minute, limit: 20, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:email-otp-verify:', 'memory'), message: { error: 'Too many verification attempts. Try again later.' } })
+const resendConfirmationLimit = rateLimit({ windowMs: 60 * minute, limit: 3, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:resend-confirmation:', 'memory'), keyGenerator: (request) => `resend:${normalizeIdentifier(request.body?.email)}`, handler: (_request, response) => { response.status(202).json({ accepted: true }) } })
 
 function normalizeIdentifier(value: unknown) {
   return typeof value === 'string' ? value.trim().toLowerCase() : ''
@@ -159,6 +163,122 @@ async function markChallengeVerified(response: Response, challengeId: string): P
     return false
   }
   return true
+}
+
+type EmailCodePurpose = 'sign_in' | 'signup' | 'link'
+type EmailChallengeRow = { otp_hash: string; purpose: EmailCodePurpose; user_id: string | null }
+type AuthUserLookup = { user: { id: string; email_confirmed: boolean } | null; error: string | null }
+
+const emailCodeExpiresInSeconds = 600
+const emailCodeResendAfterSeconds = 30
+const emailSchema = z.string().trim().toLowerCase().email()
+const emailCodeSchema = z.string().regex(/^\d{6}$/)
+
+async function authUserForEmail(email: string): Promise<AuthUserLookup> {
+  const { data, error } = await supabase.rpc('auth_user_by_email', { p_email: email })
+  if (error) return { user: null, error: error.message }
+  return { user: (data as Array<{ id: string; email_confirmed: boolean }> | null)?.[0] ?? null, error: null }
+}
+
+type IssuedEmailCode = { ok: true; challengeId: string } | { ok: false; status: number; error: string }
+
+async function issueEmailCode(requestId: unknown, email: string, purpose: EmailCodePurpose, userId: string | null): Promise<IssuedEmailCode> {
+  if (!isEmailConfigured()) return { ok: false, status: 503, error: 'Email sign-in is unavailable right now.' }
+  const otp = crypto.randomInt(100000, 1000000).toString()
+  const { data: challenge, error } = await supabase
+    .from('email_otp_challenges')
+    .insert({ email, purpose, user_id: userId, otp_hash: hashOtp(otp), expires_at: new Date(Date.now() + emailCodeExpiresInSeconds * 1000).toISOString() })
+    .select('id')
+    .single()
+  if (error || !challenge) {
+    logFailure('email.challenge_create_failed', requestId, error?.message)
+    return { ok: false, status: 500, error: 'The verification code could not be created.' }
+  }
+  const template = emailCodeEmail(otp, purpose)
+  try {
+    const delivery = await sendEmail(email, template.subject, template.html)
+    if (!delivery.queued) throw new Error(delivery.reason)
+  } catch (deliveryError) {
+    await supabase.from('email_otp_challenges').delete().eq('id', challenge.id)
+    logFailure('email.delivery_failed', requestId, deliveryError instanceof Error ? deliveryError.message : undefined)
+    return { ok: false, status: 502, error: 'The verification email could not be sent. Try again shortly.' }
+  }
+  return { ok: true, challengeId: challenge.id }
+}
+
+// Same atomic attempt counting as the phone code. The purpose list is checked in SQL, so a signup code cannot be used for linking and the reverse.
+async function consumeEmailChallenge(response: Response, challengeId: string, email: string, purposes: EmailCodePurpose[], otp: string): Promise<EmailChallengeRow | null> {
+  const { data, error } = await supabase.rpc('consume_email_otp_attempt', { p_challenge_id: challengeId, p_email: email, p_purposes: purposes })
+  if (error) {
+    logFailure('email.attempt_failed', response.locals.requestId, error.message)
+    response.status(500).json({ error: verificationFailedMessage })
+    return null
+  }
+  const row = (data as EmailChallengeRow[] | null)?.[0]
+  if (!row) {
+    response.status(400).json({ error: invalidCodeMessage })
+    return null
+  }
+  if (!otpMatches(row.otp_hash, otp)) {
+    response.status(400).json({ error: incorrectCodeMessage })
+    return null
+  }
+  return row
+}
+
+async function markEmailChallengeVerified(response: Response, challengeId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('email_otp_challenges')
+    .update({ verified_at: new Date().toISOString() })
+    .eq('id', challengeId)
+    .is('verified_at', null)
+    .gt('expires_at', new Date().toISOString())
+    .select('id')
+    .maybeSingle()
+  if (error) {
+    logFailure('email.consume_failed', response.locals.requestId, error.message)
+    response.status(500).json({ error: verificationFailedMessage })
+    return false
+  }
+  if (!data) {
+    response.status(400).json({ error: invalidCodeMessage })
+    return false
+  }
+  return true
+}
+
+async function magicLinkSession(response: Response, email: string): Promise<{ accessToken: string; refreshToken: string; user: { id: string; email?: string | null } } | null> {
+  const { data: link, error: linkError } = await authSupabase.auth.admin.generateLink({ type: 'magiclink', email })
+  const tokenHash = link?.properties?.hashed_token
+  if (linkError || !tokenHash) {
+    logFailure('email.magiclink_failed', response.locals.requestId, linkError?.message)
+    response.status(500).json({ error: 'A sign-in session could not be created.' })
+    return null
+  }
+  const { data: verified, error: verifyError } = await authSupabase.auth.verifyOtp({ token_hash: tokenHash, type: 'magiclink' })
+  if (verifyError || !verified.session || !verified.user) {
+    logFailure('email.magiclink_verify_failed', response.locals.requestId, verifyError?.message)
+    response.status(500).json({ error: 'A sign-in session could not be created.' })
+    return null
+  }
+  return { accessToken: verified.session.access_token, refreshToken: verified.session.refresh_token, user: { id: verified.user.id, email: verified.user.email } }
+}
+
+function sendSignedInUser(request: Request, response: Response, session: { accessToken: string; refreshToken: string }, authUser: { id: string; email?: string | null }, profile: ProfileRow, fallbackUsername: string) {
+  setRefreshCookie(response, session.refreshToken)
+  return response.json({
+    accessToken: session.accessToken,
+    ...refreshTokenForClient(request.header('x-client-platform'), session.refreshToken),
+    user: {
+      id: authUser.id,
+      email: authUser.email,
+      username: profile.username ?? authUser.email ?? fallbackUsername,
+      name: profile.full_name,
+      role: profile.role,
+      themeMode: profile.theme_mode ?? 'system',
+      selfieRequired: profile.selfie_required === true,
+    },
+  })
 }
 
 type ProfileRow = {
@@ -366,6 +486,150 @@ router.post('/phone/verify-otp', phoneOtpVerifyLimit, async (request, response) 
   })
 })
 
+router.post('/email/request-otp', emailOtpRequestLimit, emailOtpEmailLimit, async (request, response) => {
+  const parsed = z.object({ email: emailSchema }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Enter a valid email address.' })
+  const lookup = await authUserForEmail(parsed.data.email)
+  if (lookup.error) {
+    logFailure('email.user_lookup_failed', response.locals.requestId, lookup.error)
+    return response.status(500).json({ error: verificationFailedMessage })
+  }
+  const issued = await issueEmailCode(response.locals.requestId, parsed.data.email, 'sign_in', lookup.user?.id ?? null)
+  if (!issued.ok) return response.status(issued.status).json({ error: issued.error })
+  response.status(202).json({ challengeId: issued.challengeId, expiresInSeconds: emailCodeExpiresInSeconds, resendAfterSeconds: emailCodeResendAfterSeconds })
+})
+
+// A code for an unknown email creates a new customer account, which needs a name. Existing accounts sign in without one.
+router.post('/email/verify-otp', emailOtpVerifyLimit, async (request, response) => {
+  const parsed = z.object({
+    challengeId: z.string().uuid(),
+    email: emailSchema,
+    otp: emailCodeSchema,
+    name: z.string().trim().min(2).max(60).optional(),
+  }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Enter the verification code sent to your email.' })
+  const { challengeId, email, otp, name } = parsed.data
+  const row = await consumeEmailChallenge(response, challengeId, email, ['sign_in', 'signup'], otp)
+  if (!row) return
+
+  if (row.user_id) {
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id,role,full_name,username,phone_e164,theme_mode,selfie_required')
+      .eq('id', row.user_id)
+      .maybeSingle()
+    if (profileError) {
+      logFailure('email.profile_lookup_failed', response.locals.requestId, profileError.message)
+      return response.status(500).json({ error: verificationFailedMessage })
+    }
+    const existing = profile as ProfileRow | null
+    if (!existing || !['customer', 'vendor'].includes(existing.role)) {
+      return response.status(403).json({ error: 'This account cannot sign in here.' })
+    }
+    if (!(await markEmailChallengeVerified(response, challengeId))) return
+    const { data: confirmed, error: confirmError } = await authSupabase.auth.admin.updateUserById(row.user_id, { email_confirm: true })
+    if (confirmError || !confirmed.user) {
+      logFailure('email.confirm_failed', response.locals.requestId, confirmError?.message)
+      return response.status(500).json({ error: verificationFailedMessage })
+    }
+    const session = await magicLinkSession(response, confirmed.user.email ?? email)
+    if (!session) return
+    return sendSignedInUser(request, response, session, session.user, existing, email)
+  }
+
+  if (!name) return response.status(400).json({ error: 'Enter your name to create a new customer account.' })
+  if (!(await markEmailChallengeVerified(response, challengeId))) return
+
+  const password = crypto.randomBytes(32).toString('base64url')
+  const username = `email_${crypto.randomBytes(4).toString('hex')}`
+  const { data: created, error: createError } = await authSupabase.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    user_metadata: { full_name: name, role: 'customer', username },
+  })
+  if (createError || !created.user) {
+    logFailure('email.user_create_failed', response.locals.requestId, createError?.message)
+    return response.status(409).json({ error: 'The account could not be created. Try signing in again.' })
+  }
+  const signupPlatform = clientPlatformFromHeader(request.header('x-client-platform'))
+  const { data: createdProfile, error: profileError } = await supabase
+    .from('profiles')
+    .upsert({ id: created.user.id, full_name: name, username, role: 'customer', signup_platform: signupPlatform, selfie_required: false })
+    .select('id,role,full_name,username,phone_e164,theme_mode,selfie_required')
+    .single()
+  if (profileError || !createdProfile) {
+    logFailure('email.profile_create_failed', response.locals.requestId, profileError?.message)
+    const { error: rollbackError } = await authSupabase.auth.admin.deleteUser(created.user.id)
+    if (rollbackError) logFailure('email.rollback_failed', response.locals.requestId, rollbackError.message)
+    return response.status(500).json({ error: 'The customer account could not be created.' })
+  }
+  const { data: signedIn, error: signInError } = await authSupabase.auth.signInWithPassword({ email, password })
+  if (signInError || !signedIn.session || !signedIn.user) {
+    logFailure('email.session_failed', response.locals.requestId, signInError?.message)
+    return response.status(500).json({ error: 'The customer account was created but could not be signed in.' })
+  }
+  return sendSignedInUser(
+    request,
+    response,
+    { accessToken: signedIn.session.access_token, refreshToken: signedIn.session.refresh_token },
+    { id: signedIn.user.id, email: signedIn.user.email },
+    createdProfile as ProfileRow,
+    email,
+  )
+})
+
+// Always 202 so the reply does not reveal whether the account exists. The code is sent after the reply.
+router.post('/resend-confirmation', resendConfirmationLimit, async (request, response) => {
+  response.status(202).json({ accepted: true })
+  const parsed = z.object({ email: emailSchema }).safeParse(request.body)
+  if (!parsed.success) return
+  const requestId = response.locals.requestId
+  const lookup = await authUserForEmail(parsed.data.email)
+  if (lookup.error) return logFailure('email.resend_lookup_failed', requestId, lookup.error)
+  if (!lookup.user || lookup.user.email_confirmed) return
+  const issued = await issueEmailCode(requestId, parsed.data.email, 'signup', lookup.user.id)
+  if (!issued.ok) logFailure('email.resend_failed', requestId, issued.error)
+})
+
+router.post('/email/link/request-otp', requireAuth, emailOtpRequestLimit, emailOtpEmailLimit, async (request, response) => {
+  const parsed = z.object({ email: emailSchema }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Enter a valid email address.' })
+  const userId = request.authUser!.id
+  const lookup = await authUserForEmail(parsed.data.email)
+  if (lookup.error) {
+    logFailure('email.user_lookup_failed', response.locals.requestId, lookup.error)
+    return response.status(500).json({ error: verificationFailedMessage })
+  }
+  if (lookup.user && lookup.user.id !== userId) return response.status(400).json({ error: 'This email address cannot be used.' })
+  const issued = await issueEmailCode(response.locals.requestId, parsed.data.email, 'link', userId)
+  if (!issued.ok) return response.status(issued.status).json({ error: issued.error })
+  response.status(202).json({ challengeId: issued.challengeId, expiresInSeconds: emailCodeExpiresInSeconds, resendAfterSeconds: emailCodeResendAfterSeconds })
+})
+
+router.post('/email/link/verify-otp', requireAuth, emailOtpVerifyLimit, async (request, response) => {
+  const parsed = z.object({ challengeId: z.string().uuid(), email: emailSchema, otp: emailCodeSchema }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Enter the verification code sent to your email.' })
+  const userId = request.authUser!.id
+  const { challengeId, email, otp } = parsed.data
+  const row = await consumeEmailChallenge(response, challengeId, email, ['link'], otp)
+  if (!row) return
+  if (row.user_id !== userId) return response.status(400).json({ error: invalidCodeMessage })
+  const lookup = await authUserForEmail(email)
+  if (lookup.error) {
+    logFailure('email.user_lookup_failed', response.locals.requestId, lookup.error)
+    return response.status(500).json({ error: verificationFailedMessage })
+  }
+  if (lookup.user && lookup.user.id !== userId) return response.status(400).json({ error: 'This email address cannot be used.' })
+  if (!(await markEmailChallengeVerified(response, challengeId))) return
+  const { error: updateError } = await authSupabase.auth.admin.updateUserById(userId, { email, email_confirm: true })
+  if (updateError) {
+    logFailure('email.link_update_failed', response.locals.requestId, updateError.message)
+    return response.status(400).json({ error: 'This email address cannot be used.' })
+  }
+  response.json({ email })
+})
+
 router.post('/login', loginLimit, loginAccountLimit, async (request, response) => {
   const parsed = credentialsSchema.safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Invalid credentials', details: parsed.error.flatten() })
@@ -436,20 +700,17 @@ router.post('/signup', signupLimit, signupEmailLimit, async (request, response) 
   const themeMode = parsed.data.themeMode ?? 'system'
   const username = parsed.data.username?.toLowerCase() ?? parsed.data.email.split('@')[0]?.toLowerCase() ?? 'user'
   // The phone is not stored here. It is written by the phone verify route after the OTP passes.
-  const { data, error } = await authSupabase.auth.admin.generateLink({
-    type: 'signup',
+  const { data: created, error } = await authSupabase.auth.admin.createUser({
     email: parsed.data.email,
     password: parsed.data.password,
-    options: {
-      data: { full_name: parsed.data.name, role: 'customer', username },
-      redirectTo: `${config.FRONTEND_ORIGIN}/login`,
-    },
+    email_confirm: false,
+    user_metadata: { full_name: parsed.data.name, role: 'customer', username },
   })
-  if (error) {
-    logFailure('signup.link_failed', response.locals.requestId, error.message)
-    return response.status(400).json({ error: signupFailedMessage })
+  if (error || !created.user) {
+    logFailure('signup.user_create_failed', response.locals.requestId, error?.message)
+    return response.status(400).json({ error: 'This email may already be registered. Try signing in.' })
   }
-  const userId = data.user.id
+  const userId = created.user.id
   const { error: profileError } = await supabase.from('profiles').upsert({
     id: userId,
     full_name: parsed.data.name,
@@ -497,23 +758,22 @@ router.post('/signup', signupLimit, signupEmailLimit, async (request, response) 
     }
   }
 
-  const actionLink = data.properties.action_link
-  if (!actionLink) {
+  const code = await issueEmailCode(response.locals.requestId, parsed.data.email, 'signup', userId)
+  if (!code.ok) {
     await cleanupUnconfirmedAccount()
-    return response.status(502).json({ error: 'We could not create an email confirmation link. Please try again.' })
+    return response.status(code.status).json({ error: code.error })
   }
-  const confirmation = signupConfirmationEmail(parsed.data.name, actionLink)
-  void (async () => {
-    try {
-      const delivery = await sendEmail(parsed.data.email, confirmation.subject, confirmation.html)
-      if (!delivery.queued) throw new Error(delivery.reason)
-    } catch (deliveryError) {
-      const cleanedUp = await cleanupUnconfirmedAccount().catch(() => false)
-      console.error(JSON.stringify({ event: 'signup.confirmation_email_failed', requestId: response.locals.requestId, userId, error: mailErrorCode(deliveryError), cleanedUp }))
-    }
-  })()
 
-  response.status(201).json({ requiresEmailVerification: true, emailSent: true, userId, signupPlatform, themeMode })
+  response.status(201).json({
+    requiresEmailVerification: true,
+    emailSent: true,
+    challengeId: code.challengeId,
+    expiresInSeconds: emailCodeExpiresInSeconds,
+    resendAfterSeconds: emailCodeResendAfterSeconds,
+    userId,
+    signupPlatform,
+    themeMode,
+  })
 })
 
 // Sends the reset email after the response, so the reply never depends on whether the account exists or the mail went out.

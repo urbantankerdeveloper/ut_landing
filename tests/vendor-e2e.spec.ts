@@ -42,3 +42,49 @@ test('vendor can log in, open order inbox, assign fleet, and start delivery', as
   await page.getByRole('button', { name: 'Start delivery' }).click()
   await expect(page.getByText('booking-2 marked En route.')).toBeVisible()
 })
+
+test('sidebar logo returns a signed-in vendor to overview without changing routes', async ({ page }) => {
+  await page.addInitScript(() => {
+    const navigationHistory: string[] = []
+    const trackedWindow = window as Window & { __workspaceNavigationHistory: string[] }
+    trackedWindow.__workspaceNavigationHistory = navigationHistory
+    const pushState = history.pushState.bind(history)
+    const replaceState = history.replaceState.bind(history)
+    history.pushState = (...args) => {
+      pushState(...args)
+      navigationHistory.push(location.pathname)
+    }
+    history.replaceState = (...args) => {
+      replaceState(...args)
+      navigationHistory.push(location.pathname)
+    }
+  })
+  await page.route('**/api/auth/login', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      accessToken: 'vendor-test-token',
+      user: { username: 'vendor@test.example', name: 'Test Vendor', role: 'vendor' },
+    }),
+  }))
+  await page.route('**/api/vendor/**', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }))
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Log in' }).click()
+  await page.getByLabel('Username or email').fill('vendor@test.example')
+  await page.locator('#login-password').fill('vendor-password')
+  await page.getByRole('button', { name: /^Log in$/ }).last().click()
+  await expect(page.getByText('Test Vendor')).toBeVisible()
+  const navigation = page.locator('.workspace-nav-new')
+  await navigation.getByRole('button', { name: 'Orders & support' }).click()
+  await navigation.getByRole('button', { name: 'Orders', exact: true }).click()
+  await expect(navigation.getByRole('button', { name: 'Orders', exact: true })).toHaveAttribute('aria-current', 'page')
+  await page.evaluate(() => {
+    (window as Window & { __workspaceNavigationHistory: string[] }).__workspaceNavigationHistory.length = 0
+  })
+
+  await page.locator('.sidebar-brand .brand').click()
+
+  await expect(navigation.getByRole('button', { name: 'Overview', exact: true })).toHaveAttribute('aria-current', 'page')
+  expect(await page.evaluate(() => (window as Window & { __workspaceNavigationHistory: string[] }).__workspaceNavigationHistory)).toEqual([])
+})

@@ -56,7 +56,11 @@ export default function WorkspaceScreen() {
   const navigationGroups = activeRole === 'admin' ? adminNavGroups : activeRole === 'vendor' ? vendorNavGroups : dispatcherNavGroups
   const selectItem = useCallback((key: string) => { setActiveItem(key); const group = navigationGroups.find((item) => item.keys.includes(key)); if (group) setExpandedAdminGroups(new Set([group.label])); setNotices([]); setSidebarOpen(false) }, [navigationGroups])
   const addNotice = useCallback((message: string) => { const id = Date.now() + Math.random(); setNotices((current) => [...current.slice(-4), { id, message }]); window.setTimeout(() => setNotices((current) => current.filter((notice) => notice.id !== id)), 5000) }, [])
-  const navigateContent = useCallback((screen: 'booking' | 'bookings' | 'offers' | 'home') => screen === 'booking' ? navigate('booking') : screen === 'offers' ? selectItem('offers') : navigate('home'), [navigate, selectItem])
+  const showWorkspaceOverview = useCallback(() => selectItem('overview'), [selectItem])
+  const navigateContent = useCallback((screen: 'booking' | 'bookings' | 'offers' | 'home') => {
+    if (screen === 'booking') return navigate('booking')
+    selectItem(screen === 'home' ? 'overview' : screen)
+  }, [navigate, selectItem])
   const logout = async () => {
     await authApi.logout().catch(() => undefined)
     queryClient.clear()
@@ -85,7 +89,7 @@ export default function WorkspaceScreen() {
   </>
   return <section className={`workspace-app workspace-app-${activeRole} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
     <aside className={`workspace-sidebar-new ${sidebarOpen ? 'is-open' : ''}`}>
-      <div className="sidebar-brand"><button className="brand" onClick={() => navigate('home')} aria-label={w.shell.homeAria}><img className="brand-wordmark workspace-wordmark" src="/urban-tanker-wordmark-white.webp" width={380} height={59} decoding="async" alt={w.shell.brandAlt} /></button><button className="sidebar-collapse-toggle" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} aria-label={sidebarCollapsed ? w.shell.expandSidebar : w.shell.collapseSidebar} title={sidebarCollapsed ? w.shell.expandSidebar : w.shell.collapseSidebar}>{sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button><button className="sidebar-close" onClick={() => setSidebarOpen(false)} aria-label={w.shell.closeSidebar}><X size={17} /></button></div>
+      <div className="sidebar-brand"><button className="brand" onClick={showWorkspaceOverview} aria-label={w.shell.homeAria}><img className="brand-wordmark workspace-wordmark" src="/urban-tanker-wordmark-white.webp" width={380} height={59} decoding="async" alt={w.shell.brandAlt} /></button><button className="sidebar-collapse-toggle" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} aria-label={sidebarCollapsed ? w.shell.expandSidebar : w.shell.collapseSidebar} title={sidebarCollapsed ? w.shell.expandSidebar : w.shell.collapseSidebar}>{sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button><button className="sidebar-close" onClick={() => setSidebarOpen(false)} aria-label={w.shell.closeSidebar}><X size={17} /></button></div>
       <p className="workspace-caption-new">{data.caption}</p>
       <nav className="workspace-nav-new" aria-label={w.shell.workspacePagesAria(activeRole)}>
         {activeRole === 'admin' || activeRole === 'vendor' || activeRole === 'dispatcher'
@@ -100,7 +104,7 @@ export default function WorkspaceScreen() {
         <button className="sidebar-open" onClick={() => setSidebarOpen(true)} aria-label={w.shell.openSidebar}><Menu size={19} /></button>
         <span className="topbar-title">{activeItem === 'overview' ? data.title : data.nav.find((item) => item.key === activeItem)?.label}</span>
         <div className="topbar-identity">
-          <button className="topbar-home" onClick={() => navigate('home')}>{w.shell.home}</button>
+          <button className="topbar-home" onClick={showWorkspaceOverview}>{w.shell.home}</button>
           <span className="workspace-avatar-new">{displayName.slice(0, 1)}</span><span className="topbar-person">{displayName}</span>
           <button className="button button-quiet topbar-logout" onClick={logout}><LogOut size={14} /> {w.shell.logOut}</button>
         </div>

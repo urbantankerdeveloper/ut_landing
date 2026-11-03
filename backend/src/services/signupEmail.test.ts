@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { passwordResetEmail, signupConfirmationEmail } from './signupEmail.js'
+import { emailCodeEmail, passwordResetEmail, signupConfirmationEmail } from './signupEmail.js'
+
+describe('email verification code email', () => {
+  it('shows the code and expiry for each purpose', () => {
+    const signIn = emailCodeEmail('123456', 'sign_in')
+    expect(signIn.subject).toContain('sign-in')
+    expect(signIn.html).toContain('123456')
+    expect(signIn.html).toContain('10 minutes')
+    expect(emailCodeEmail('123456', 'signup').html).toContain('finish creating your account')
+    expect(emailCodeEmail('123456', 'link').html).toContain('new email address')
+  })
+})
 
 describe('signup confirmation email', () => {
   it('includes the confirmation action link', () => {
