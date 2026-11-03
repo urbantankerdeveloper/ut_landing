@@ -1,3 +1,2 @@
-import type { User } from '@supabase/supabase-js'
-declare global { namespace Express { interface Request { authUser?: User; profile?: { id: string; role: string; full_name: string } } } }
+declare global { namespace Express { interface Request { authUser?: { id: string; email?: string }; profile?: { id: string; role: string; full_name: string }; vendorId?: string } } }
 export {}

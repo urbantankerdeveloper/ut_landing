@@ -377,6 +377,9 @@ router.patch('/profile', async (request, response) => {
     if (!(await passwordIsCorrect(currentEmail, parsed.data.currentPassword))) return response.status(400).json({ error: 'The current password is incorrect.' })
     const { error } = await supabase.auth.admin.updateUserById(userId, { email: parsed.data.email })
     if (error) return failure(response, 400, 'This email address cannot be used.', 'customer.email_update_failed', error)
+    // The auth email has already changed, so a failed profile copy only logs. Login falls back to auth when it is stale.
+    const { error: emailSyncError } = await supabase.from('profiles').update({ email: parsed.data.email.toLowerCase() }).eq('id', userId)
+    if (emailSyncError) console.warn(JSON.stringify({ event: 'customer.profile_email_sync_failed', requestId: response.locals.requestId, error: emailSyncError.message }))
   }
   const { data, error } = await supabase.from('profiles').update(profileUpdate).eq('id', userId).select().single()
   if (error) return databaseFailure(response, 'customer.profile_update_failed', error, 400)

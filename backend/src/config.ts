@@ -14,6 +14,12 @@ const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production'], { error: 'NODE_ENV must be set to development, test, or production (see backend/.env.example)' }),
   PORT: z.coerce.number().default(8080),
   FRONTEND_ORIGIN: z.string().default('http://localhost:5173').transform((value) => value.replace(/\/+$/, '')),
+  // Where the signup confirmation link sends people. The default opens the app.
+  // The same URL must be listed in Supabase Auth > URL Configuration > Redirect URLs.
+  APP_EMAIL_REDIRECT_URL: z.string().default('urbantanker://auth/email-confirmed').refine(
+    (value) => value.startsWith('urbantanker://') || value.startsWith('https://'),
+    'APP_EMAIL_REDIRECT_URL must start with urbantanker:// or https://',
+  ),
   CORS_ORIGINS: z.string().optional(),
   SUPABASE_URL: z.string().url(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
@@ -58,6 +64,10 @@ const schema = z.object({
   HTTP_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
   SLOW_REQUEST_MS: z.coerce.number().int().nonnegative().default(800),
   CATALOG_CACHE_TTL_SECONDS: z.coerce.number().int().nonnegative().default(60),
+  // Phase 2 rollout flags. Each one keeps the previous code path when it is off.
+  AUTH_LOCAL_JWT: z.preprocess((value) => value === undefined ? undefined : value === 'true', z.boolean().default(false)),
+  AUTH_CONTEXT_CACHE: z.preprocess((value) => value === undefined ? undefined : value === 'true', z.boolean().default(false)),
+  AUDIT_BATCHING: z.preprocess((value) => value === undefined ? undefined : value === 'true', z.boolean().default(false)),
 })
 // Blank values (for example SUPABASE_SECRET_KEY= in .env.example) mean "not set".
 const environment = Object.fromEntries(Object.entries(process.env).map(([key, value]) => [key, value === '' ? undefined : value]))

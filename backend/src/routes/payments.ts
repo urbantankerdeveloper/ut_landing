@@ -2,7 +2,7 @@ import { databaseFailure } from '../lib/httpErrors.js'
 import { Router } from 'express'
 import crypto from 'node:crypto'
 import { z } from 'zod'
-import { requireAuth, requireRole } from '../middleware/auth.js'
+import { requireAuth, requireFreshAuth, requireRole } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 import { refundAmountInPaise, signaturesMatch } from '../services/paymentSecurity.js'
 import { failure } from '../lib/httpErrors.js'
@@ -82,7 +82,7 @@ router.post('/razorpay/webhook', async (request, response) => {
   }
   response.status(202).json({ accepted: true })
 })
-router.post('/payments/:id/refund', requireAuth, requireRole('admin'), async (request, response) => {
+router.post('/payments/:id/refund', requireFreshAuth, requireAuth, requireRole('admin'), async (request, response) => {
   const parsed = z.object({ amount: z.number().positive().optional() }).safeParse(request.body)
   const keys = razorpay()
   if (!parsed.success) return response.status(400).json({ error: 'Invalid refund' })

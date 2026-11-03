@@ -16,7 +16,8 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "smtp:test": "tsx src/scripts/smtp-test.ts",
-    "bench": "node scripts/bench/run.mjs"
+    "bench": "node scripts/bench/run.mjs",
+    "seed:bench": "tsx src/scripts/seed-bench.ts"
   },
   "dependencies": {
     "@socket.io/redis-adapter": "^8.3.0",
@@ -27,6 +28,7 @@
     "express": "^5.1.0",
     "express-rate-limit": "^8.1.0",
     "helmet": "^8.1.0",
+    "jose": "^6.2.15",
     "nodemailer": "^10.1.6",
     "pg": "^8.13.1",
     "rate-limit-redis": "^6.0.2",

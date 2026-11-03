@@ -4,7 +4,11 @@ import { databasePool } from '../database.js'
 
 if (!databasePool) throw new Error('SUPABASE_DB_URL is required to apply the database update.')
 
-const sql = await readFile(join(process.cwd(), 'supabase', '002_security_hardening.sql'), 'utf8')
+// Usage: npm run db:update -- [migration file name]. Defaults to 002_security_hardening.sql.
+const migrationFile = process.argv[2] ?? '002_security_hardening.sql'
+if (!/^[\w.-]+\.sql$/.test(migrationFile)) throw new Error('Migration file name must be a plain .sql file name in backend/supabase.')
+
+const sql = await readFile(join(process.cwd(), 'supabase', migrationFile), 'utf8')
 try {
   const client = await databasePool.connect()
   try {

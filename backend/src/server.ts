@@ -29,6 +29,9 @@ import { errorHandler } from './middleware/errors.js'
 import { startBackgroundJobs } from './services/jobs.js'
 import { supabase } from './supabase.js'
 import { setRealtimeServer } from './services/realtime.js'
+import { resolveIdentity } from './middleware/auth.js'
+import { loadAuthContext } from './services/authContext.js'
+import { flushAuditQueue, stopAuditBatcher } from './services/auditLog.js'
 import { closeRedisPair, createRedisPair, rateLimitStoreFor, socketAdapterFor, warnIfSingleInstanceInProduction } from './services/scaling.js'
 import { requestObservability } from './middleware/observability.js'
 import { createHealthRouter } from './routes/health.js'
@@ -85,9 +88,9 @@ io.use(async (socket, next) => {
   try {
     const token = socket.handshake.auth?.token
     if (typeof token !== 'string' || !token) return next(new Error('Authentication required'))
-    const { data, error } = await supabase.auth.getUser(token)
-    if (error || !data.user) return next(new Error('Invalid session'))
-    socket.data.userId = data.user.id
+    const identity = await resolveIdentity(token)
+    if (!identity) return next(new Error('Invalid session'))
+    socket.data.userId = identity.id
     next()
   } catch {
     next(new Error('Realtime authentication failed'))
@@ -105,15 +108,18 @@ async function handleConnection(socket: Socket) {
     }
   })
   socket.join(`customer:${socket.data.userId}`)
-  const [{ data: profile, error: profileError }, { data: vendor, error: vendorError }] = await Promise.all([
-    supabase.from('profiles').select('role').eq('id', socket.data.userId).maybeSingle(),
-    supabase.from('vendors').select('id').eq('owner_profile_id', socket.data.userId).maybeSingle(),
-  ])
-  if (profileError || vendorError) {
-    console.error(JSON.stringify({ event: 'realtime.user_context_failed', userId: socket.data.userId, profileError: profileError?.message, vendorError: vendorError?.message }))
+  let context: Awaited<ReturnType<typeof loadAuthContext>>
+  try {
+    context = await loadAuthContext(socket.data.userId)
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'realtime.user_context_failed', userId: socket.data.userId, error: error instanceof Error ? error.message : String(error) }))
     socket.disconnect(true)
     return
   }
+  const profile = context ? { role: context.role } : null
+  const vendor = context?.vendorId ? { id: context.vendorId } : null
+  // Booking ownership for this connection. Cached for the connection's lifetime, so a repeated join does not query again.
+  const bookingOwners = new Map<string, { customer_id: string | null; vendor_id: string | null }>()
   if (profile?.role === 'admin') socket.join('admins')
   if (vendor) socket.join(`vendor:${vendor.id}`)
   socket.emit('connected', { service: 'urban-tanker-realtime', vendorId: vendor?.id ?? null, role: profile?.role ?? null })
@@ -132,9 +138,14 @@ async function handleConnection(socket: Socket) {
     if (joinCount >= 30 || (joinedBookingRooms.size >= 20 && !joinedBookingRooms.has(bookingId))) return
     joinCount += 1
     try {
-      const { data: booking, error } = await supabase.from('bookings').select('customer_id,vendor_id').eq('id', bookingId).maybeSingle()
-      if (error) throw error
-      if (!booking) return
+      let booking = bookingOwners.get(bookingId)
+      if (!booking) {
+        const { data, error } = await supabase.from('bookings').select('customer_id,vendor_id').eq('id', bookingId).maybeSingle()
+        if (error) throw error
+        if (!data) return
+        booking = data
+        bookingOwners.set(bookingId, data)
+      }
       const isCustomer = booking.customer_id === socket.data.userId
       const isAdmin = profile?.role === 'admin'
       const isVendor = Boolean(vendor?.id && booking.vendor_id === vendor.id)
@@ -155,7 +166,7 @@ const stopBackgroundJobs = startBackgroundJobs()
 const shutdown = (signal: string) => {
   console.info(JSON.stringify({ event: 'server.shutdown', signal }))
   stopBackgroundJobs()
-  io.close(() => httpServer.close(() => { void closeRedisPair(redis).finally(() => process.exit(0)) }))
+  io.close(() => httpServer.close(() => { void flushAuditQueue().finally(() => stopAuditBatcher()).then(() => closeRedisPair(redis)).finally(() => process.exit(0)) }))
   setTimeout(() => process.exit(1), 10_000).unref()
 }
 process.once('SIGTERM', () => shutdown('SIGTERM'))

@@ -3,21 +3,23 @@ import crypto from 'node:crypto'
 import { z } from 'zod'
 import rateLimit from 'express-rate-limit'
 import { authSupabase, supabase } from '../supabase.js'
-import { requireAuth } from '../middleware/auth.js'
+import { requireAuth, resolveIdentity } from '../middleware/auth.js'
+import { revokeSession, revokeUserTokens } from '../services/sessionRevocation.js'
 import { toE164IndianMobile } from '../lib/phone.js'
 import { clientPlatformFromHeader, credentialsSchema, themeModeSchema } from '../lib/schemas.js'
 import { decodeSelfieJpeg, selfieBucket, selfieObjectPath } from '../services/selfie.js'
-import { isEmailConfigured, sendEmail } from '../services/providers.js'
+import { isEmailConfigured, mailErrorCode, sendEmail } from '../services/providers.js'
+import { sendSignupConfirmation } from '../services/signupDelivery.js'
 import { sendTemplateSms } from '../services/sms.js'
 import { passwordResetEmail, signupConfirmationEmail } from '../services/signupEmail.js'
 import { hashOtp, otpMatches } from '../services/otp.js'
 import { config } from '../config.js'
 import { limiterStore } from '../services/scaling.js'
+import { findProfileByUsername, resolveLoginEmail, signedInAsCredential, signInWithFallback } from '../services/loginResolution.js'
 
 const router = Router()
 const minute = 60 * 1000
 const bcryptPasswordMaxBytes = 72
-const unmatchedLoginEmail = 'no-account@login.urbantanker.local'
 const invalidCodeMessage = 'This verification code is invalid or expired.'
 const incorrectCodeMessage = 'The verification code is incorrect.'
 const verificationFailedMessage = 'The verification could not be completed. Try again shortly.'
@@ -85,10 +87,6 @@ function bearerToken(request: Request) {
 }
 function logFailure(event: string, requestId: unknown, detail?: string) {
   console.error(JSON.stringify({ event, requestId, error: detail }))
-}
-function mailErrorCode(error: unknown) {
-  const code = (error as { code?: unknown } | null)?.code
-  return typeof code === 'string' ? code : 'unknown'
 }
 
 const phoneSchema = z.string().regex(/^\d{10}$/)
@@ -195,7 +193,7 @@ router.post('/guest/verify-otp', async (request, response) => {
     logFailure('guest.user_create_failed', response.locals.requestId, createError?.message)
     return response.status(500).json({ error: 'Guest account could not be created.' })
   }
-  const { error: profileError } = await supabase.from('profiles').upsert({ id: created.user.id, full_name: name, phone_e164: phone, phone_verified_at: new Date().toISOString(), username: `guest_${parsed.data.phone}`, role: 'customer' })
+  const { error: profileError } = await supabase.from('profiles').upsert({ id: created.user.id, full_name: name, phone_e164: phone, phone_verified_at: new Date().toISOString(), username: `guest_${parsed.data.phone}`, role: 'customer', email })
   if (profileError) {
     logFailure('guest.profile_failed', response.locals.requestId, profileError.message)
     const { error: rollbackError } = await authSupabase.auth.admin.deleteUser(created.user.id)
@@ -259,14 +257,18 @@ router.post('/phone/verify-otp', phoneOtpVerifyLimit, async (request, response) 
   if (!existingProfile && !parsed.data.name) {
     return response.status(400).json({ error: 'Enter your name to create a new customer account.' })
   }
-  if (!(await markChallengeVerified(response, parsed.data.challengeId))) return
+  // The auth user read does not depend on the challenge update, so the two run together.
+  // The read's result is used only after the challenge check passes.
+  const existingUserLookup = existingProfile ? authSupabase.auth.admin.getUserById(existingProfile.id) : null
+  const [challengeVerified, existingUserResult] = await Promise.all([markChallengeVerified(response, parsed.data.challengeId), existingUserLookup])
+  if (!challengeVerified) return
 
   let profile: ProfileRow
   let session: { access_token: string; refresh_token: string }
   let authUser: { id: string; email?: string | null }
   if (existingProfile) {
     profile = existingProfile
-    const { data: existingUser, error: userError } = await authSupabase.auth.admin.getUserById(profile.id)
+    const { data: existingUser, error: userError } = existingUserResult!
     if (userError || !existingUser.user?.email) {
       return response.status(403).json({ error: 'The phone account is unavailable.' })
     }
@@ -322,6 +324,7 @@ router.post('/phone/verify-otp', phoneOtpVerifyLimit, async (request, response) 
         phone_verified_at: new Date().toISOString(),
         username,
         role: 'customer',
+        email,
         signup_platform: signupPlatform,
         selfie_required: signupPlatform === 'mobile',
       })
@@ -366,32 +369,44 @@ router.post('/phone/verify-otp', phoneOtpVerifyLimit, async (request, response) 
   })
 })
 
+async function passwordSignIn(email: string, password: string) {
+  const { data, error } = await authSupabase.auth.signInWithPassword({ email, password })
+  return error || !data.session || !data.user ? null : { session: data.session, user: data.user }
+}
+async function authEmailForUser(userId: string) {
+  const { data } = await authSupabase.auth.admin.getUserById(userId)
+  return data.user?.email ?? null
+}
+async function loadLoginProfile(userId: string) {
+  return await supabase.from('profiles').select('id,role,full_name,username,phone_e164,theme_mode,selfie_required').eq('id', userId).single()
+}
+
 router.post('/login', loginLimit, loginAccountLimit, async (request, response) => {
   const parsed = credentialsSchema.safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Invalid credentials', details: parsed.error.flatten() })
   const credential = (parsed.data.email ?? parsed.data.username!).trim().toLowerCase()
-  let email = credential
-  let username = credential
-  if (!credential.includes('@')) {
-    const { data: usernameProfile } = await supabase.from('profiles').select('id,username').ilike('username', escapeIlike(credential)).maybeSingle()
-    let matchedEmail: string | undefined
-    if (usernameProfile) {
-      const { data: authUser } = await authSupabase.auth.admin.getUserById(usernameProfile.id)
-      matchedEmail = authUser.user?.email ?? undefined
-      username = usernameProfile.username ?? credential
-    }
-    // An unknown username still goes through the password check so both cases take similar time.
-    email = matchedEmail ?? unmatchedLoginEmail
-  }
-  const { data, error } = await authSupabase.auth.signInWithPassword({ email, password: parsed.data.password })
-  if (error || !data.session || !data.user) return response.status(401).json({ error: 'Invalid credentials' })
-  const { data: profile, error: profileError } = await supabase.from('profiles').select('id,role,full_name,username,phone_e164,theme_mode,selfie_required').eq('id', data.user.id).single()
+  const resolution = await resolveLoginEmail(credential, {
+    findProfileByUsername: async (username) => {
+      const { profile, error } = await findProfileByUsername(supabase, username)
+      if (error) logFailure('login.username_lookup_failed', response.locals.requestId, error)
+      return profile
+    },
+    getAuthEmail: authEmailForUser,
+  })
+  // For a known account the profile read does not depend on the password check, so it starts now.
+  // Its result is used only when the signed-in user is that same account.
+  const earlyProfile = resolution.profileId ? loadLoginProfile(resolution.profileId) : null
+  earlyProfile?.catch(() => undefined)
+  const { signedIn } = await signInWithFallback(resolution, (email) => passwordSignIn(email, parsed.data.password), authEmailForUser)
+  if (!signedIn || !signedInAsCredential(resolution, signedIn.user.id)) return response.status(401).json({ error: 'Invalid credentials' })
+  const { session, user: authUser } = signedIn
+  const { data: profile, error: profileError } = earlyProfile && resolution.profileId === authUser.id ? await earlyProfile : await loadLoginProfile(authUser.id)
   if (profileError || !profile) return response.status(403).json({ error: 'Account profile is unavailable.' })
   if (profile.role === 'vendor') {
     const { data: vendor, error: vendorLookupError } = await supabase.from('vendors').select('id').eq('owner_profile_id', profile.id).maybeSingle()
     if (vendorLookupError) return response.status(500).json({ error: 'Vendor profile could not be checked.' })
     if (!vendor) {
-      const rawPhone = profile.phone_e164 ?? (typeof data.user.user_metadata?.phone === 'string' ? data.user.user_metadata.phone : null) ?? data.user.phone
+      const rawPhone = profile.phone_e164 ?? (typeof authUser.user_metadata?.phone === 'string' ? authUser.user_metadata.phone : null) ?? authUser.phone
       const phone = rawPhone ? toE164IndianMobile(rawPhone) : null
       if (phone) {
         const { error: vendorCreateError } = await supabase.from('vendors').insert({
@@ -409,9 +424,9 @@ router.post('/login', loginLimit, loginAccountLimit, async (request, response) =
       }
     }
   }
-  setRefreshCookie(response, data.session.refresh_token)
-  const user = { id: data.user.id, email: data.user.email, username: profile.username ?? username ?? data.user.email, name: profile.full_name ?? data.user.email, role: profile.role ?? 'customer', themeMode: profile.theme_mode ?? 'system', selfieRequired: profile.selfie_required === true }
-  return response.json({ accessToken: data.session.access_token, ...refreshTokenForClient(request.header('x-client-platform'), data.session.refresh_token), user })
+  setRefreshCookie(response, session.refresh_token)
+  const user = { id: authUser.id, email: authUser.email, username: profile.username ?? resolution.username, name: profile.full_name ?? authUser.email, role: profile.role ?? 'customer', themeMode: profile.theme_mode ?? 'system', selfieRequired: profile.selfie_required === true }
+  return response.json({ accessToken: session.access_token, ...refreshTokenForClient(request.header('x-client-platform'), session.refresh_token), user })
 })
 
 router.post('/signup', signupLimit, signupEmailLimit, async (request, response) => {
@@ -442,7 +457,7 @@ router.post('/signup', signupLimit, signupEmailLimit, async (request, response) 
     password: parsed.data.password,
     options: {
       data: { full_name: parsed.data.name, role: 'customer', username },
-      redirectTo: `${config.FRONTEND_ORIGIN}/login`,
+      redirectTo: config.APP_EMAIL_REDIRECT_URL,
     },
   })
   if (error) {
@@ -455,6 +470,7 @@ router.post('/signup', signupLimit, signupEmailLimit, async (request, response) 
     full_name: parsed.data.name,
     username,
     role: 'customer',
+    email: parsed.data.email.toLowerCase(),
     signup_platform: signupPlatform,
     theme_mode: themeMode,
   })
@@ -503,15 +519,16 @@ router.post('/signup', signupLimit, signupEmailLimit, async (request, response) 
     return response.status(502).json({ error: 'We could not create an email confirmation link. Please try again.' })
   }
   const confirmation = signupConfirmationEmail(parsed.data.name, actionLink)
-  void (async () => {
-    try {
-      const delivery = await sendEmail(parsed.data.email, confirmation.subject, confirmation.html)
-      if (!delivery.queued) throw new Error(delivery.reason)
-    } catch (deliveryError) {
-      const cleanedUp = await cleanupUnconfirmedAccount().catch(() => false)
-      console.error(JSON.stringify({ event: 'signup.confirmation_email_failed', requestId: response.locals.requestId, userId, error: mailErrorCode(deliveryError), cleanedUp }))
-    }
-  })()
+  // The mail is sent before the reply. If it fails, the account is removed, so
+  // the app never shows "check your inbox" for an email that was not sent.
+  const delivery = await sendSignupConfirmation({
+    send: () => sendEmail(parsed.data.email, confirmation.subject, confirmation.html),
+    rollback: cleanupUnconfirmedAccount,
+  })
+  if (!delivery.sent) {
+    console.error(JSON.stringify({ event: 'signup.confirmation_email_failed', requestId: response.locals.requestId, userId, error: delivery.reason, cleanedUp: delivery.cleanedUp }))
+    return response.status(502).json({ error: 'We could not send your confirmation email. Please try again in a few minutes.' })
+  }
 
   response.status(201).json({ requiresEmailVerification: true, emailSent: true, userId, signupPlatform, themeMode })
 })
@@ -560,6 +577,8 @@ router.post('/password-update', passwordUpdateLimit, async (request, response) =
     logFailure('auth.password_update_failed', response.locals.requestId, updateError.message)
     return response.status(500).json({ error: 'The password could not be updated. Please try again.' })
   }
+  // Every token issued before this point stops working here, including the recovery session that made this request.
+  await revokeUserTokens(data.user.id)
   const { error: signOutError } = await authSupabase.auth.admin.signOut(parsed.data.accessToken, 'others')
   if (signOutError) logFailure('auth.password_update_signout_failed', response.locals.requestId, signOutError.message)
   return response.json({ updated: true })
@@ -598,6 +617,14 @@ router.patch('/preferences', requireAuth, async (request, response) => {
 })
 
 // Revokes every session for the user. Without an access token, the refresh cookie or body token is exchanged for one first.
+// Records the revocation before Supabase is asked, so a token that is still valid there stops working here at once.
+async function revokeAccessToken(accessToken: string) {
+  const identity = await resolveIdentity(accessToken).catch(() => null)
+  if (!identity) return
+  await revokeUserTokens(identity.id)
+  if (identity.sessionId) await revokeSession(identity.sessionId)
+}
+
 router.post('/logout', async (request, response) => {
   if (!originAllowed(request)) return response.status(403).json({ error: 'Request origin is not allowed.' })
   let accessToken = bearerToken(request)
@@ -609,6 +636,7 @@ router.post('/logout', async (request, response) => {
     }
   }
   if (accessToken) {
+    await revokeAccessToken(accessToken)
     const { error } = await authSupabase.auth.admin.signOut(accessToken, 'global').catch((signOutError: unknown) => ({ error: { message: signOutError instanceof Error ? signOutError.message : 'unknown' } }))
     if (error) {
       logFailure('auth.logout_failed', response.locals.requestId, error.message)

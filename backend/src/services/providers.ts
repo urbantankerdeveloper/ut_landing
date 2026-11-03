@@ -27,6 +27,12 @@ export async function sendEmail(to: string, subject: string, html: string) {
   return { queued: true }
 }
 
+/// A short code for logs: the SMTP error code when there is one, never the message text.
+export function mailErrorCode(error: unknown) {
+  const code = (error as { code?: unknown } | null)?.code
+  return typeof code === 'string' ? code : 'unknown'
+}
+
 export async function sendSms(to: string, body: string) {
   const sid = config.TWILIO_ACCOUNT_SID
   const token = config.TWILIO_AUTH_TOKEN
