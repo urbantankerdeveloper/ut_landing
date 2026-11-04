@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { requireAuth } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
+import { logger } from '../lib/logger.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -33,7 +34,7 @@ router.post('/signed-url', async (request, response) => {
   const safePath = `${request.authUser!.id}/${relativePath}`
   const { data, error } = await supabase.storage.from(documentBucket).createSignedUploadUrl(safePath)
   if (error) {
-    console.error(JSON.stringify({ event: 'uploads.signed_url_failed', requestId: response.locals.requestId, error: error.message }))
+    logger.error('uploads.signed_url_failed', { requestId: response.locals.requestId, error: error.message })
     return response.status(400).json({ error: 'The upload could not be prepared. Please try again.' })
   }
   response.json({ path: safePath, token: data.token, signedUrl: data.signedUrl, contentType: parsed.data.contentType, maxBytes: maxUploadBytes })
@@ -48,7 +49,7 @@ router.delete('/:bucket/*path', async (request, response) => {
   const path = `${request.authUser!.id}/${relativePath}`
   const { error } = await supabase.storage.from(documentBucket).remove([path])
   if (error) {
-    console.error(JSON.stringify({ event: 'uploads.remove_failed', requestId: response.locals.requestId, error: error.message }))
+    logger.error('uploads.remove_failed', { requestId: response.locals.requestId, error: error.message })
     return response.status(400).json({ error: 'The upload could not be removed. Please try again.' })
   }
   response.status(204).send()

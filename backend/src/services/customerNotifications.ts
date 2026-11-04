@@ -1,4 +1,5 @@
 import { supabase } from '../supabase.js'
+import { logger } from '../lib/logger.js'
 import { emitRealtimeToUser } from './realtime.js'
 import { sendPushNotification } from './pushNotifications.js'
 
@@ -16,10 +17,9 @@ export async function notifyCustomer(input: NotificationInput) {
     title: input.title,
     body: input.detail,
     data: { eventType: input.eventType, ...(input.bookingId ? { bookingId: input.bookingId } : {}) },
-  }).catch((error) => console.warn(JSON.stringify({
-    event: 'notification.push_failed',
+  }).catch((error) => logger.warn('notification.push_failed', {
     recipientId: input.customerId,
     error: error instanceof Error ? error.message : 'Unknown error',
-  })))
+  }))
   return data
 }

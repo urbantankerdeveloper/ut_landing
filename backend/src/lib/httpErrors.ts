@@ -1,4 +1,5 @@
 import type { Response } from 'express'
+import { logger } from './logger.js'
 
 export function describeError(error: unknown) {
   if (error instanceof Error) return error.message
@@ -7,7 +8,7 @@ export function describeError(error: unknown) {
 }
 
 export function failure(response: Response, status: number, message: string, event?: string, error?: unknown) {
-  if (event) console.warn(JSON.stringify({ event, requestId: response.locals.requestId, status, error: error === undefined ? undefined : describeError(error) }))
+  if (event) logger.warn(event, { requestId: response.locals.requestId, status, error: error === undefined ? undefined : describeError(error) })
   return response.status(status).json({ error: message })
 }
 

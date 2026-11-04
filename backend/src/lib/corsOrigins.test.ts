@@ -13,8 +13,9 @@ describe('isAllowedCorsOrigin', () => {
     expect(isAllowedCorsOrigin('https://evil.example', allowed, 'production')).toBe(false)
   })
 
-  it('allows localhost only outside production', () => {
+  it('allows localhost on any port only outside production', () => {
     expect(isAllowedCorsOrigin('http://localhost:5173', allowed, 'development')).toBe(true)
+    expect(isAllowedCorsOrigin('http://localhost:50767', allowed, 'development')).toBe(true)
     expect(isAllowedCorsOrigin('http://localhost:5173', allowed, 'production')).toBe(false)
   })
 })

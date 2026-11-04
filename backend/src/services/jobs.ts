@@ -1,5 +1,6 @@
 import { supabase } from '../supabase.js'
 import { config } from '../config.js'
+import { logger } from '../lib/logger.js'
 import { databasePool } from '../database.js'
 import { runAnalyticsRetentionSweep } from '../routes/analytics.js'
 export async function runReminderSweep() { const cutoff = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); const { count, error } = await supabase.from('bookings').select('id', { count: 'exact', head: true }).eq('status', 'accepted').lte('scheduled_for', cutoff); if (error) throw new Error(`Reminder sweep failed: ${error.message}`); return count ?? 0 }
@@ -30,11 +31,11 @@ export function startBackgroundJobs() {
         const names = Object.keys(sweeps) as Array<keyof typeof sweeps>
         const results = await Promise.allSettled(names.map((name) => sweeps[name]()))
         results.forEach((result, index) => {
-          if (result.status === 'rejected') console.error(JSON.stringify({ event: 'background_jobs.job_failed', job: names[index], error: result.reason instanceof Error ? result.reason.message : String(result.reason) }))
+          if (result.status === 'rejected') logger.error('background_jobs.job_failed', { job: names[index], error: result.reason instanceof Error ? result.reason.message : String(result.reason) })
         })
       })
     } catch (error) {
-      console.error(JSON.stringify({ event: 'background_jobs.failed', error: error instanceof Error ? error.message : String(error) }))
+      logger.error('background_jobs.failed', { error: error instanceof Error ? error.message : String(error) })
     }
   }
   const timer = setInterval(() => { void run() }, 15 * 60 * 1000); timer.unref(); return () => clearInterval(timer)

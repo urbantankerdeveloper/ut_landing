@@ -1,4 +1,5 @@
 import { config } from '../config.js'
+import { logger } from '../lib/logger.js'
 import { supabase } from '../supabase.js'
 import { notifyCustomer } from './customerNotifications.js'
 import { notifyUser } from './providers.js'
@@ -62,7 +63,7 @@ export async function notifyCustomerSms(phoneE164: string | null | undefined, ke
   try {
     return await sendTemplateSms(key, phoneE164, vars)
   } catch (error) {
-    console.warn(JSON.stringify({ event: 'sms_failed', template: key, error: error instanceof Error ? error.message : 'unknown' }))
+    logger.warn('sms_failed', { template: key, error: error instanceof Error ? error.message : 'unknown' })
     return { queued: false, reason: 'SMS failed' }
   }
 }
@@ -70,7 +71,7 @@ export async function notifyCustomerSms(phoneE164: string | null | undefined, ke
 export async function notifyCustomerSmsById(customerId: string, key: SmsTemplateKey, vars: Record<string, string>) {
   const { data, error } = await supabase.from('profiles').select('phone_e164').eq('id', customerId).maybeSingle()
   if (error) {
-    console.warn(JSON.stringify({ event: 'sms_lookup_failed', template: key, error: error.message }))
+    logger.warn('sms_lookup_failed', { template: key, error: error.message })
     return { queued: false, reason: 'Profile lookup failed' }
   }
   return notifyCustomerSms(data?.phone_e164, key, vars)

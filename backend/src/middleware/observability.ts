@@ -1,5 +1,6 @@
 import crypto from 'node:crypto'
 import type { NextFunction, Request, Response } from 'express'
+import { logger } from '../lib/logger.js'
 
 // Tracking links carry a bearer-style token in the path. Log the route template instead of the token.
 export function loggablePath(path: string) {
@@ -28,9 +29,12 @@ export function requestObservability(slowRequestMs = 800) {
     response.on('finish', () => {
       const durationMs = roundMs(elapsedMs())
       const path = loggablePath(request.path)
-      console.info(JSON.stringify({ event: 'http.request', requestId, method: request.method, path, status: response.statusCode, durationMs }))
+      const fields = { requestId, method: request.method, path, status: response.statusCode, durationMs }
+      if (response.statusCode >= 500) logger.error('http.request', fields)
+      else if (response.statusCode >= 400) logger.warn('http.request', fields)
+      else logger.success('http.request', fields)
       if (slowRequestMs > 0 && durationMs >= slowRequestMs) {
-        console.warn(JSON.stringify({ event: 'slow_request', requestId, method: request.method, path, status: response.statusCode, durationMs, thresholdMs: slowRequestMs }))
+        logger.warn('slow_request', { ...fields, thresholdMs: slowRequestMs })
       }
     })
     next()

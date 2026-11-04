@@ -3,6 +3,7 @@ import { MemoryStore, type Options, type Store } from 'express-rate-limit'
 import { RedisStore } from 'rate-limit-redis'
 import { createClient, type RedisClientType } from 'redis'
 import { config } from '../config.js'
+import { logger } from '../lib/logger.js'
 
 export type RedisPair = { pub: RedisClientType; sub: RedisClientType }
 
@@ -26,7 +27,7 @@ function createRedisClient(url: string, disableOfflineQueue = false) {
     },
   })
   client.on('ready', () => { connectedOnce = true })
-  client.on('error', (error: Error) => console.error(JSON.stringify({ event: 'redis.error', error: error.message })))
+  client.on('error', (error: Error) => logger.error('redis.error', { error: error.message }))
   return client
 }
 
@@ -58,7 +59,7 @@ export function rateLimitStoreFor(redis: RedisPair | null, prefix = 'rl:api:') {
       try {
         return await redis.pub.sendCommand(args)
       } catch (error) {
-        console.error(JSON.stringify({ event: 'rate_limit.store_failed', prefix, error: error instanceof Error ? error.message : String(error) }))
+        logger.error('rate_limit.store_failed', { prefix, error: error instanceof Error ? error.message : String(error) })
         throw error
       }
     },
@@ -79,7 +80,7 @@ export function limiterStore(prefix: string, onRedisError: 'open' | 'memory' = '
     if (pair !== redisPair) {
       redisPair = pair
       redisStore = rateLimitStoreFor(pair, prefix) as RedisStore
-      if (options) void redisStore.init(options).catch((error: unknown) => console.error(JSON.stringify({ event: 'rate_limit.init_failed', prefix, error: error instanceof Error ? error.message : String(error) })))
+      if (options) void redisStore.init(options).catch((error: unknown) => logger.error('rate_limit.init_failed', { prefix, error: error instanceof Error ? error.message : String(error) }))
     }
     return redisStore
   }
@@ -90,7 +91,7 @@ export function limiterStore(prefix: string, onRedisError: 'open' | 'memory' = '
       return await operation(store)
     } catch (error) {
       if (onRedisError === 'open') throw error
-      console.error(JSON.stringify({ event: 'rate_limit.memory_fallback', prefix }))
+      logger.error('rate_limit.memory_fallback', { prefix })
       return operation(memory)
     }
   }
@@ -113,6 +114,6 @@ export async function closeRedisPair(redis: RedisPair | null) {
 
 export function warnIfSingleInstanceInProduction() {
   if (config.NODE_ENV === 'production' && !config.REDIS_URL) {
-    console.warn(JSON.stringify({ event: 'scaling.single_instance', message: 'REDIS_URL is not set. Run one API instance, or set REDIS_URL before adding instances.' }))
+    logger.warn('scaling.single_instance', { message: 'REDIS_URL is not set. Run one API instance, or set REDIS_URL before adding instances.' })
   }
 }

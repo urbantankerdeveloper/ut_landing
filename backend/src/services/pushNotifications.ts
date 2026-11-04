@@ -1,5 +1,6 @@
 import { config } from '../config.js'
 import { supabase } from '../supabase.js'
+import { logger } from '../lib/logger.js'
 
 export async function sendPushNotification(input: {
   recipientId: string
@@ -44,7 +45,7 @@ export async function sendPushNotification(input: {
       .update({ is_active: false })
       .eq('user_id', input.recipientId)
       .in('token', invalidTokens)
-    if (deactivateError) console.warn(JSON.stringify({ event: 'push.deactivate_failed', error: deactivateError.message }))
+    if (deactivateError) logger.warn('push.deactivate_failed', { error: deactivateError.message })
   }
   return { delivered: result.recipients ?? 0, configured: true, id: result.id }
 }

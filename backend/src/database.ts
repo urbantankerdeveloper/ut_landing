@@ -1,5 +1,6 @@
 import { Pool } from 'pg'
 import { config } from './config.js'
+import { logger } from './lib/logger.js'
 
 export const databasePool = config.SUPABASE_DB_URL
   ? new Pool({
@@ -14,7 +15,7 @@ export const databasePool = config.SUPABASE_DB_URL
 
 // An idle client that loses its connection emits 'error'. Without a listener the process would crash.
 databasePool?.on('error', (error) => {
-  console.error(JSON.stringify({ event: 'database.pool_error', error: error.message }))
+  logger.error('database.pool_error', { error: error.message })
 })
 
 export async function checkDatabaseConnection() {

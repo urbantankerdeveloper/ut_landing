@@ -12,6 +12,8 @@ import { sendTemplateSms } from '../services/sms.js'
 import { emailCodeEmail, passwordResetEmail } from '../services/signupEmail.js'
 import { hashOtp, otpMatches } from '../services/otp.js'
 import { config } from '../config.js'
+import { logger } from '../lib/logger.js'
+import { isAllowedCorsOrigin } from '../lib/corsOrigins.js'
 import { limiterStore } from '../services/scaling.js'
 
 const router = Router()
@@ -78,7 +80,7 @@ function setRefreshCookie(response: Response, token: string) { response.setHeade
 function clearRefreshCookie(response: Response) { response.setHeader('Set-Cookie', `refresh_token=; HttpOnly; Path=/api/auth; SameSite=${refreshCookieSameSite}; Max-Age=0${refreshCookieSecurity}`) }
 function originAllowed(request: Request) {
   const origin = request.header('origin')
-  return !origin || origin === config.FRONTEND_ORIGIN || config.CORS_ORIGINS.includes(origin)
+  return isAllowedCorsOrigin(origin, [config.FRONTEND_ORIGIN, ...config.CORS_ORIGINS], config.NODE_ENV)
 }
 function refreshTokenFromRequest(request: Request) {
   const bodyToken = typeof request.body?.refreshToken === 'string' ? request.body.refreshToken : undefined
@@ -88,7 +90,7 @@ function bearerToken(request: Request) {
   return request.headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1]
 }
 function logFailure(event: string, requestId: unknown, detail?: string) {
-  console.error(JSON.stringify({ event, requestId, error: detail }))
+  logger.error(event, { requestId, error: detail })
 }
 function mailErrorCode(error: unknown) {
   const code = (error as { code?: unknown } | null)?.code
@@ -799,7 +801,7 @@ router.post('/signup', signupLimit, signupEmailLimit, async (request, response) 
     const { error: deleteUserError } = await authSupabase.auth.admin.deleteUser(userId)
     if (removePhotoError || deleteProfileError || deleteUserError) {
       const errors = [removePhotoError?.message, deleteProfileError?.message, deleteUserError?.message].filter(Boolean).join('; ')
-      console.error(JSON.stringify({ event: 'signup.rollback_failed', userId, error: errors }))
+      logger.error('signup.rollback_failed', { userId, error: errors })
       return false
     }
     return true

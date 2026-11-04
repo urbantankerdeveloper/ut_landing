@@ -7,6 +7,7 @@
   },
   "scripts": {
     "db:check": "tsx src/scripts/db-check.ts",
+    "help": "tsx src/scripts/help.ts",
     "db:backup": "tsx src/scripts/backup-postgres.ts",
     "db:reset": "tsx src/scripts/reset-database.ts",
     "dev": "npm run db:check && tsx watch src/server.ts",

@@ -1,5 +1,6 @@
 import { getRedisPair } from './scaling.js'
 import { config } from '../config.js'
+import { logger } from '../lib/logger.js'
 
 // Read-mostly catalogs (services, offers, plans, feature flags). With REDIS_URL the entries live in Redis, so an admin change
 // invalidates every instance. Without it they live in process memory, bounded by MAX_LOCAL_ENTRIES.
@@ -35,13 +36,13 @@ export async function cachedCatalog<T>(name: string, load: () => Promise<T>, ttl
       const cached = await redis.pub.get(key)
       if (cached !== null) return JSON.parse(cached) as T
     } catch (error) {
-      console.error(JSON.stringify({ event: 'catalog_cache.read_failed', key, error: error instanceof Error ? error.message : String(error) }))
+      logger.error('catalog_cache.read_failed', { key, error: error instanceof Error ? error.message : String(error) })
     }
     const value = await load()
     try {
       await redis.pub.set(key, JSON.stringify(value), { PX: ttlMs })
     } catch (error) {
-      console.error(JSON.stringify({ event: 'catalog_cache.write_failed', key, error: error instanceof Error ? error.message : String(error) }))
+      logger.error('catalog_cache.write_failed', { key, error: error instanceof Error ? error.message : String(error) })
     }
     return value
   }
@@ -60,7 +61,7 @@ export async function invalidateCatalog(...names: string[]) {
   try {
     await redis.pub.del(names.map((name) => `${keyPrefix}${name}`))
   } catch (error) {
-    console.error(JSON.stringify({ event: 'catalog_cache.invalidate_failed', names, error: error instanceof Error ? error.message : String(error) }))
+    logger.error('catalog_cache.invalidate_failed', { names, error: error instanceof Error ? error.message : String(error) })
   }
 }
 

@@ -13,6 +13,7 @@ const optionalEmail = z.preprocess((value) => value === '' ? undefined : value, 
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production'], { error: 'NODE_ENV must be set to development, test, or production (see backend/.env.example)' }),
   PORT: z.coerce.number().default(8080),
+  LOG_LEVEL: z.enum(['error', 'warn', 'success', 'info', 'debug']).default('info'),
   FRONTEND_ORIGIN: z.string().default('http://localhost:5173').transform((value) => value.replace(/\/+$/, '')),
   CORS_ORIGINS: z.string().optional(),
   SUPABASE_URL: z.string().url(),

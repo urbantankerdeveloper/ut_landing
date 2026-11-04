@@ -4,6 +4,7 @@ import crypto from 'node:crypto'
 import { z } from 'zod'
 import { requireAuth, requireRole } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
+import { logger } from '../lib/logger.js'
 import { refundAmountInPaise, signaturesMatch } from '../services/paymentSecurity.js'
 import { failure } from '../lib/httpErrors.js'
 const router = Router()
@@ -73,12 +74,12 @@ router.post('/razorpay/webhook', async (request, response) => {
     const { data: payment, error: lookupError } = await supabase.from('payments').select('amount_paise').eq('provider_order_id', paymentEntity.order_id).maybeSingle()
     if (lookupError) return databaseFailure(response, 'payments.webhook_lookup_failed', lookupError, 500, 'Payment event could not be persisted')
     if (status === 'paid' && payment && paymentEntity.amount !== payment.amount_paise) {
-      console.error(JSON.stringify({ event: 'payment.amount_mismatch', providerOrderId: paymentEntity.order_id, capturedPaise: paymentEntity.amount, expectedPaise: payment.amount_paise }))
+      logger.error('payment.amount_mismatch', { providerOrderId: paymentEntity.order_id, capturedPaise: paymentEntity.amount, expectedPaise: payment.amount_paise })
       return response.status(202).json({ accepted: true })
     }
     const { data: updated, error } = await supabase.from('payments').update({ provider_payment_id: paymentEntity.id, status, raw_webhook: event, updated_at: new Date().toISOString() }).eq('provider_order_id', paymentEntity.order_id).in('status', ['pending', 'failed']).select('id')
     if (error) return databaseFailure(response, 'payments.webhook_update_failed', error, 500, 'Payment event could not be persisted')
-    if (!updated?.length) console.warn(JSON.stringify({ event: 'payment.webhook_no_matching_row', providerOrderId: paymentEntity.order_id, status }))
+    if (!updated?.length) logger.warn('payment.webhook_no_matching_row', { providerOrderId: paymentEntity.order_id, status })
   }
   response.status(202).json({ accepted: true })
 })

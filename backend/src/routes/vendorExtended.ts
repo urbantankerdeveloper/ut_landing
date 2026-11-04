@@ -9,6 +9,7 @@ import { notifyCustomerOfAssignment, notifyCustomerSmsById } from '../services/b
 import { transitionBooking, type BookingStatus } from '../services/bookingLifecycle.js'
 import { analyticsEventNames, recordAnalyticsEvent } from '../lib/analytics.js'
 import { failure } from '../lib/httpErrors.js'
+import { logger } from '../lib/logger.js'
 import { otpMatches } from '../services/otp.js'
 import { listWindow, sendList, type ListWindow } from '../lib/listParams.js'
 const exactCount = (range: ListWindow) => (range.mode === 'paged' ? { count: 'exact' as const } : undefined)
@@ -45,13 +46,13 @@ async function vendorOffer(ownerProfileId: string, bookingId: string) {
 async function markOtherVendorOffersTaken(bookingId: string, winnerVendorId: string, reference: string) {
   const { data: winner } = await supabase.from('vendors').select('owner_profile_id').eq('id', winnerVendorId).maybeSingle()
   const { data: offers, error } = await supabase.from('notifications').select('id,recipient_id,payload').eq('event_type', 'vendor_order_created').limit(500)
-  if (error) { console.warn(JSON.stringify({ event: 'vendor_order.offers_lookup_failed', bookingId, error: error.message })); return }
+  if (error) { logger.warn('vendor_order.offers_lookup_failed', { bookingId, error: error.message }); return }
   const matching = (offers ?? []).filter((offer) => (offer.payload as { bookingId?: string } | null)?.bookingId === bookingId)
   const losers = matching.filter((offer) => offer.recipient_id && offer.recipient_id !== winner?.owner_profile_id)
   for (const offer of losers) {
     const payload = { ...((offer.payload ?? {}) as Record<string, unknown>), outcome: 'accepted_elsewhere', winningVendorId: winnerVendorId }
     const { error: updateError } = await supabase.from('notifications').update({ event_type: 'vendor_order_taken', title: 'Order already accepted by another vendor', payload }).eq('id', offer.id)
-    if (updateError) { console.warn(JSON.stringify({ event: 'vendor_order.offer_update_failed', bookingId, error: updateError.message })); continue }
+    if (updateError) { logger.warn('vendor_order.offer_update_failed', { bookingId, error: updateError.message }); continue }
     const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', offer.recipient_id).maybeSingle()
     if (vendor) emitRealtimeToVendor(vendor.id, 'vendor.order.taken', { bookingId, reference, status: 'unavailable', message: 'Already accepted by another vendor.' })
   }
@@ -119,7 +120,7 @@ async function handleVendorOrderTransition(request: Request, response: Response)
   if (customerId) emitRealtimeToUser(customerId, 'notification.created', { bookingId: current.id, status: requestedStatus })
   return response.json(data)
 }
-async function shareAssignment(data: Record<string, unknown>) { try { await notifyCustomerOfAssignment(data as Parameters<typeof notifyCustomerOfAssignment>[0]) } catch (error) { console.warn(JSON.stringify({ event: 'booking.assignment_notification_failed', bookingId: data.id, error: error instanceof Error ? error.message : 'Unknown error' })) } }
+async function shareAssignment(data: Record<string, unknown>) { try { await notifyCustomerOfAssignment(data as Parameters<typeof notifyCustomerOfAssignment>[0]) } catch (error) { logger.warn('booking.assignment_notification_failed', { bookingId: data.id, error: error instanceof Error ? error.message : 'Unknown error' }) } }
 router.post('/offline-mutations', async (request, response) => { const parsed = z.object({ mutationType: z.string().min(2), entityType: z.string().min(2), entityId: z.string().uuid().optional(), payload: z.record(z.string(), z.unknown()).default({}), clientVersion: z.number().int().positive().default(1) }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid offline mutation' }); const { data, error } = await supabase.from('offline_mutations').insert({ actor_id: request.authUser!.id, mutation_type: parsed.data.mutationType, entity_type: parsed.data.entityType, entity_id: parsed.data.entityId, payload: parsed.data.payload, client_version: parsed.data.clientVersion }).select().single(); if (error) return databaseFailure(response, 'vendorExtended.database_error', error, 400); response.status(201).json(data) })
 router.get('/offline-mutations', async (request, response) => { const { data, error } = await supabase.from('offline_mutations').select('*').eq('actor_id', request.authUser!.id).order('created_at', { ascending: false }).limit(100); if (error) return databaseFailure(response, 'vendorExtended.database_error', error, 500); response.json(data ?? []) })
 router.post('/offline-mutations/:id/retry', async (request, response) => { const { data, error } = await supabase.from('offline_mutations').update({ conflict_status: 'queued', last_error: null, updated_at: new Date().toISOString() }).eq('id', request.params.id).eq('actor_id', request.authUser!.id).select().single(); if (error) return databaseFailure(response, 'vendorExtended.database_error', error, 400); response.json(data) })

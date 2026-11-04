@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { databasePool } from '../database.js'
 import { databaseResetRefusal } from '../lib/databaseGuards.js'
+import { logger } from '../lib/logger.js'
 
 if (!databasePool) throw new Error('SUPABASE_DB_URL is required to reset the database.')
 const refusal = databaseResetRefusal(process.env)
@@ -19,7 +20,7 @@ try {
   } finally {
     client.release()
   }
-  console.log('Database reset and canonical install completed successfully.')
+  logger.success('database.reset_completed', { install: 'canonical' })
 } finally {
   await databasePool.end()
 }

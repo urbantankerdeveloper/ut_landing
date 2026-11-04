@@ -9,6 +9,8 @@ import rateLimit from 'express-rate-limit'
 import { createServer } from 'node:http'
 import { Server, type Socket } from 'socket.io'
 import { config } from './config.js'
+import { logger } from './lib/logger.js'
+import { startupBanner } from './lib/startupBanner.js'
 import { isAllowedCorsOrigin } from './lib/corsOrigins.js'
 import authRoutes from './routes/auth.js'
 import customerRoutes from './routes/customer.js'
@@ -101,7 +103,7 @@ async function handleConnection(socket: Socket) {
     try {
       await handler(...args)
     } catch (error) {
-      console.error(JSON.stringify({ event: 'realtime.handler_failed', socketEvent: event, userId: socket.data.userId, error: error instanceof Error ? error.message : String(error) }))
+      logger.error('realtime.handler_failed', { socketEvent: event, userId: socket.data.userId, error: error instanceof Error ? error.message : String(error) })
     }
   })
   socket.join(`customer:${socket.data.userId}`)
@@ -110,7 +112,7 @@ async function handleConnection(socket: Socket) {
     supabase.from('vendors').select('id').eq('owner_profile_id', socket.data.userId).maybeSingle(),
   ])
   if (profileError || vendorError) {
-    console.error(JSON.stringify({ event: 'realtime.user_context_failed', userId: socket.data.userId, profileError: profileError?.message, vendorError: vendorError?.message }))
+    logger.error('realtime.user_context_failed', { userId: socket.data.userId, profileError: profileError?.message, vendorError: vendorError?.message })
     socket.disconnect(true)
     return
   }
@@ -140,20 +142,20 @@ async function handleConnection(socket: Socket) {
       const isVendor = Boolean(vendor?.id && booking.vendor_id === vendor.id)
       if (isCustomer || isAdmin || isVendor) { joinedBookingRooms.add(bookingId); socket.join(`booking:${bookingId}`) }
     } catch (error) {
-      console.warn(JSON.stringify({ event: 'realtime.booking_room_join_failed', userId: socket.data.userId, error: error instanceof Error ? error.message : String(error) }))
+      logger.warn('realtime.booking_room_join_failed', { userId: socket.data.userId, error: error instanceof Error ? error.message : String(error) })
     }
   })
 }
 io.on('connection', (socket) => {
   handleConnection(socket).catch((error) => {
-    console.error(JSON.stringify({ event: 'realtime.connection_failed', userId: socket.data.userId, error: error instanceof Error ? error.message : String(error) }))
+    logger.error('realtime.connection_failed', { userId: socket.data.userId, error: error instanceof Error ? error.message : String(error) })
     socket.disconnect(true)
   })
 })
 setRealtimeServer(io)
 const stopBackgroundJobs = startBackgroundJobs()
 const shutdown = (signal: string) => {
-  console.info(JSON.stringify({ event: 'server.shutdown', signal }))
+  logger.info('server.shutdown', { signal })
   stopBackgroundJobs()
   io.close(() => httpServer.close(() => { void closeRedisPair(redis).finally(() => process.exit(0)) }))
   setTimeout(() => process.exit(1), 10_000).unref()
@@ -161,7 +163,13 @@ const shutdown = (signal: string) => {
 process.once('SIGTERM', () => shutdown('SIGTERM'))
 process.once('SIGINT', () => shutdown('SIGINT'))
 process.on('unhandledRejection', (reason) => {
-  console.error(JSON.stringify({ event: 'process.unhandled_rejection', error: reason instanceof Error ? reason.message : String(reason) }))
+  logger.error('process.unhandled_rejection', { error: reason instanceof Error ? reason.message : String(reason) })
 })
 warnIfSingleInstanceInProduction()
-httpServer.listen(config.PORT, () => console.log(`Urban Tanker API listening on ${config.PORT}`))
+httpServer.listen(config.PORT, () => {
+  if (config.NODE_ENV === 'development') {
+    console.log(startupBanner({ port: config.PORT, logLevel: config.LOG_LEVEL, frontendOrigin: config.FRONTEND_ORIGIN }))
+  } else {
+    logger.success('server.listening', { port: config.PORT, environment: config.NODE_ENV, logLevel: config.LOG_LEVEL })
+  }
+})

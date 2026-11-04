@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { supabase } from '../supabase.js'
+import { logger } from '../lib/logger.js'
 
 const maxPropertyKeyLength = 64
 const maxPropertyValueLength = 200
@@ -25,7 +26,7 @@ export async function recordAnalyticsEvent(eventName: string, properties: Record
     session_id: 'server',
     properties,
   })
-  if (error) console.error(JSON.stringify({ event: 'analytics.persist_failed', eventName, error: error.message }))
+  if (error) logger.error('analytics.persist_failed', { eventName, error: error.message })
 }
 
 export const analyticsEventNames = {

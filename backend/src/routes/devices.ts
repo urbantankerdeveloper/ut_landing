@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { requireAuth } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
+import { logger } from '../lib/logger.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -23,7 +24,7 @@ router.post('/register', async (request, response) => {
   }
   const { data: existing, error: lookupError } = await supabase.from('device_tokens').select('user_id').eq('token', parsed.data.token).maybeSingle()
   if (lookupError) {
-    console.error(JSON.stringify({ event: 'devices.lookup_failed', requestId: response.locals.requestId, error: lookupError.message }))
+    logger.error('devices.lookup_failed', { requestId: response.locals.requestId, error: lookupError.message })
     return response.status(500).json({ error: 'Device registration could not be saved.' })
   }
   if (existing && existing.user_id !== userId) return response.status(409).json({ error: 'This device is registered to another account.' })
@@ -31,7 +32,7 @@ router.post('/register', async (request, response) => {
   if (existing) {
     const { data, error } = await supabase.from('device_tokens').update(values).eq('token', parsed.data.token).eq('user_id', userId).select().single()
     if (error || !data) {
-      console.error(JSON.stringify({ event: 'devices.update_failed', requestId: response.locals.requestId, error: error?.message }))
+      logger.error('devices.update_failed', { requestId: response.locals.requestId, error: error?.message })
       return response.status(500).json({ error: 'Device registration could not be saved.' })
     }
     return response.status(201).json(data)
@@ -41,7 +42,7 @@ router.post('/register', async (request, response) => {
   if (error) {
     // A concurrent registration by another user wins the unique token, so the insert fails instead of reassigning it.
     if (error.code === '23505') return response.status(409).json({ error: 'This device is registered to another account.' })
-    console.error(JSON.stringify({ event: 'devices.insert_failed', requestId: response.locals.requestId, error: error.message }))
+    logger.error('devices.insert_failed', { requestId: response.locals.requestId, error: error.message })
     return response.status(500).json({ error: 'Device registration could not be saved.' })
   }
   response.status(201).json(data)
@@ -55,7 +56,7 @@ router.delete('/register', async (request, response) => {
     .eq('user_id', request.authUser!.id)
     .eq('token', parsed.data.token)
   if (error) {
-    console.error(JSON.stringify({ event: 'devices.deactivate_failed', requestId: response.locals.requestId, error: error.message }))
+    logger.error('devices.deactivate_failed', { requestId: response.locals.requestId, error: error.message })
     return response.status(400).json({ error: 'Device could not be removed.' })
   }
   response.status(204).send()

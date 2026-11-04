@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from 'express'
+import { logger } from '../lib/logger.js'
 import { supabase } from '../supabase.js'
 
 // Only these keys are copied into audit metadata. Anything else, including free text and contact details, is replaced.
@@ -49,9 +50,9 @@ export async function requireAuth(request: Request, response: Response, next: Ne
             server_version: response.statusCode,
             updated_at: new Date().toISOString(),
           }).eq('id', offlineId).eq('actor_id', data.user.id)
-          if (offlineError) console.warn(JSON.stringify({ event: 'offline_mutation.update_failed', requestId: response.locals.requestId, error: offlineError.message }))
+          if (offlineError) logger.warn('offline_mutation.update_failed', { requestId: response.locals.requestId, error: offlineError.message })
         })().catch((offlineError: unknown) => {
-          console.warn(JSON.stringify({ event: 'offline_mutation.update_failed', requestId: response.locals.requestId, error: offlineError instanceof Error ? offlineError.message : String(offlineError) }))
+          logger.warn('offline_mutation.update_failed', { requestId: response.locals.requestId, error: offlineError instanceof Error ? offlineError.message : String(offlineError) })
         })
       }
 
@@ -64,9 +65,9 @@ export async function requireAuth(request: Request, response: Response, next: Ne
           entity_id: typeof request.params.id === 'string' ? request.params.id : undefined,
           metadata: { status: response.statusCode, requestId: response.locals.requestId, before: null, after, offlineMutationId: offlineId },
         })
-        if (auditError) console.warn(JSON.stringify({ event: 'audit.write_failed', requestId: response.locals.requestId, error: auditError.message }))
+        if (auditError) logger.warn('audit.write_failed', { requestId: response.locals.requestId, error: auditError.message })
       })().catch((auditError: unknown) => {
-        console.warn(JSON.stringify({ event: 'audit.write_failed', requestId: response.locals.requestId, error: auditError instanceof Error ? auditError.message : String(auditError) }))
+        logger.warn('audit.write_failed', { requestId: response.locals.requestId, error: auditError instanceof Error ? auditError.message : String(auditError) })
       })
     })
   }

@@ -5,6 +5,7 @@ import rateLimit from 'express-rate-limit'
 import { z } from 'zod'
 import { requireAuth } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
+import { logger } from '../lib/logger.js'
 import { bookingSchema } from '../lib/schemas.js'
 import { quoteServices } from '../services/pricing.js'
 import { emitRealtimeToUser, emitRealtimeToVendor } from '../services/realtime.js'
@@ -40,11 +41,10 @@ function pushVendorOrder(ownerId: string, bookingId: string, reference: string) 
     title: 'New delivery request',
     body: `Booking ${reference} is ready for review.`,
     data: { eventType: 'vendor_order_created', bookingId },
-  }).catch((error) => console.warn(JSON.stringify({
-    event: 'vendor_order.push_failed',
+  }).catch((error) => logger.warn('vendor_order.push_failed', {
     bookingId,
     error: error instanceof Error ? error.message : 'Unknown error',
-  })))
+  }))
 }
 type GeoPoint = { latitude: number; longitude: number }
 type DispatchVendor = { id: string; owner_profile_id: string | null; service_zone: string; latitude: number | null; longitude: number | null }
