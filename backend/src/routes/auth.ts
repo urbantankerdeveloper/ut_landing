@@ -385,12 +385,26 @@ router.post('/guest/verify-otp', async (request, response) => {
 })
 
 router.post('/guest/verify-phone', requireAuth, async (request, response) => {
-  const parsed = z.object({ challengeId: z.string().uuid(), phone: phoneSchema, otp: z.string().regex(/^\d{6}$/) }).safeParse(request.body)
-  if (!parsed.success) return response.status(400).json({ error: 'Enter the verification code sent to this mobile number.' })
+  // Accepts the SMS code, the booking email code, or both. At least one pair is required, and every pair sent must verify.
+  const parsed = z.object({
+    challengeId: z.string().uuid().optional(),
+    phone: phoneSchema,
+    otp: z.string().regex(/^\d{6}$/).optional(),
+    email: emailSchema.optional(),
+    emailChallengeId: z.string().uuid().optional(),
+    emailOtp: emailCodeSchema.optional(),
+  }).safeParse(request.body)
+  const invalid = 'Enter the verification code sent to this mobile number or email.'
+  if (!parsed.success) return response.status(400).json({ error: invalid })
+  if (!parsed.data.challengeId && !parsed.data.emailChallengeId) return response.status(400).json({ error: invalid })
+  if (parsed.data.challengeId && !parsed.data.otp) return response.status(400).json({ error: 'Enter the verification code sent to this mobile number.' })
+  if (parsed.data.emailChallengeId && (!parsed.data.email || !parsed.data.emailOtp)) return response.status(400).json({ error: 'Enter the verification code sent to your email.' })
   const phone = toE164IndianMobile(parsed.data.phone)
   if (!phone) return response.status(400).json({ error: 'Enter the verification code sent to this mobile number.' })
-  if (!(await passesChallengeAttempt(response, parsed.data.challengeId, phone, parsed.data.otp))) return
-  if (!(await markChallengeVerified(response, parsed.data.challengeId))) return
+  if (parsed.data.challengeId && !(await passesChallengeAttempt(response, parsed.data.challengeId, phone, parsed.data.otp!))) return
+  if (parsed.data.emailChallengeId && !(await consumeEmailChallenge(response, parsed.data.emailChallengeId, parsed.data.email!, ['booking'], parsed.data.emailOtp!))) return
+  if (parsed.data.challengeId && !(await markChallengeVerified(response, parsed.data.challengeId))) return
+  if (parsed.data.emailChallengeId && !(await markEmailChallengeVerified(response, parsed.data.emailChallengeId))) return
   response.json({ verified: true })
 })
 

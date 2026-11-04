@@ -150,6 +150,37 @@ describe('POST /guest/request-otp', () => {
   })
 })
 
+describe('POST /guest/verify-phone (booking, signed in)', () => {
+  it('accepts the booking email code alone', async () => {
+    mocks.rpc.mockResolvedValue({ data: [{ otp_hash: hashOtp('123456'), purpose: 'booking', user_id: null }], error: null })
+    const response = await request(buildApp()).post('/guest/verify-phone').send({
+      phone: PHONE,
+      email: 'guest@example.com',
+      emailChallengeId: EMAIL_CHALLENGE,
+      emailOtp: '123456',
+    })
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ verified: true })
+  })
+
+  it('rejects a wrong email code', async () => {
+    mocks.rpc.mockResolvedValue({ data: [{ otp_hash: hashOtp('123456'), purpose: 'booking', user_id: null }], error: null })
+    const response = await request(buildApp()).post('/guest/verify-phone').send({
+      phone: PHONE,
+      email: 'guest@example.com',
+      emailChallengeId: EMAIL_CHALLENGE,
+      emailOtp: '654321',
+    })
+    expect(response.status).toBe(400)
+    expect(response.body.error).toBe('The verification code is incorrect.')
+  })
+
+  it('requires a code from either channel', async () => {
+    const response = await request(buildApp()).post('/guest/verify-phone').send({ phone: PHONE })
+    expect(response.status).toBe(400)
+  })
+})
+
 describe('POST /guest/verify-otp', () => {
   it('signs in a guest with the email code alone when SMS is off', async () => {
     mocks.rpc.mockResolvedValue({ data: [{ otp_hash: hashOtp('123456'), purpose: 'booking', user_id: null }], error: null })
