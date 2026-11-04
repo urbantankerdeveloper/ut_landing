@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 
-const base = { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k', SUPABASE_DB_URL: '', OTP_HMAC_SECRET: 'x'.repeat(32) }
+const base = { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k', SUPABASE_DB_URL: '', OTP_HMAC_SECRET: 'x'.repeat(32), CORS_ORIGINS: '', REQUIRE_BOOKING_PHONE_VERIFICATION: '' }
 
 describe('production configuration guards', () => {
   const original = { ...process.env }

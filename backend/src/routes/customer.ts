@@ -123,6 +123,13 @@ router.get('/phone-verification', async (request, response) => {
   if (profileError) return databaseFailure(response, 'customer.phone_verification_failed', profileError, 500)
   const phoneE164 = toE164IndianMobile(String(profile.phone_e164 ?? ''))
   if (!phoneE164) return response.json({ phone: '', verified: false, required: config.REQUIRE_BOOKING_PHONE_VERIFICATION })
+  if (!config.REQUIRE_BOOKING_PHONE_VERIFICATION) {
+    return response.json({
+      phone: phoneE164.slice(-10),
+      verified: true,
+      required: false,
+    })
+  }
   const { data: challenge, error } = await supabase.from('guest_otp_challenges').select('id').eq('phone_e164', phoneE164).not('verified_at', 'is', null).gte('verified_at', recentVerificationCutoff()).order('verified_at', { ascending: false }).limit(1).maybeSingle()
   if (error) return databaseFailure(response, 'customer.phone_verification_failed', error, 500)
   response.json({
