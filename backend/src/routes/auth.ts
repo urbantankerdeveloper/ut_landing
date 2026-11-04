@@ -121,7 +121,31 @@ async function issueOtpChallenge(response: Response, phone: string, template: 'b
       return response.status(502).json({ error: 'OTP delivery failed.' })
     }
   }
-  return response.status(202).json({ challengeId: challenge.id, expiresInSeconds: 600 })
+  return response.status(202).json({ challengeId: challenge.id, expiresInSeconds: 600, resendAfterSeconds: emailCodeResendAfterSeconds })
+}
+
+// Signup never fails because of SMS. When SMS is not configured the phone leg is reported as not sent and the email flow continues.
+async function sendPhoneOtpBestEffort(requestId: unknown, phone: string, template: 'booking_verification_otp' | 'user_registration_otp' = 'user_registration_otp'): Promise<{ sent: boolean; challengeId: string | null }> {
+  const otp = config.USE_DEFAULT_VERIFICATION_CODE ? config.DEFAULT_VERIFICATION_CODE : crypto.randomInt(100000, 1000000).toString()
+  const { data: challenge, error } = await supabase
+    .from('guest_otp_challenges')
+    .insert({ phone_e164: phone, otp_hash: hashOtp(otp), expires_at: new Date(Date.now() + 10 * minute).toISOString() })
+    .select('id')
+    .single()
+  if (error || !challenge) {
+    logFailure('signup.phone_challenge_failed', requestId, error?.message)
+    return { sent: false, challengeId: null }
+  }
+  if (config.USE_DEFAULT_VERIFICATION_CODE) return { sent: true, challengeId: challenge.id }
+  try {
+    const delivery = await sendTemplateSms(template, phone, { otp })
+    if (delivery.queued) return { sent: true, challengeId: challenge.id }
+    logFailure('signup.phone_not_sent', requestId, 'reason' in delivery ? delivery.reason : undefined)
+  } catch (deliveryError) {
+    logFailure('signup.phone_delivery_failed', requestId, deliveryError instanceof Error ? deliveryError.message : undefined)
+  }
+  await supabase.from('guest_otp_challenges').delete().eq('id', challenge.id)
+  return { sent: false, challengeId: null }
 }
 
 // The attempt counter is incremented atomically in SQL before the code is compared, so guesses cannot race past the limit.
@@ -165,7 +189,7 @@ async function markChallengeVerified(response: Response, challengeId: string): P
   return true
 }
 
-type EmailCodePurpose = 'sign_in' | 'signup' | 'link'
+type EmailCodePurpose = 'sign_in' | 'signup' | 'link' | 'booking'
 type EmailChallengeRow = { otp_hash: string; purpose: EmailCodePurpose; user_id: string | null }
 type AuthUserLookup = { user: { id: string; email_confirmed: boolean } | null; error: string | null }
 
@@ -184,7 +208,7 @@ type IssuedEmailCode = { ok: true; challengeId: string } | { ok: false; status: 
 
 async function issueEmailCode(requestId: unknown, email: string, purpose: EmailCodePurpose, userId: string | null): Promise<IssuedEmailCode> {
   if (!isEmailConfigured()) return { ok: false, status: 503, error: 'Email sign-in is unavailable right now.' }
-  const otp = crypto.randomInt(100000, 1000000).toString()
+  const otp = config.USE_DEFAULT_VERIFICATION_CODE ? config.DEFAULT_VERIFICATION_CODE : crypto.randomInt(100000, 1000000).toString()
   const { data: challenge, error } = await supabase
     .from('email_otp_challenges')
     .insert({ email, purpose, user_id: userId, otp_hash: hashOtp(otp), expires_at: new Date(Date.now() + emailCodeExpiresInSeconds * 1000).toISOString() })
@@ -194,6 +218,8 @@ async function issueEmailCode(requestId: unknown, email: string, purpose: EmailC
     logFailure('email.challenge_create_failed', requestId, error?.message)
     return { ok: false, status: 500, error: 'The verification code could not be created.' }
   }
+  // Same as SMS: the default-code mode skips real delivery (local and test only, enforced in config).
+  if (config.USE_DEFAULT_VERIFICATION_CODE) return { ok: true, challengeId: challenge.id }
   const template = emailCodeEmail(otp, purpose)
   try {
     const delivery = await sendEmail(email, template.subject, template.html)
@@ -292,20 +318,47 @@ type ProfileRow = {
 }
 
 router.post('/guest/request-otp', otpRequestLimit, otpPhoneLimit, async (request, response) => {
-  const parsed = z.object({ phone: phoneSchema }).safeParse(request.body)
+  const parsed = z.object({ phone: phoneSchema, email: emailSchema.optional() }).safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
   const phone = toE164IndianMobile(parsed.data.phone)
   if (!phone) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
-  return issueOtpChallenge(response, phone, 'booking_verification_otp')
+  if (!parsed.data.email) return issueOtpChallenge(response, phone, 'booking_verification_otp')
+
+  // With an email, the code goes to both channels. When SMS is off, the email code alone verifies the booking.
+  const phoneCode = await sendPhoneOtpBestEffort(response.locals.requestId, phone, 'booking_verification_otp')
+  const emailCode = await issueEmailCode(response.locals.requestId, parsed.data.email, 'booking', null)
+  if (!phoneCode.sent && !emailCode.ok) {
+    return response.status(503).json({ error: 'Verification codes could not be sent. Check your mobile number and email, then try again.' })
+  }
+  return response.status(202).json({
+    challengeId: phoneCode.challengeId,
+    phoneOtpSent: phoneCode.sent,
+    emailChallengeId: emailCode.ok ? emailCode.challengeId : null,
+    emailOtpSent: emailCode.ok,
+    expiresInSeconds: emailCodeExpiresInSeconds,
+  })
 })
 
 router.post('/guest/verify-otp', async (request, response) => {
-  const parsed = z.object({ challengeId: z.string().uuid(), phone: phoneSchema, otp: z.string().regex(/^\d{6}$/), name: z.string().min(2).max(60).optional() }).safeParse(request.body)
-  if (!parsed.success) return response.status(400).json({ error: 'Enter the verification code sent to your mobile.' })
+  const parsed = z.object({
+    challengeId: z.string().uuid().optional(),
+    phone: phoneSchema,
+    otp: z.string().regex(/^\d{6}$/).optional(),
+    email: emailSchema.optional(),
+    emailChallengeId: z.string().uuid().optional(),
+    emailOtp: emailCodeSchema.optional(),
+    name: z.string().min(2).max(60).optional(),
+  }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Enter the verification code sent to your mobile or email.' })
+  if (!parsed.data.challengeId && !parsed.data.emailChallengeId) return response.status(400).json({ error: 'Enter the verification code sent to your mobile or email.' })
+  if (parsed.data.challengeId && !parsed.data.otp) return response.status(400).json({ error: 'Enter the verification code sent to your mobile.' })
+  if (parsed.data.emailChallengeId && (!parsed.data.email || !parsed.data.emailOtp)) return response.status(400).json({ error: 'Enter the verification code sent to your email.' })
   const phone = toE164IndianMobile(parsed.data.phone)
   if (!phone) return response.status(400).json({ error: 'Enter the verification code sent to your mobile.' })
-  if (!(await passesChallengeAttempt(response, parsed.data.challengeId, phone, parsed.data.otp))) return
-  if (!(await markChallengeVerified(response, parsed.data.challengeId))) return
+  if (parsed.data.challengeId && !(await passesChallengeAttempt(response, parsed.data.challengeId, phone, parsed.data.otp!))) return
+  if (parsed.data.emailChallengeId && !(await consumeEmailChallenge(response, parsed.data.emailChallengeId, parsed.data.email!, ['booking'], parsed.data.emailOtp!))) return
+  if (parsed.data.challengeId && !(await markChallengeVerified(response, parsed.data.challengeId))) return
+  if (parsed.data.emailChallengeId && !(await markEmailChallengeVerified(response, parsed.data.emailChallengeId))) return
 
   const password = crypto.randomBytes(24).toString('base64url')
   const email = `guest-${parsed.data.phone}-${crypto.randomBytes(6).toString('hex')}@guest.urbantanker.local`
@@ -764,12 +817,16 @@ router.post('/signup', signupLimit, signupEmailLimit, async (request, response) 
     return response.status(code.status).json({ error: code.error })
   }
 
+  const phoneCode = await sendPhoneOtpBestEffort(response.locals.requestId, parsed.data.phone)
+
   response.status(201).json({
     requiresEmailVerification: true,
     emailSent: true,
     challengeId: code.challengeId,
     expiresInSeconds: emailCodeExpiresInSeconds,
     resendAfterSeconds: emailCodeResendAfterSeconds,
+    phoneOtpSent: phoneCode.sent,
+    phoneChallengeId: phoneCode.challengeId,
     userId,
     signupPlatform,
     themeMode,

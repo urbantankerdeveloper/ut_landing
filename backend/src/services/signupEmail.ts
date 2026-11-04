@@ -17,11 +17,12 @@ export function signupConfirmationEmail(name: string, actionLink: string) {
   }
 }
 
-export function emailCodeEmail(code: string, purpose: 'sign_in' | 'signup' | 'link') {
+export function emailCodeEmail(code: string, purpose: 'sign_in' | 'signup' | 'link' | 'booking') {
   const intro = {
     sign_in: 'Use this code to sign in to Urban Tanker.',
     signup: 'Use this code to confirm your email address and finish creating your account.',
     link: 'Use this code to confirm the new email address on your Urban Tanker account.',
+    booking: 'Use this code to verify your mobile number and continue your Urban Tanker booking.',
   }[purpose]
   const subject = purpose === 'sign_in' ? 'Your Urban Tanker sign-in code' : 'Your Urban Tanker verification code'
   return {

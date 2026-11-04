@@ -1137,7 +1137,7 @@ on conflict (key) do update set value = excluded.value, updated_at = now();
 create table if not exists public.email_otp_challenges (
   id uuid primary key default gen_random_uuid(),
   email text not null,
-  purpose text not null check (purpose in ('sign_in', 'signup', 'link')),
+  purpose text not null check (purpose in ('sign_in', 'signup', 'link', 'booking')),
   user_id uuid,
   otp_hash text not null,
   expires_at timestamptz not null,

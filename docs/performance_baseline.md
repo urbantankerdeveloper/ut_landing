@@ -70,13 +70,13 @@ Status key: **C** = confirmed, **P** = partly true, **R** = refuted.
 
 ## Existing indexes vs the Phase 3 list
 
-The Phase 3 index list must not duplicate what exists. Status is based on the index names in `backend/supabase/001_initial.sql` and `002_security_hardening.sql`. Definitions must be checked before the migration is written.
+The Phase 3 index list must not duplicate what exists. Status is based on the index names in `backend/supabase/001_initial.sql`. Definitions must be checked before the migration is written.
 
 | Requested index | Status |
 |---|---|
 | `bookings (customer_id, created_at desc)` | Exists: `bookings_customer_created_idx` (001) |
 | `bookings (vendor_id, created_at desc)` | Exists: `bookings_vendor_created_idx` (001) |
-| `bookings (status, scheduled_for)` | Partly: `bookings_accepted_scheduled_for_idx` (002), `bookings_status_created_idx` (002). Verify definitions. |
+| `bookings (status, scheduled_for)` | Partly: `bookings_accepted_scheduled_for_idx` and `bookings_status_created_idx` (001). Verify definitions. |
 | `bookings (tracking_token_hash)` | Exists: `bookings_tracking_token_hash_idx` (001) |
 | `notifications (recipient_id, created_at desc)` | Exists: `notifications_recipient_created_idx` (001) |
 | `notifications (booking_id)` | Missing. Needs the new column first (Phase 3.2). |
