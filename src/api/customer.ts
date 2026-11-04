@@ -120,6 +120,8 @@ export const customerApi = {
   },
   phoneVerification: () => apiFetch<CustomerPhoneVerification>('/customer/phone-verification'),
   services: () => apiFetch<CustomerService[]>('/customer/services'),
+  pricing: () => apiFetch<{ gstPercentage: number; gstRate: number; gstWaived?: boolean }>('/customer/pricing'),
+  pricingForCustomer: () => apiFetch<{ gstPercentage: number; gstRate: number; gstWaived: boolean }>('/customer/pricing/me'),
   createBooking: (payload: CreateBookingPayload) => apiFetch<{ id: string; quotedAmountPaise?: number }>('/customer/orders/quote', { method: 'POST', body: JSON.stringify(payload) }),
   tracking: (orderId: string) => apiFetch<TrackingSnapshot>(`/customer/orders/${orderId}/tracking`),
   publicTracking: (token: string) => apiFetch<PublicTracking>(`/public/tracking/${encodeURIComponent(token)}`),

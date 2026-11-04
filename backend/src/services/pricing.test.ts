@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildVendorPayouts, isServiceInEffectiveWindow, sumServiceItemPrices } from './pricingMath.js'
-import { quoteServices } from './pricing.js'
+import { GST_PERCENTAGE, GST_RATE, quoteServices } from './pricing.js'
 
 const mock = vi.hoisted(() => ({ tables: new Map<string, { data: unknown; error: unknown }>() }))
 vi.mock('../supabase.js', () => {
@@ -18,6 +18,11 @@ vi.mock('../supabase.js', () => {
 })
 
 describe('service item pricing', () => {
+  it('derives the GST rate from APPLIED_GST_PERCENTAGE', () => {
+    expect(GST_PERCENTAGE).toBe(18)
+    expect(GST_RATE).toBe(0.18)
+  })
+
   it('charges each repeated service item', () => {
     expect(sumServiceItemPrices(['water_tanker', 'water_tanker'], [
       { code: 'water_tanker', base_price_paise: 250000 },
@@ -119,7 +124,32 @@ describe('quoteServices', () => {
 
   it('prices a flat coupon and returns the coupon id', async () => {
     seed({ service_catalog: { data: [waterTanker] }, coupons: { data: { id: 'c1', discount_type: 'flat', discount_value: 100, valid_until: null } } })
-    await expect(quoteServices([{ serviceId: 'water_tanker' }], 'save100', 'customer-1')).resolves.toEqual({ subtotalPaise: 250000, gstPaise: 45000, discountPaise: 10000, totalPaise: 285000, couponId: 'c1' })
+    await expect(quoteServices([{ serviceId: 'water_tanker' }], 'save100', 'customer-1')).resolves.toEqual({ subtotalPaise: 250000, gstPaise: 45000, gstRate: 0.18, discountPaise: 10000, totalPaise: 285000, couponId: 'c1' })
+  })
+  it('charges no GST when the customer has an active subscription or membership', async () => {
+    seed({ service_catalog: { data: [waterTanker] }, subscriptions: { data: { id: 's1' } } })
+    await expect(quoteServices([{ serviceId: 'water_tanker' }], undefined, 'customer-1')).resolves.toEqual({ subtotalPaise: 250000, gstPaise: 0, gstRate: 0, discountPaise: 0, totalPaise: 250000, couponId: undefined })
+    seed({ service_catalog: { data: [waterTanker] }, customer_memberships: { data: { id: 'm1' } } })
+    await expect(quoteServices([{ serviceId: 'water_tanker' }], undefined, 'customer-1')).resolves.toMatchObject({ gstPaise: 0, gstRate: 0, totalPaise: 250000 })
+  })
+  it('keeps GST for guests even when the tables have active plans', async () => {
+    seed({ service_catalog: { data: [waterTanker] }, subscriptions: { data: { id: 's1' } } })
+    await expect(quoteServices([{ serviceId: 'water_tanker' }])).resolves.toMatchObject({ gstPaise: 45000, gstRate: 0.18 })
+  })
+  it('applies GST to the combined subtotal of all selected services', async () => {
+    seed({ service_catalog: { data: [
+      waterTanker,
+      { code: 'tank_cleaning', base_price_paise: 180000, config: {} },
+    ] } })
+    await expect(quoteServices([
+      { serviceId: 'water_tanker' },
+      { serviceId: 'tank_cleaning' },
+    ])).resolves.toMatchObject({
+      subtotalPaise: 430000,
+      gstPaise: 77400,
+      gstRate: 0.18,
+      totalPaise: 507400,
+    })
   })
   it('rejects a coupon past its expiry date', async () => {
     seed({ service_catalog: { data: [waterTanker] }, coupons: { data: { id: 'c1', discount_type: 'flat', discount_value: 100, valid_until: '2020-01-01T00:00:00Z' } } })

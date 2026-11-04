@@ -350,7 +350,8 @@ export const bookingContent = {
   payment: {
     verifiedNote: 'This shared number is verified and will receive booking updates and delivery OTPs.',
     services: 'Services',
-    gst: 'GST (18%)',
+    gst: (percentage?: number) => percentage === undefined ? 'GST' : `GST (${percentage}%)`,
+    gstWaived: 'GST waived',
     couponDiscount: 'Coupon discount',
     total: 'Total',
     inr: (amount: string) => `INR ${amount}`,

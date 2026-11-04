@@ -5,7 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { ArrowLeft, ArrowRight, Check, CreditCard, Crosshair, MapPin, Phone, Plus, Trash2, Wallet } from 'lucide-react'
 import { useAppNavigation } from '../routing/useAppNavigation'
-import { useCreateCustomerAddress, useCreateCustomerBooking, useCustomerAddresses, useCustomerOffers, useCustomerPhoneVerification, useCustomerServices } from '../hooks/useCustomerData'
+import { useCreateCustomerAddress, useCreateCustomerBooking, useCustomerAddresses, useCustomerOffers, useCustomerPhoneVerification, useCustomerPricing, useCustomerServices } from '../hooks/useCustomerData'
 import { useCouponValidation, useRazorpayPayment } from '../hooks/useFrontendFeatures'
 import { useAuthStore } from '../stores/authStore'
 import { customerApi, type BookingPaymentMethod, type BookingServiceDetails, type CustomerBooking, type SavedAddress } from '../api/customer'
@@ -20,7 +20,6 @@ import { bookingContent as c } from '../content/booking'
 
 const LocationPickerModal = lazyWithRetry(() => import('../components/LocationPickerModal').then((module) => ({ default: module.LocationPickerModal })))
 
-const GST_RATE = 0.18
 type Step = 'details' | 'review' | 'payment' | 'success'
 
 type CouponRecord = { discount_type?: string; discount_value?: number | string; discount?: number | string }
@@ -280,6 +279,10 @@ export default function BookingScreen() {
   const couponValidation = useCouponValidation()
   const user = useAuthStore((state) => state.user)
   const isRegisteredCustomer = Boolean(user && !user.username.startsWith('guest_'))
+  const pricingQuery = useCustomerPricing(isRegisteredCustomer)
+  const gstPercentage = pricingQuery.data?.gstPercentage
+  const gstRate = pricingQuery.data?.gstRate
+  const gstWaived = pricingQuery.data?.gstWaived === true
   const phoneVerificationQuery = useCustomerPhoneVerification(isRegisteredCustomer)
   const addressesQuery = useCustomerAddresses(isRegisteredCustomer)
   const createAddress = useCreateCustomerAddress()
@@ -375,9 +378,10 @@ export default function BookingScreen() {
     const serviceOption = options.find((option) => option.code === item.serviceId)
     return sum + estimatedServiceAmount(item, serviceOption)
   }, 0)
-  const gst = Math.round(subtotal * GST_RATE)
-  const total = Math.max(0, subtotal + gst - couponDiscount)
-  const canReviewRequest = activeServiceEntries.length > 0
+  const gst = gstRate === undefined ? undefined : Math.round(subtotal * gstRate)
+  const total = Math.max(0, subtotal + (gst ?? 0) - couponDiscount)
+  const canReviewRequest = gstRate !== undefined
+    && activeServiceEntries.length > 0
     && activeServiceEntries.length === serviceEntries.length
     && isValidDeliveryDate(sharedDate)
     && sharedLocation.trim().length >= 3
@@ -731,12 +735,12 @@ export default function BookingScreen() {
           {step === 'payment' && <>
             <div className="guest-verification"><p className="eyebrow">{c.verification.eyebrow}</p><p className="verification-success">{c.payment.verifiedNote}</p></div>
             {couponMessage && <p className={couponDiscount ? 'coupon-success' : 'coupon-error'} role="status">{couponMessage}</p>}
-            <div className="booking-price-summary"><div><span>{c.payment.services}</span><b>{c.payment.inr(subtotal.toLocaleString('en-IN'))}</b></div><div><span>{c.payment.gst}</span><b>{c.payment.inr(gst.toLocaleString('en-IN'))}</b></div>{couponDiscount > 0 && <div><span>{c.payment.couponDiscount}</span><b>{c.payment.couponDiscountAmount(couponDiscount.toLocaleString('en-IN'))}</b></div>}<div className="booking-price-total"><span>{c.payment.total}</span><b>{c.payment.inr(total.toLocaleString('en-IN'))}</b></div></div>
+            <div className="booking-price-summary"><div><span>{c.payment.services}</span><b>{c.payment.inr(subtotal.toLocaleString('en-IN'))}</b></div><div><span>{gstWaived ? c.payment.gstWaived : c.payment.gst(gstPercentage)}</span><b>{gst === undefined ? '—' : c.payment.inr(gst.toLocaleString('en-IN'))}</b></div>{couponDiscount > 0 && <div><span>{c.payment.couponDiscount}</span><b>{c.payment.couponDiscountAmount(couponDiscount.toLocaleString('en-IN'))}</b></div>}<div className="booking-price-total"><span>{c.payment.total}</span><b>{c.payment.inr(total.toLocaleString('en-IN'))}</b></div></div>
             <div className="payment-choice-list">
               <label className={paymentMethod === 'wallet' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'wallet'} onChange={() => setValue('paymentMethod', 'wallet')} /><Wallet size={18} /><span><b>{c.payment.methods[0].title}</b><small>{c.payment.methods[0].detail}</small></span></label>
               <label className={paymentMethod === 'gateway' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'gateway'} onChange={() => setValue('paymentMethod', 'gateway')} /><CreditCard size={18} /><span><b>{c.payment.methods[1].title}</b><small>{c.payment.methods[1].detail}</small></span></label>
               <label className={paymentMethod === 'cod' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'cod'} onChange={() => setValue('paymentMethod', 'cod')} /><Wallet size={18} /><span><b>{c.payment.methods[2].title}</b><small>{c.payment.methods[2].detail}</small></span></label>
-              <button className="button button-primary button-large" disabled={isSubmitting} onClick={() => void confirmBooking()}>{isSubmitting ? c.payment.processing : c.payment.confirmBooking(total.toLocaleString('en-IN'))} <Check size={16} /></button>
+              <button className="button button-primary button-large" disabled={isSubmitting || gstRate === undefined} onClick={() => void confirmBooking()}>{isSubmitting ? c.payment.processing : c.payment.confirmBooking(total.toLocaleString('en-IN'))} <Check size={16} /></button>
             </div>
           </>}
           {error && <p className="login-error" role="alert">{error}</p>}

@@ -60,6 +60,7 @@ const schema = z.object({
   HTTP_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
   SLOW_REQUEST_MS: z.coerce.number().int().nonnegative().default(800),
   CATALOG_CACHE_TTL_SECONDS: z.coerce.number().int().nonnegative().default(60),
+  APPLIED_GST_PERCENTAGE: z.coerce.number({ error: 'APPLIED_GST_PERCENTAGE must be a number from 0 to 100 (see backend/.env.example)' }).min(0).max(100).default(18),
 })
 // Blank values (for example SUPABASE_SECRET_KEY= in .env.example) mean "not set".
 const environment = Object.fromEntries(Object.entries(process.env).map(([key, value]) => [key, value === '' ? undefined : value]))

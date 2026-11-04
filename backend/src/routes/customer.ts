@@ -7,7 +7,7 @@ import { requireAuth } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 import { logger } from '../lib/logger.js'
 import { bookingSchema } from '../lib/schemas.js'
-import { quoteServices } from '../services/pricing.js'
+import { customerHasGstWaiver, GST_PERCENTAGE, GST_RATE, quoteServices } from '../services/pricing.js'
 import { emitRealtimeToUser, emitRealtimeToVendor } from '../services/realtime.js'
 import { sendPushNotification } from '../services/pushNotifications.js'
 import { isJpeg, selfieBucket, selfieMaxBytes, selfieObjectPath } from '../services/selfie.js'
@@ -107,6 +107,10 @@ router.get('/services', async (_request, response) => {
   }
 })
 // Offers filter on the current time. The 60 s TTL means an offer can stay listed up to 60 s after valid_until (accepted by product).
+router.get('/pricing', (_request, response) => {
+  response.setHeader('Cache-Control', catalogCacheControl)
+  response.json({ gstPercentage: GST_PERCENTAGE, gstRate: GST_RATE })
+})
 router.get('/offers', async (_request, response) => {
   try {
     const offers = await cachedCatalog('customer.offers', loadOffers, 60_000)
@@ -116,8 +120,16 @@ router.get('/offers', async (_request, response) => {
     return databaseFailure(response, 'customer.database_error', error, 500)
   }
 })
-router.post('/coupons/validate', async (request, response) => { const parsed = z.object({ code: z.string().min(2).max(80), serviceCode: z.string().optional(), amount: z.number().nonnegative() }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid coupon request' }); const { data, error } = await supabase.from('coupons').select('id').eq('code', parsed.data.code.toUpperCase()).eq('is_active', true).or('valid_until.is.null,valid_until.gte.' + new Date().toISOString()).maybeSingle(); if (error) return failure(response, 500, 'Coupon could not be checked.', 'customer.coupon_validate_failed', error); if (!data) return response.status(404).json({ error: 'Coupon is not available' }); response.json({ valid: true }) })
+router.post('/coupons/validate', async (request, response) => { const parsed = z.object({ code: z.string().min(2).max(80), serviceCode: z.string().optional(), amount: z.number().nonnegative() }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid coupon request' }); const { data, error } = await supabase.from('coupons').select('id,code,title,discount_type,discount_value,valid_until').eq('code', parsed.data.code.toUpperCase()).eq('is_active', true).or('valid_until.is.null,valid_until.gte.' + new Date().toISOString()).maybeSingle(); if (error) return failure(response, 500, 'Coupon could not be checked.', 'customer.coupon_validate_failed', error); if (!data) return response.status(404).json({ error: 'Coupon is not available' }); response.json({ valid: true, coupon: { id: data.id, code: data.code, title: data.title, discountType: data.discount_type, discountValue: Number(data.discount_value), validUntil: data.valid_until } }) })
 router.use(requireAuth)
+router.get('/pricing/me', async (request, response) => {
+  try {
+    const gstWaived = await customerHasGstWaiver(request.authUser!.id)
+    response.json({ gstPercentage: GST_PERCENTAGE, gstRate: gstWaived ? 0 : GST_RATE, gstWaived })
+  } catch (error) {
+    return failure(response, 500, 'GST eligibility could not be checked. Please try again.', 'customer.pricing_failed', error)
+  }
+})
 router.get('/phone-verification', async (request, response) => {
   const { data: profile, error: profileError } = await supabase.from('profiles').select('phone_e164').eq('id', request.authUser!.id).single()
   if (profileError) return databaseFailure(response, 'customer.phone_verification_failed', profileError, 500)

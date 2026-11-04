@@ -1,7 +1,19 @@
+import { config } from '../config.js'
 import { supabase } from '../supabase.js'
 import { assertPayableAmount, istToday, isServiceInEffectiveWindow, PricingError, sumServiceItemPrices, type PriceableServiceItem } from './pricingMath.js'
 
-export const GST_RATE = 0.18
+export const GST_PERCENTAGE = config.APPLIED_GST_PERCENTAGE
+export const GST_RATE = GST_PERCENTAGE / 100
+
+// A customer with an active recurring subscription or an active membership pays no GST.
+export async function customerHasGstWaiver(customerId: string) {
+  const [subscription, membership] = await Promise.all([
+    supabase.from('subscriptions').select('id').eq('customer_id', customerId).eq('status', 'active').limit(1).maybeSingle(),
+    supabase.from('customer_memberships').select('id').eq('customer_id', customerId).eq('status', 'active').limit(1).maybeSingle(),
+  ])
+  if (subscription.error || membership.error) throw new Error('GST eligibility could not be checked')
+  return Boolean(subscription.data || membership.data)
+}
 
 export async function quoteServices(items: PriceableServiceItem[], couponCode?: string, customerId?: string) {
   const serviceItems = items.map((item) => typeof item === 'string' ? { serviceId: item } : item)
@@ -12,7 +24,9 @@ export async function quoteServices(items: PriceableServiceItem[], couponCode?: 
   const activeServices = (services ?? []).filter((service) => isServiceInEffectiveWindow(service.config, today))
   if (activeServices.length !== new Set(codes).size) throw new PricingError('One or more selected services are unavailable')
   const subtotalPaise = sumServiceItemPrices(serviceItems, activeServices)
-  const gstPaise = Math.round(subtotalPaise * GST_RATE)
+  const gstWaived = customerId ? await customerHasGstWaiver(customerId) : false
+  const appliedGstRate = gstWaived ? 0 : GST_RATE
+  const gstPaise = Math.round(subtotalPaise * appliedGstRate)
   let discountPaise = 0
   let couponId: string | undefined
   if (couponCode?.trim()) {
@@ -30,5 +44,5 @@ export async function quoteServices(items: PriceableServiceItem[], couponCode?: 
     discountPaise = Math.min(Math.max(discountPaise, 0), subtotalPaise + gstPaise)
   }
   const totalPaise = assertPayableAmount(Math.max(0, subtotalPaise + gstPaise - discountPaise))
-  return { subtotalPaise, gstPaise, discountPaise, totalPaise, couponId }
+  return { subtotalPaise, gstPaise, gstRate: appliedGstRate, discountPaise, totalPaise, couponId }
 }

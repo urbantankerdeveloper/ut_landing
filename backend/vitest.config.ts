@@ -10,6 +10,7 @@ export default defineConfig({
       SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
       // Blank so a developer's .env.local cannot switch on the database CA guard in tests.
       SUPABASE_DB_URL: '',
+      APPLIED_GST_PERCENTAGE: '18',
     },
   },
 })

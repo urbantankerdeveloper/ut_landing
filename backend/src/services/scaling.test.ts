@@ -20,7 +20,7 @@ vi.mock('redis', () => ({
   },
 }))
 
-const base = { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k', SUPABASE_DB_URL: '' }
+const base = { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k', SUPABASE_DB_URL: '', APPLIED_GST_PERCENTAGE: '18' }
 
 describe('horizontal scaling switch', () => {
   const original = { ...process.env }
@@ -35,13 +35,26 @@ describe('horizontal scaling switch', () => {
     expect(socketAdapterFor(null)).toBeUndefined()
   })
 
+  it('defaults APPLIED_GST_PERCENTAGE to 18 when it is not configured', async () => {
+    const withoutGst: Record<string, string> = { ...base }
+    delete withoutGst.APPLIED_GST_PERCENTAGE
+    process.env = { ...original, ...withoutGst }
+    const { config } = await import('../config.js')
+    expect(config.APPLIED_GST_PERCENTAGE).toBe(18)
+  })
+
+  it('rejects a non-numeric APPLIED_GST_PERCENTAGE', async () => {
+    process.env = { ...original, ...base, APPLIED_GST_PERCENTAGE: 'eighteen' }
+    await expect(import('../config.js')).rejects.toThrow('APPLIED_GST_PERCENTAGE')
+  })
+
   it('rejects a REDIS_URL that is not a URL', async () => {
     process.env = { ...original, ...base, REDIS_URL: 'not-a-url' }
     await expect(import('../config.js')).rejects.toThrow('REDIS_URL')
   })
 
   it('warns in production when REDIS_URL is missing', async () => {
-    process.env = { ...original, ...base, NODE_ENV: 'production', FRONTEND_ORIGIN: 'https://app.example.com', REDIS_URL: '', OTP_HMAC_SECRET: 'x'.repeat(32) }
+    process.env = { ...original, ...base, NODE_ENV: 'production', FRONTEND_ORIGIN: 'https://app.example.com', CORS_ORIGINS: 'https://app.example.com', REDIS_URL: '', OTP_HMAC_SECRET: 'x'.repeat(32) }
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const { warnIfSingleInstanceInProduction } = await import('./scaling.js')
     warnIfSingleInstanceInProduction()
