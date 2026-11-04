@@ -57,6 +57,11 @@ export function escapeIlike(value: string) {
 export function passwordWithinBcryptLimit(value: string) {
   return Buffer.byteLength(value, 'utf8') <= bcryptPasswordMaxBytes
 }
+export function hashMpinForUser(userId: string, pin: string) {
+  return crypto.createHmac('sha256', config.OTP_HMAC_SECRET)
+    .update(`urban-tanker:mpin:v1:${userId}:${pin}`)
+    .digest('hex')
+}
 export function refreshTokenForClient(platform: string | undefined, refreshToken: string): { refreshToken?: string } {
   return platform === 'mobile' ? { refreshToken } : {}
 }
@@ -341,6 +346,27 @@ router.post('/guest/request-otp', otpRequestLimit, otpPhoneLimit, async (request
   })
 })
 
+router.post('/booking/email-fallback', requireAuth, otpRequestLimit, otpPhoneLimit, async (request, response) => {
+  const parsed = z.object({ phone: phoneSchema }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
+  const phone = toE164IndianMobile(parsed.data.phone)
+  if (!phone) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
+
+  const user = request.authUser!
+  const email = user.email?.trim().toLowerCase()
+  if (!email || !user.email_confirmed_at || email.endsWith('@guest.urbantanker.local')) {
+    return response.status(403).json({ error: 'Email verification is unavailable for this account.' })
+  }
+  const issued = await issueEmailCode(response.locals.requestId, email, 'booking', user.id)
+  if (!issued.ok) return response.status(issued.status).json({ error: issued.error })
+  return response.status(202).json({
+    emailChallengeId: issued.challengeId,
+    emailOtpSent: true,
+    expiresInSeconds: emailCodeExpiresInSeconds,
+    resendAfterSeconds: emailCodeResendAfterSeconds,
+  })
+})
+
 router.post('/guest/verify-otp', async (request, response) => {
   const parsed = z.object({
     challengeId: z.string().uuid().optional(),
@@ -403,6 +429,9 @@ router.post('/guest/verify-phone', requireAuth, async (request, response) => {
   if (parsed.data.emailChallengeId && (!parsed.data.email || !parsed.data.emailOtp)) return response.status(400).json({ error: 'Enter the verification code sent to your email.' })
   const phone = toE164IndianMobile(parsed.data.phone)
   if (!phone) return response.status(400).json({ error: 'Enter the verification code sent to this mobile number.' })
+  if (parsed.data.emailChallengeId && parsed.data.email?.trim().toLowerCase() !== request.authUser!.email?.trim().toLowerCase()) {
+    return response.status(403).json({ error: 'Only the registered account email can verify this booking.' })
+  }
   if (parsed.data.challengeId && !(await passesChallengeAttempt(response, parsed.data.challengeId, phone, parsed.data.otp!))) return
   if (parsed.data.emailChallengeId && !(await consumeEmailChallenge(response, parsed.data.emailChallengeId, parsed.data.email!, ['booking'], parsed.data.emailOtp!))) return
   if (parsed.data.challengeId && !(await markChallengeVerified(response, parsed.data.challengeId))) return
@@ -928,6 +957,33 @@ router.patch('/preferences', requireAuth, async (request, response) => {
   const { data, error } = await supabase.from('profiles').update({ theme_mode: parsed.data.themeMode }).eq('id', request.authUser!.id).select('theme_mode').single()
   if (error || !data) return response.status(400).json({ error: 'Preferences could not be saved' })
   return response.json({ themeMode: data.theme_mode })
+})
+
+router.put('/mpin', requireAuth, async (request, response) => {
+  const parsed = z.object({ pin: z.string().regex(/^\d{4,6}$/) }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'MPIN must be 4 to 6 digits.' })
+  const userId = request.authUser!.id
+  const { error } = await supabase.from('user_mpin_credentials').upsert({
+    user_id: userId,
+    pin_digest: hashMpinForUser(userId, parsed.data.pin),
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'user_id' })
+  if (error) {
+    logFailure('auth.mpin_save_failed', response.locals.requestId, error.message)
+    return response.status(500).json({ error: 'MPIN could not be saved.' })
+  }
+  return response.status(204).send()
+})
+
+router.delete('/mpin', requireAuth, async (request, response) => {
+  const { error } = await supabase.from('user_mpin_credentials')
+    .delete()
+    .eq('user_id', request.authUser!.id)
+  if (error) {
+    logFailure('auth.mpin_delete_failed', response.locals.requestId, error.message)
+    return response.status(500).json({ error: 'MPIN could not be removed.' })
+  }
+  return response.status(204).send()
 })
 
 // Revokes every session for the user. Without an access token, the refresh cookie or body token is exchanged for one first.

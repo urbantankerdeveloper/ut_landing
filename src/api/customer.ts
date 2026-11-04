@@ -1,4 +1,5 @@
 import { apiFetch } from './client'
+import { feedbackContent } from '../content/feedback'
 
 export type CustomerBooking = { id: string; service: string; services: BookingServiceDetails[]; location: string; status: string; amount: number; scheduledAt: string; phone?: string; notes?: string; paymentMethod?: BookingPaymentMethod; latitude?: number; longitude?: number }
 export type CustomerBookingPage = { rows: CustomerBooking[]; nextOffset: number | null }
@@ -108,9 +109,9 @@ function normalizeBooking(item: Record<string, unknown>): CustomerBooking {
 function normalizeSubscription(item: Record<string, unknown>): CustomerSubscription { return { id: String(item.id), name: String(item.name ?? item.plan_id ?? 'Subscription'), status: item.status as CustomerSubscription['status'], nextDelivery: item.nextDelivery as string | undefined ?? item.next_delivery as string | undefined, amount: Number(item.amount ?? 0) } }
 
 export const customerApi = {
-  requestGuestOtp: (phone: string) => apiFetch<GuestOtpChallenge>('/auth/guest/request-otp', { method: 'POST', body: JSON.stringify({ phone }) }),
+  requestGuestOtp: (phone: string) => apiFetch<GuestOtpChallenge>('/auth/guest/request-otp', { method: 'POST', successMessage: feedbackContent.success.codeSent, body: JSON.stringify({ phone }) }),
   verifyGuestOtp: (payload: { challengeId: string; phone: string; otp: string; name?: string }) => apiFetch<GuestSession>('/auth/guest/verify-otp', { method: 'POST', body: JSON.stringify(payload) }),
-  verifyContactPhoneOtp: (payload: { challengeId: string; phone: string; otp: string }) => apiFetch<{ verified: boolean }>('/auth/guest/verify-phone', { method: 'POST', body: JSON.stringify(payload) }),
+  verifyContactPhoneOtp: (payload: { challengeId: string; phone: string; otp: string }) => apiFetch<{ verified: boolean }>('/auth/guest/verify-phone', { method: 'POST', successMessage: feedbackContent.success.phoneVerified, body: JSON.stringify(payload) }),
   bookings: async (offset = 0) => {
     const path = offset === 0 ? '/customer/orders' : `/customer/orders?offset=${offset}&pageSize=100`
     const page = await apiFetch<{ rows: Record<string, unknown>[]; nextOffset: number | null } | Record<string, unknown>[]>(path)
@@ -124,7 +125,7 @@ export const customerApi = {
   publicTracking: (token: string) => apiFetch<PublicTracking>(`/public/tracking/${encodeURIComponent(token)}`),
   requestDeliveryOtp: (orderId: string) => apiFetch<{ expiresAt: string }>(`/customer/orders/${orderId}/delivery-otp`, { method: 'POST' }),
   rescheduleBooking: (orderId: string, scheduledFor: string) => apiFetch<CustomerBooking>(`/customer/orders/${orderId}/reschedule`, { method: 'PATCH', body: JSON.stringify({ scheduledFor }) }),
-  cancelBooking: (orderId: string) => apiFetch<CustomerBooking>(`/customer/orders/${orderId}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'cancelled' }) }),
+  cancelBooking: (orderId: string) => apiFetch<CustomerBooking>(`/customer/orders/${orderId}/status`, { method: 'PATCH', successMessage: feedbackContent.success.cancelled, body: JSON.stringify({ status: 'cancelled' }) }),
   rateBooking: (orderId: string, rating: number, review?: string) => apiFetch<unknown>(`/customer/orders/${orderId}/rating`, { method: 'POST', body: JSON.stringify({ rating, review }) }),
   createPaymentOrder: (payload: { amount: number; bookingId: string }) => apiFetch<PaymentOrder>('/payment/razorpay/order', { method: 'POST', body: JSON.stringify(payload) }),
   verifyPayment: (payload: { orderId: string; paymentId: string; signature: string }) => apiFetch<PaymentVerification>('/payment/razorpay/verify', { method: 'POST', body: JSON.stringify(payload) }),

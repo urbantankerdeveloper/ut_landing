@@ -1,10 +1,14 @@
 import { useAuthStore } from '../stores/authStore'
 import { useServerStatusStore } from '../stores/serverStatusStore'
+import { notifyError, notifySuccess, describeError, markReported } from '../utils/notify'
+import { resolveWriteMessage } from '../content/writeMessages'
+import { ApiError } from './errors'
 
-export class ApiError extends Error {
-  status: number
-  constructor(message: string, status: number) { super(message); this.name = 'ApiError'; this.status = status }
-}
+export { ApiError }
+
+// silent: true skips the toast for calls whose failure the screen handles itself (for example, a session check).
+// successMessage overrides the default saved text for a write that succeeds.
+export type ApiRequestInit = RequestInit & { silent?: boolean; successMessage?: string }
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api'
 const REQUEST_TIMEOUT_MS = 12_000
@@ -79,7 +83,23 @@ function waitBeforeRetry(delayMs: number, signal?: AbortSignal | null) {
   })
 }
 
-export async function apiFetch<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
+export async function apiFetch<T>(path: string, init: ApiRequestInit = {}, retry = true): Promise<T> {
+  const { silent, successMessage, ...requestInit } = init
+  const method = (requestInit.method ?? 'GET').toUpperCase()
+  const write = method !== 'GET' ? resolveWriteMessage(method, path) : undefined
+  try {
+    const result = await requestWithRetries<T>(path, requestInit, retry)
+    // Successful writes confirm to the user for every role. Reads stay quiet.
+    if (write && !write.silent && !silent) notifySuccess(successMessage ?? write.message)
+    return result
+  } catch (error) {
+    if (!silent && !requestInit.signal?.aborted) notifyError(describeError(error))
+    markReported(error)
+    throw error
+  }
+}
+
+async function requestWithRetries<T>(path: string, init: RequestInit, retry: boolean): Promise<T> {
   const isIdempotent = (init.method ?? 'GET').toUpperCase() === 'GET'
   let slow = false
   const slowTimer = window.setTimeout(() => {
@@ -120,13 +140,17 @@ async function apiFetchOnce<T>(path: string, init: RequestInit, retry: boolean):
     }
     if (!response.ok) {
       let message = `Request failed: ${response.status}`
+      let serverMessage: string | undefined
       try {
         const body = await response.json() as { error?: unknown }
-        if (typeof body.error === 'string' && body.error.trim()) message = body.error
+        if (typeof body.error === 'string' && body.error.trim()) {
+          message = body.error
+          serverMessage = body.error
+        }
       } catch {
         // Keep the HTTP status message when the server did not return JSON.
       }
-      throw new ApiError(message, response.status)
+      throw new ApiError(message, response.status, serverMessage)
     }
     if (response.status === 204) return undefined as T
     return response.json() as Promise<T>

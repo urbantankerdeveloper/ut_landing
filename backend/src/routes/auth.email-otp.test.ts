@@ -11,6 +11,11 @@ const mocks = vi.hoisted(() => ({
   isEmailConfigured: vi.fn(() => true),
   sendEmail: vi.fn(),
   sendTemplateSms: vi.fn(),
+  authUser: {
+    id: 'user-1',
+    email: 'guest@example.com',
+    email_confirmed_at: '2026-01-01T00:00:00.000Z',
+  },
 }))
 
 // Builds a chain like supabase-js. The final awaited call is answered by mocks.respond.
@@ -46,7 +51,12 @@ vi.mock('../supabase.js', () => ({
 }))
 vi.mock('express-rate-limit', () => ({ default: () => (_req: unknown, _res: unknown, next: () => void) => next() }))
 vi.mock('../services/scaling.js', () => ({ limiterStore: () => undefined, getRedisPair: () => null }))
-vi.mock('../middleware/auth.js', () => ({ requireAuth: (_req: unknown, _res: unknown, next: () => void) => next() }))
+vi.mock('../middleware/auth.js', () => ({
+  requireAuth: (request: object, _response: unknown, next: () => void) => {
+    Object.assign(request, { authUser: mocks.authUser })
+    next()
+  },
+}))
 vi.mock('../services/providers.js', () => ({
   isEmailConfigured: () => mocks.isEmailConfigured(),
   sendEmail: (...args: unknown[]) => mocks.sendEmail(...args),
@@ -91,6 +101,9 @@ beforeEach(() => {
   mocks.sendEmail.mockResolvedValue({ queued: true })
   mocks.sendTemplateSms.mockReset()
   mocks.sendTemplateSms.mockResolvedValue({ queued: false, reason: 'SMS is not configured' })
+  mocks.authUser.id = 'user-1'
+  mocks.authUser.email = 'guest@example.com'
+  mocks.authUser.email_confirmed_at = '2026-01-01T00:00:00.000Z'
 })
 
 describe('POST /signup', () => {
@@ -147,6 +160,36 @@ describe('POST /guest/request-otp', () => {
     mocks.isEmailConfigured.mockReturnValue(false)
     const response = await request(buildApp()).post('/guest/request-otp').send({ phone: PHONE, email: 'guest@example.com' })
     expect(response.status).toBe(503)
+  })
+})
+
+describe('POST /booking/email-fallback', () => {
+  it('sends a booking code to the authenticated user email', async () => {
+    mocks.authUser.email = 'registered@example.com'
+    const response = await request(buildApp())
+      .post('/booking/email-fallback')
+      .send({ phone: PHONE })
+
+    expect(response.status).toBe(202)
+    expect(response.body).toMatchObject({
+      emailChallengeId: EMAIL_CHALLENGE,
+      emailOtpSent: true,
+    })
+    expect(mocks.sendEmail).toHaveBeenCalledWith(
+      'registered@example.com',
+      expect.any(String),
+      expect.any(String),
+    )
+  })
+
+  it('does not send email fallback to a guest account', async () => {
+    mocks.authUser.email = 'guest-123@guest.urbantanker.local'
+    const response = await request(buildApp())
+      .post('/booking/email-fallback')
+      .send({ phone: PHONE })
+
+    expect(response.status).toBe(403)
+    expect(mocks.sendEmail).not.toHaveBeenCalled()
   })
 })
 

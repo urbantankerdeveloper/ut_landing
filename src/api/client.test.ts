@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, apiFetch } from './client'
 import { useAuthStore } from '../stores/authStore'
 import { useServerStatusStore } from '../stores/serverStatusStore'
+import { useToastStore } from '../stores/toastStore'
+import { feedbackContent } from '../content/feedback'
 
 describe('apiFetch', () => {
   beforeEach(() => {
@@ -39,7 +41,7 @@ describe('apiFetch', () => {
       headers: { 'Content-Type': 'application/json' },
     })))
 
-    await expect(apiFetch('/auth/signup')).rejects.toMatchObject(new ApiError('Email confirmation is unavailable.', 503))
+    await expect(apiFetch('/auth/signup')).rejects.toMatchObject(new ApiError('Email confirmation is unavailable.', 503, 'Email confirmation is unavailable.'))
   })
 
   it('adds the in-memory access token and preserves request options', async () => {
@@ -141,5 +143,27 @@ describe('apiFetch retries and slow requests', () => {
     resolveFetch(new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
     await expect(request).resolves.toEqual({ ok: true })
     expect(useServerStatusStore.getState().slowRequests).toBe(0)
+  })
+
+  it('confirms successful writes with a toast and keeps reads quiet', async () => {
+    useToastStore.setState({ toasts: [] })
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } }))))
+
+    await apiFetch('/customer/profile')
+    expect(useToastStore.getState().toasts).toHaveLength(0)
+
+    await apiFetch('/customer/profile', { method: 'PATCH', body: '{}', successMessage: 'Profile updated for test.' })
+    expect(useToastStore.getState().toasts.map((toast) => toast.message)).toEqual(['Profile updated for test.'])
+  })
+
+  it('uses a custom success message and skips the toast when silent', async () => {
+    useToastStore.setState({ toasts: [] })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204 })))
+
+    await apiFetch('/auth/logout', { method: 'POST', silent: true })
+    expect(useToastStore.getState().toasts).toHaveLength(0)
+
+    await apiFetch('/auth/password-reset', { method: 'POST', successMessage: feedbackContent.success.passwordSent })
+    expect(useToastStore.getState().toasts[0].message).toBe(feedbackContent.success.passwordSent)
   })
 })

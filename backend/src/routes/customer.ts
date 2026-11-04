@@ -122,10 +122,14 @@ router.get('/phone-verification', async (request, response) => {
   const { data: profile, error: profileError } = await supabase.from('profiles').select('phone_e164').eq('id', request.authUser!.id).single()
   if (profileError) return databaseFailure(response, 'customer.phone_verification_failed', profileError, 500)
   const phoneE164 = toE164IndianMobile(String(profile.phone_e164 ?? ''))
-  if (!phoneE164) return response.json({ phone: '', verified: false })
+  if (!phoneE164) return response.json({ phone: '', verified: false, required: config.REQUIRE_BOOKING_PHONE_VERIFICATION })
   const { data: challenge, error } = await supabase.from('guest_otp_challenges').select('id').eq('phone_e164', phoneE164).not('verified_at', 'is', null).gte('verified_at', recentVerificationCutoff()).order('verified_at', { ascending: false }).limit(1).maybeSingle()
   if (error) return databaseFailure(response, 'customer.phone_verification_failed', error, 500)
-  response.json({ phone: phoneE164.slice(-10), verified: Boolean(challenge) })
+  response.json({
+    phone: phoneE164.slice(-10),
+    verified: config.REQUIRE_BOOKING_PHONE_VERIFICATION ? Boolean(challenge) : true,
+    required: config.REQUIRE_BOOKING_PHONE_VERIFICATION,
+  })
 })
 router.get('/usage', async (request, response) => { const { data, error } = await supabase.from('bookings').select('quoted_amount_paise,status').eq('customer_id', request.authUser!.id); if (error) return databaseFailure(response, 'customer.database_error', error, 500); const delivered = (data ?? []).filter((item) => item.status === 'delivered'); const totalSpend = delivered.reduce((sum, item) => sum + Number(item.quoted_amount_paise ?? 0) / 100, 0); response.json({ deliveries: delivered.length, totalSpend, averageAmount: delivered.length ? Math.round(totalSpend / delivered.length) : 0 }) })
 router.get('/orders', async (request, response) => {
@@ -184,12 +188,12 @@ function getBookingServices(data: z.infer<typeof bookingSchema>) {
     phoneVerificationChallengeId: item.phoneVerificationChallengeId,
   })).filter((item) => item.serviceId)
 }
-async function validateServicePhoneVerification(data: z.infer<typeof bookingSchema>, services: ReturnType<typeof getBookingServices>) {
+async function validateServicePhoneVerification(data: z.infer<typeof bookingSchema>, services: ReturnType<typeof getBookingServices>, requireBookingContactVerification = true) {
   const contactChallenges = new Map<string, { challengeId?: string; serviceId: string }>()
   for (const service of services) {
-    if (service.phone) contactChallenges.set(service.phone, { challengeId: service.phoneVerificationChallengeId, serviceId: service.serviceId })
+    if (service.phone && (requireBookingContactVerification || service.phone !== data.phone)) contactChallenges.set(service.phone, { challengeId: service.phoneVerificationChallengeId, serviceId: service.serviceId })
   }
-  if (data.phone) contactChallenges.set(data.phone, { challengeId: data.phoneVerificationChallengeId ?? contactChallenges.get(data.phone)?.challengeId, serviceId: 'booking contact' })
+  if (data.phone && requireBookingContactVerification) contactChallenges.set(data.phone, { challengeId: data.phoneVerificationChallengeId ?? contactChallenges.get(data.phone)?.challengeId, serviceId: 'booking contact' })
   for (const [phone, contact] of contactChallenges) {
     const phoneE164 = toE164IndianMobile(phone)
     if (!phoneE164) return { status: 400, message: 'Enter a valid 10-digit mobile number.' }
@@ -260,11 +264,18 @@ function quoteFailure(response: Response, error: unknown) {
 async function placeQuotedBooking(request: Request, response: Response, includeQuote: boolean) {
   const parsed = bookingSchema.safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Invalid booking', details: parsed.error.flatten() })
+  const customerId = request.authUser!.id
+  if (!config.REQUIRE_BOOKING_PHONE_VERIFICATION) {
+    const { data: profile, error } = await supabase.from('profiles').select('phone_e164').eq('id', customerId).maybeSingle()
+    if (error) return databaseFailure(response, 'customer.phone_verification_failed', error, 500)
+    const accountPhone = toE164IndianMobile(String(profile?.phone_e164 ?? ''))
+    if (!accountPhone) return response.status(400).json({ error: 'Add a mobile number to your account before booking.' })
+    parsed.data.phone = accountPhone.slice(-10)
+  }
   const services = getBookingServices(parsed.data)
   if (!services.length) return response.status(400).json({ error: 'At least one service is required' })
-  const verificationError = await validateServicePhoneVerification(parsed.data, services)
+  const verificationError = await validateServicePhoneVerification(parsed.data, services, config.REQUIRE_BOOKING_PHONE_VERIFICATION)
   if (verificationError) return response.status(verificationError.status).json({ error: verificationError.message })
-  const customerId = request.authUser!.id
   let quote: Awaited<ReturnType<typeof quoteServices>>
   try {
     quote = await quoteServices(services, parsed.data.couponCode, customerId)

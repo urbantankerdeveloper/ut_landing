@@ -23,6 +23,17 @@ describe('production configuration guards', () => {
     expect(config.DB_SSL_CA).toBe('line1\nline2')
   })
 
+  it('requires booking phone verification by default and allows the setting to be disabled', async () => {
+    process.env = { ...original, ...base, NODE_ENV: 'test' }
+    const defaultConfig = await import('./config.js')
+    expect(defaultConfig.config.REQUIRE_BOOKING_PHONE_VERIFICATION).toBe(true)
+
+    vi.resetModules()
+    process.env.REQUIRE_BOOKING_PHONE_VERIFICATION = 'false'
+    const disabledConfig = await import('./config.js')
+    expect(disabledConfig.config.REQUIRE_BOOKING_PHONE_VERIFICATION).toBe(false)
+  })
+
   it('reads the comma-separated CORS origin list', async () => {
     process.env = { ...original, ...base, NODE_ENV: 'production', FRONTEND_ORIGIN: 'https://app.example.com', CORS_ORIGINS: 'https://urbantanker.com, https://www.urbantanker.com ,' }
     const { config } = await import('./config.js')

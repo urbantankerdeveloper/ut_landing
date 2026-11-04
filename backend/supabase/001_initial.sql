@@ -15,6 +15,15 @@ create extension if not exists pgcrypto;
 create type public.user_role as enum ('customer','vendor','dispatcher','admin');
 create type public.booking_status as enum ('pending_vendor','vendor_assigned','accepted','en_route','arrived','delivered','cancelled');
 
+create table if not exists public.user_mpin_credentials (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  pin_digest text not null,
+  updated_at timestamptz not null default now()
+);
+alter table public.user_mpin_credentials enable row level security;
+revoke all on public.user_mpin_credentials from public, anon, authenticated;
+grant all on public.user_mpin_credentials to service_role;
+
 create table if not exists public.profiles (id uuid primary key references auth.users(id) on delete cascade, full_name text not null, phone_e164 text unique, role public.user_role not null default 'customer', created_at timestamptz not null default now());
 create table if not exists public.vendors (id uuid primary key default gen_random_uuid(), owner_profile_id uuid references public.profiles(id), business_name text not null, phone_e164 text not null, service_zone text not null, latitude numeric(9,6), longitude numeric(9,6), is_online boolean not null default false, verification text not null default 'pending', created_at timestamptz not null default now(), constraint vendors_coordinates_pair_check check ((latitude is null) = (longitude is null) and (latitude is null or latitude between -90 and 90) and (longitude is null or longitude between -180 and 180)));
 create table if not exists public.vehicles (id uuid primary key default gen_random_uuid(), vendor_id uuid not null references public.vendors(id) on delete cascade, registration_number text not null unique, capacity_litres integer, supported_services text[] not null default '{}', is_active boolean not null default true, metadata jsonb not null default '{}');
