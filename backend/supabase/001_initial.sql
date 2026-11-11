@@ -1289,6 +1289,18 @@ begin
   end loop;
 end $$;
 
+-- ===== Admin sign-up approval (additive) =====
+-- Admin accounts created from the public sign-up stay 'pending' until an existing admin approves them.
+alter table public.profiles add column if not exists approval_status text not null default 'approved';
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'profiles_approval_status_check' and conrelid = 'public.profiles'::regclass) then
+    alter table public.profiles
+      add constraint profiles_approval_status_check
+      check (approval_status in ('pending', 'approved', 'rejected'));
+  end if;
+end $$;
+
 notify pgrst, 'reload schema';
 
 commit;

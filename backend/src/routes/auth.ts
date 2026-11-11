@@ -23,6 +23,7 @@ const unmatchedLoginEmail = 'no-account@login.urbantanker.local'
 const invalidCodeMessage = 'This verification code is invalid or expired.'
 const incorrectCodeMessage = 'The verification code is incorrect.'
 const verificationFailedMessage = 'The verification could not be completed. Try again shortly.'
+const adminApprovalPendingMessage = 'Your account is waiting for approval from an existing admin.'
 const signupFailedMessage = 'Registration could not be completed. Check your details or sign in to an existing account.'
 
 const otpRequestLimit = rateLimit({ windowMs: 10 * minute, limit: 5, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:otp-request:', 'memory'), message: { error: 'Too many OTP requests. Try again later.' } })
@@ -322,6 +323,7 @@ type ProfileRow = {
   phone_e164: string | null
   theme_mode: string | null
   selfie_required: boolean | null
+  approval_status: string | null
 }
 
 router.post('/guest/request-otp', otpRequestLimit, otpPhoneLimit, async (request, response) => {
@@ -613,7 +615,7 @@ router.post('/email/verify-otp', emailOtpVerifyLimit, async (request, response) 
   if (row.user_id) {
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
-      .select('id,role,full_name,username,phone_e164,theme_mode,selfie_required')
+      .select('id,role,full_name,username,phone_e164,theme_mode,selfie_required,approval_status')
       .eq('id', row.user_id)
       .maybeSingle()
     if (profileError) {
@@ -621,7 +623,8 @@ router.post('/email/verify-otp', emailOtpVerifyLimit, async (request, response) 
       return response.status(500).json({ error: verificationFailedMessage })
     }
     const existing = profile as ProfileRow | null
-    if (!existing || !['customer', 'vendor'].includes(existing.role)) {
+    const pendingApproval = (existing?.role === 'admin' || existing?.role === 'vendor') && existing.approval_status === 'pending'
+    if (!existing || (!['customer', 'vendor'].includes(existing.role) && !pendingApproval)) {
       return response.status(403).json({ error: 'This account cannot sign in here.' })
     }
     if (!(await markEmailChallengeVerified(response, challengeId))) return
@@ -629,6 +632,9 @@ router.post('/email/verify-otp', emailOtpVerifyLimit, async (request, response) 
     if (confirmError || !confirmed.user) {
       logFailure('email.confirm_failed', response.locals.requestId, confirmError?.message)
       return response.status(500).json({ error: verificationFailedMessage })
+    }
+    if (pendingApproval) {
+      return response.status(202).json({ approvalPending: true, message: adminApprovalPendingMessage })
     }
     const session = await magicLinkSession(response, confirmed.user.email ?? email)
     if (!session) return
@@ -747,8 +753,11 @@ router.post('/login', loginLimit, loginAccountLimit, async (request, response) =
   }
   const { data, error } = await authSupabase.auth.signInWithPassword({ email, password: parsed.data.password })
   if (error || !data.session || !data.user) return response.status(401).json({ error: 'Invalid credentials' })
-  const { data: profile, error: profileError } = await supabase.from('profiles').select('id,role,full_name,username,phone_e164,theme_mode,selfie_required').eq('id', data.user.id).single()
+  const { data: profile, error: profileError } = await supabase.from('profiles').select('id,role,full_name,username,phone_e164,theme_mode,selfie_required,approval_status').eq('id', data.user.id).single()
   if (profileError || !profile) return response.status(403).json({ error: 'Account profile is unavailable.' })
+  if ((profile.role === 'admin' || profile.role === 'vendor') && profile.approval_status !== 'approved') {
+    return response.status(403).json({ error: adminApprovalPendingMessage })
+  }
   if (profile.role === 'vendor') {
     const { data: vendor, error: vendorLookupError } = await supabase.from('vendors').select('id').eq('owner_profile_id', profile.id).maybeSingle()
     if (vendorLookupError) return response.status(500).json({ error: 'Vendor profile could not be checked.' })
@@ -784,12 +793,18 @@ router.post('/signup', signupLimit, signupEmailLimit, async (request, response) 
     name: z.string().min(2).max(60),
     phone: phoneSchema,
     role: z.enum(['customer', 'vendor', 'admin']).optional(),
+    businessName: z.string().trim().min(2).max(120).optional(),
+    serviceZone: z.string().trim().min(2).max(120).optional(),
+    latitude: z.number().finite().min(-90).max(90).optional(),
+    longitude: z.number().finite().min(-180).max(180).optional(),
     adminKey: z.string().optional(),
     themeMode: themeModeSchema.optional(),
     selfieJpegBase64: z.string().min(1).max(2_000_000).optional(),
   }).safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Invalid registration', details: parsed.error.flatten() })
-  if (parsed.data.role && parsed.data.role !== 'customer') return response.status(403).json({ error: 'Public signup creates customer accounts only.' })
+  const role = parsed.data.role ?? 'customer'
+  if ((parsed.data.latitude === undefined) !== (parsed.data.longitude === undefined)) return response.status(400).json({ error: 'Latitude and longitude must be provided together.' })
+  if (role === 'vendor' && (!parsed.data.businessName || !parsed.data.serviceZone)) return response.status(400).json({ error: 'Enter your business name and service zone to create a vendor account.' })
   const selfie = parsed.data.selfieJpegBase64 === undefined ? null : decodeSelfieJpeg(parsed.data.selfieJpegBase64)
   if (parsed.data.selfieJpegBase64 !== undefined && !selfie) return response.status(400).json({ error: 'Choose a JPEG photo.' })
   if (!isEmailConfigured()) return response.status(503).json({ error: 'Email confirmation is unavailable. Configure Gmail SMTP_USER, SMTP_PASSWORD, and MAIL_FROM on the backend, then try again.' })
@@ -802,7 +817,7 @@ router.post('/signup', signupLimit, signupEmailLimit, async (request, response) 
     email: parsed.data.email,
     password: parsed.data.password,
     email_confirm: false,
-    user_metadata: { full_name: parsed.data.name, role: 'customer', username },
+    user_metadata: { full_name: parsed.data.name, role, username },
   })
   if (error || !created.user) {
     logFailure('signup.user_create_failed', response.locals.requestId, error?.message)
@@ -813,7 +828,8 @@ router.post('/signup', signupLimit, signupEmailLimit, async (request, response) 
     id: userId,
     full_name: parsed.data.name,
     username,
-    role: 'customer',
+    role,
+    approval_status: role === 'admin' || role === 'vendor' ? 'pending' : 'approved',
     signup_platform: signupPlatform,
     theme_mode: themeMode,
   })
@@ -826,14 +842,33 @@ router.post('/signup', signupLimit, signupEmailLimit, async (request, response) 
 
   const cleanupUnconfirmedAccount = async () => {
     const { error: removePhotoError } = await supabase.storage.from(selfieBucket).remove([selfieObjectPath(userId)])
+    const { error: deleteVendorError } = await supabase.from('vendors').delete().eq('owner_profile_id', userId)
     const { error: deleteProfileError } = await supabase.from('profiles').delete().eq('id', userId)
     const { error: deleteUserError } = await authSupabase.auth.admin.deleteUser(userId)
-    if (removePhotoError || deleteProfileError || deleteUserError) {
-      const errors = [removePhotoError?.message, deleteProfileError?.message, deleteUserError?.message].filter(Boolean).join('; ')
+    if (removePhotoError || deleteVendorError || deleteProfileError || deleteUserError) {
+      const errors = [removePhotoError?.message, deleteVendorError?.message, deleteProfileError?.message, deleteUserError?.message].filter(Boolean).join('; ')
       logger.error('signup.rollback_failed', { userId, error: errors })
       return false
     }
     return true
+  }
+
+  if (role === 'vendor') {
+    const { error: vendorError } = await supabase.from('vendors').insert({
+      owner_profile_id: userId,
+      business_name: parsed.data.businessName,
+      phone_e164: toE164IndianMobile(parsed.data.phone),
+      service_zone: parsed.data.serviceZone,
+      latitude: parsed.data.latitude ?? null,
+      longitude: parsed.data.longitude ?? null,
+      verification: 'pending',
+      is_online: false,
+    })
+    if (vendorError) {
+      logFailure('signup.vendor_failed', response.locals.requestId, vendorError.message)
+      await cleanupUnconfirmedAccount()
+      return response.status(400).json({ error: signupFailedMessage })
+    }
   }
 
   if (selfie) {
@@ -873,6 +908,8 @@ router.post('/signup', signupLimit, signupEmailLimit, async (request, response) 
     phoneOtpSent: phoneCode.sent,
     phoneChallengeId: phoneCode.challengeId,
     userId,
+    role,
+    approvalPending: role === 'admin' || role === 'vendor',
     signupPlatform,
     themeMode,
   })

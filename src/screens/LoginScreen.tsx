@@ -10,7 +10,7 @@ import { authContent as c } from '../content/auth'
 import { notifyError, notifyInfo, notifySuccess } from '../utils/notify'
 
 type AuthMode = 'login' | 'signup' | 'reset' | 'set-password'
-type SignupRole = 'customer' | 'vendor'
+type SignupRole = 'customer' | 'vendor' | 'admin'
 const googleSignInEnabled = import.meta.env.VITE_ENABLE_GOOGLE_SIGN_IN === 'true'
 
 type PasswordResetFormProps = {
@@ -71,6 +71,9 @@ export default function LoginScreen() {
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [role, setRole] = useState<SignupRole>('customer')
+  const [businessName, setBusinessName] = useState('')
+  const [serviceZone, setServiceZone] = useState('')
+  const [coordinates, setCoordinates] = useState<{ latitude: number; longitude: number } | null>(null)
   const [selfieBytes, setSelfieBytes] = useState<Uint8Array<ArrayBuffer> | null>(null)
   const [selfiePreview, setSelfiePreview] = useState<string | null>(null)
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
@@ -148,6 +151,21 @@ export default function LoginScreen() {
     setMode(nextMode)
   }
 
+  function captureLocation() {
+    if (!navigator.geolocation) {
+      notifyError(c.fields.location.unavailable)
+      return
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setCoordinates({ latitude: position.coords.latitude, longitude: position.coords.longitude })
+        notifySuccess(c.fields.location.captured)
+      },
+      () => notifyError(c.fields.location.unavailable),
+      { enableHighAccuracy: false, timeout: 10_000 },
+    )
+  }
+
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const normalizedUsername = username.trim().toLowerCase()
@@ -157,11 +175,25 @@ export default function LoginScreen() {
           notifyError(c.messages.incompleteSignUp)
           return
         }
-        const response = await authApi.signup({ email: normalizedUsername, password, name: name.trim(), phone, role, selfieJpegBase64: role === 'customer' && selfieBytes ? base64FromBytes(selfieBytes) : undefined })
+        if (role === 'vendor' && (businessName.trim().length < 2 || serviceZone.trim().length < 2)) {
+          notifyError(c.messages.incompleteVendorSignUp)
+          return
+        }
+        const response = await authApi.signup({
+          email: normalizedUsername,
+          password,
+          name: name.trim(),
+          phone,
+          role,
+          ...(role === 'vendor' ? { businessName: businessName.trim(), serviceZone: serviceZone.trim(), ...(coordinates ?? {}) } : {}),
+          selfieJpegBase64: selfieBytes ? base64FromBytes(selfieBytes) : undefined,
+        })
         if (!response.accessToken && !response.token) {
-          notifySuccess(response.emailSent
-            ? c.messages.accountCreatedConfirmEmail
-            : c.messages.accountCreatedFollowEmail)
+          notifySuccess(response.approvalPending
+            ? c.messages.accountCreatedAdminApproval
+            : response.emailSent
+              ? c.messages.accountCreatedConfirmEmail
+              : c.messages.accountCreatedFollowEmail)
           setMode('login')
           setPassword('')
           return
@@ -219,5 +251,5 @@ export default function LoginScreen() {
       setShowPassword={setShowPassword}
     />
   }
-  return <section className="auth-screen"><div className="auth-story"><button className="auth-story-brand" onClick={() => navigate('home')} aria-label={c.shared.homeAriaLabel}><img className="brand-mark" src="/urban-tanker-mark.png" width={512} height={512} decoding="async" alt="" aria-hidden="true" /><span>{c.shared.brandPrefix}<b>{c.shared.brandName}</b></span></button><div className="auth-story-content"><p className="eyebrow">{c.shared.eyebrow}</p><h1>{story.titleLead}<em>{story.titleEmphasis}</em></h1><p>{story.copy}</p><div className="auth-proof"><ShieldCheck size={18} /><span>{c.shared.proof}</span></div></div><div className="auth-orbit" aria-hidden="true" /></div><div className="auth-panel"><button className="back-link" onClick={() => navigate('home')}><ArrowLeft size={14} /> {c.shared.backToHome}</button><div className="auth-panel-inner">{isSignup ? <p className="eyebrow">{c.panel.eyebrow.signUp}</p> : <p className="eyebrow">{c.panel.eyebrow.signIn}</p>}<h2>{isSignup ? c.panel.title.signUp : isReset ? c.panel.title.reset : c.panel.title.signIn}</h2><p className="auth-intro">{isSignup ? c.panel.intro.signUp : isReset ? c.panel.intro.reset : c.panel.intro.signIn}</p>{!isSignup && !isReset && googleSignInEnabled && <><button className="google-button" onClick={() => notifyInfo(c.google.note)}>{c.google.button} <span aria-hidden="true">{c.google.mark}</span></button><p className="provider-note">{c.google.note}</p><div className="or-divider"><span>{c.google.divider}</span></div></>}<form className="auth-form" onSubmit={submit} noValidate>{isSignup && <><label htmlFor="signup-name">{c.fields.fullName.label}</label><input id="signup-name" value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" placeholder={c.fields.fullName.placeholder} required /><label htmlFor="signup-phone">{c.fields.phone.label}</label><input id="signup-phone" value={phone} onChange={(event) => setPhone(event.target.value.replace(/\D/g, '').slice(0, 10))} type="tel" inputMode="numeric" autoComplete="tel" placeholder={c.fields.phone.placeholder} required /><label htmlFor="signup-role">{c.fields.accountType.label}</label><select id="signup-role" value={role} onChange={(event) => setRole(event.target.value as SignupRole)}><option value="customer">{c.fields.accountType.options.customer}</option><option value="vendor">{c.fields.accountType.options.vendor}</option></select></>}<label htmlFor="login-username">{isSignup || isReset ? c.fields.email.label : c.fields.usernameOrEmail.label}</label><input id="login-username" value={username} onChange={(event) => setUsername(event.target.value)} type={isSignup || isReset ? 'email' : 'text'} autoComplete="username" autoCapitalize="none" spellCheck="false" placeholder={isSignup || isReset ? c.fields.email.placeholder : c.fields.usernameOrEmail.placeholder} required />{!isReset && <><label htmlFor="login-password">{c.fields.password.label}</label><span className="password-field"><input id="login-password" value={password} onChange={(event) => setPassword(event.target.value)} type={showPassword ? 'text' : 'password'} autoComplete={isSignup ? 'new-password' : 'current-password'} placeholder={isSignup ? c.fields.password.placeholderSignUp : c.fields.password.placeholderSignIn} required /><button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? c.shared.hidePassword : c.shared.showPassword}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></span></>} {isSignup && role === 'customer' && <div className="selfie-upload"><p className="selfie-upload-title">{c.selfie.title}</p><p className="selfie-upload-note">{c.selfie.note}</p>{selfiePreview && <img className="selfie-upload-preview" src={selfiePreview} alt={c.selfie.previewAlt} decoding="async" width={120} height={120} />}{cameraStream ? <div className="selfie-camera"><video ref={selfieVideoRef} className="selfie-camera-video" playsInline muted /><div className="selfie-upload-actions"><button type="button" className="button button-primary" onClick={() => void captureSelfie()}>{c.selfie.capture}</button><button type="button" className="button button-quiet" onClick={() => setCameraStream(null)}>{c.selfie.cancelCamera}</button></div></div> : <div className="selfie-upload-actions"><button type="button" className="button button-quiet" onClick={() => void takeSelfie()}>{c.selfie.takeSelfie}</button><button type="button" className="button button-quiet" onClick={() => photoInputRef.current?.click()}>{c.selfie.choosePhoto}</button></div>}<input ref={photoInputRef} type="file" accept="image/*" hidden onChange={(event) => { void choosePhoto(event.target.files?.[0]); event.target.value = '' }} /></div>}<button className="button button-primary button-large" type="submit">{isSignup ? c.actions.createAccount : isReset ? c.actions.sendReset : c.actions.logIn} {isSignup ? <ArrowRight size={15} /> : <LogIn size={15} />}</button></form><div className="auth-links">{!isSignup && !isReset && <button type="button" onClick={() => changeMode('reset')}>{c.actions.forgotPassword}</button>}{isReset && <button type="button" onClick={() => changeMode('login')}>{c.shared.backToLogin}</button>}{!isReset && <><span className="auth-switch"><span>{c.actions.separator}</span> <span>{isSignup ? c.actions.alreadyHaveAccount : c.actions.newHere}</span> <button type="button" onClick={() => changeMode(isSignup ? 'login' : 'signup')}>{isSignup ? c.actions.logIn : c.actions.createAnAccount}</button></span></>}</div></div></div></section>
+  return <section className="auth-screen"><div className="auth-story"><button className="auth-story-brand" onClick={() => navigate('home')} aria-label={c.shared.homeAriaLabel}><img className="brand-mark" src="/urban-tanker-mark.png" width={512} height={512} decoding="async" alt="" aria-hidden="true" /><span>{c.shared.brandPrefix}<b>{c.shared.brandName}</b></span></button><div className="auth-story-content"><p className="eyebrow">{c.shared.eyebrow}</p><h1>{story.titleLead}<em>{story.titleEmphasis}</em></h1><p>{story.copy}</p><div className="auth-proof"><ShieldCheck size={18} /><span>{c.shared.proof}</span></div></div><div className="auth-orbit" aria-hidden="true" /></div><div className="auth-panel"><button className="back-link" onClick={() => navigate('home')}><ArrowLeft size={14} /> {c.shared.backToHome}</button><div className="auth-panel-inner">{isSignup ? <p className="eyebrow">{c.panel.eyebrow.signUp}</p> : <p className="eyebrow">{c.panel.eyebrow.signIn}</p>}<h2>{isSignup ? c.panel.title.signUp : isReset ? c.panel.title.reset : c.panel.title.signIn}</h2><p className="auth-intro">{isSignup ? c.panel.intro.signUp : isReset ? c.panel.intro.reset : c.panel.intro.signIn}</p>{!isSignup && !isReset && googleSignInEnabled && <><button className="google-button" onClick={() => notifyInfo(c.google.note)}>{c.google.button} <span aria-hidden="true">{c.google.mark}</span></button><p className="provider-note">{c.google.note}</p><div className="or-divider"><span>{c.google.divider}</span></div></>}<form className="auth-form" onSubmit={submit} noValidate>{isSignup && <><label htmlFor="signup-name">{c.fields.fullName.label}</label><input id="signup-name" value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" placeholder={c.fields.fullName.placeholder} required /><label htmlFor="signup-phone">{c.fields.phone.label}</label><input id="signup-phone" value={phone} onChange={(event) => setPhone(event.target.value.replace(/\D/g, '').slice(0, 10))} type="tel" inputMode="numeric" autoComplete="tel" placeholder={c.fields.phone.placeholder} required /><label htmlFor="signup-role">{c.fields.accountType.label}</label><select id="signup-role" value={role} onChange={(event) => setRole(event.target.value as SignupRole)}><option value="customer">{c.fields.accountType.options.customer}</option><option value="vendor">{c.fields.accountType.options.vendor}</option><option value="admin">{c.fields.accountType.options.admin}</option></select>{role === 'vendor' && <><label htmlFor="signup-business">{c.fields.businessName.label}</label><input id="signup-business" value={businessName} onChange={(event) => setBusinessName(event.target.value)} autoComplete="organization" placeholder={c.fields.businessName.placeholder} required /><label htmlFor="signup-zone">{c.fields.serviceZone.label}</label><input id="signup-zone" value={serviceZone} onChange={(event) => setServiceZone(event.target.value)} placeholder={c.fields.serviceZone.placeholder} required /><button type="button" className="button button-quiet" onClick={captureLocation}>{coordinates ? c.fields.location.captured : c.fields.location.useCurrent}</button></>}</>}<label htmlFor="login-username">{isSignup || isReset ? c.fields.email.label : c.fields.usernameOrEmail.label}</label><input id="login-username" value={username} onChange={(event) => setUsername(event.target.value)} type={isSignup || isReset ? 'email' : 'text'} autoComplete="username" autoCapitalize="none" spellCheck="false" placeholder={isSignup || isReset ? c.fields.email.placeholder : c.fields.usernameOrEmail.placeholder} required />{!isReset && <><label htmlFor="login-password">{c.fields.password.label}</label><span className="password-field"><input id="login-password" value={password} onChange={(event) => setPassword(event.target.value)} type={showPassword ? 'text' : 'password'} autoComplete={isSignup ? 'new-password' : 'current-password'} placeholder={isSignup ? c.fields.password.placeholderSignUp : c.fields.password.placeholderSignIn} required /><button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? c.shared.hidePassword : c.shared.showPassword}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></span></>} {isSignup && <div className="selfie-upload"><p className="selfie-upload-title">{c.selfie.title}</p><p className="selfie-upload-note">{c.selfie.note}</p>{selfiePreview && <img className="selfie-upload-preview" src={selfiePreview} alt={c.selfie.previewAlt} decoding="async" width={120} height={120} />}{cameraStream ? <div className="selfie-camera"><video ref={selfieVideoRef} className="selfie-camera-video" playsInline muted /><div className="selfie-upload-actions"><button type="button" className="button button-primary" onClick={() => void captureSelfie()}>{c.selfie.capture}</button><button type="button" className="button button-quiet" onClick={() => setCameraStream(null)}>{c.selfie.cancelCamera}</button></div></div> : <div className="selfie-upload-actions"><button type="button" className="button button-quiet" onClick={() => void takeSelfie()}>{c.selfie.takeSelfie}</button><button type="button" className="button button-quiet" onClick={() => photoInputRef.current?.click()}>{c.selfie.choosePhoto}</button></div>}<input ref={photoInputRef} type="file" accept="image/*" hidden onChange={(event) => { void choosePhoto(event.target.files?.[0]); event.target.value = '' }} /></div>}<button className="button button-primary button-large" type="submit">{isSignup ? c.actions.createAccount : isReset ? c.actions.sendReset : c.actions.logIn} {isSignup ? <ArrowRight size={15} /> : <LogIn size={15} />}</button></form><div className="auth-links">{!isSignup && !isReset && <button type="button" onClick={() => changeMode('reset')}>{c.actions.forgotPassword}</button>}{isReset && <button type="button" onClick={() => changeMode('login')}>{c.shared.backToLogin}</button>}{!isReset && <><span className="auth-switch"><span>{c.actions.separator}</span> <span>{isSignup ? c.actions.alreadyHaveAccount : c.actions.newHere}</span> <button type="button" onClick={() => changeMode(isSignup ? 'login' : 'signup')}>{isSignup ? c.actions.logIn : c.actions.createAnAccount}</button></span></>}</div></div></div></section>
 }

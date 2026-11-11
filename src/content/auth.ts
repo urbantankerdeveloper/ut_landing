@@ -57,8 +57,23 @@ export const authContent = {
       label: 'Account type',
       options: {
         customer: 'Customer',
-        vendor: 'Vendor partner',
+        vendor: 'Vendor (needs approval)',
+        admin: 'Admin (needs approval)',
       },
+    },
+    businessName: {
+      label: 'Business name',
+      placeholder: 'Your company or trading name',
+    },
+    serviceZone: {
+      label: 'Service zone',
+      placeholder: 'e.g. Koramangala, Bengaluru',
+    },
+    location: {
+      label: 'Location (optional)',
+      useCurrent: 'Use my current location',
+      captured: 'Location captured',
+      unavailable: 'Location is unavailable on this device.',
     },
     email: {
       label: 'Email',
@@ -127,6 +142,8 @@ export const authContent = {
   },
   messages: {
     incompleteSignUp: 'Complete all required account fields before continuing.',
+    incompleteVendorSignUp: 'Enter your business name and service zone to create a vendor account.',
+    accountCreatedAdminApproval: 'Account created. An existing admin must approve it before you can sign in.',
     accountCreatedConfirmEmail: 'Account created. Check your email and confirm your address before signing in.',
     accountCreatedFollowEmail: 'Account created. Follow the email instructions to finish registration.',
     accountCreatedNoRole: 'Your account was created but has no valid workspace role.',
