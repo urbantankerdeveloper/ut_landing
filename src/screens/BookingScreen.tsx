@@ -7,6 +7,8 @@ import { ArrowLeft, ArrowRight, Check, CreditCard, Crosshair, MapPin, Phone, Plu
 import { useAppNavigation } from '../routing/useAppNavigation'
 import { useCreateCustomerAddress, useCreateCustomerBooking, useCustomerAddresses, useCustomerOffers, useCustomerPhoneVerification, useCustomerPricing, useCustomerServices } from '../hooks/useCustomerData'
 import { useCouponValidation, useRazorpayPayment } from '../hooks/useFrontendFeatures'
+import { CheckoutError } from '../utils/razorpayCheckout'
+import { PaymentReceiptCard } from '../components/PaymentReceiptCard'
 import { useAuthStore } from '../stores/authStore'
 import { customerApi, type BookingPaymentMethod, type BookingServiceDetails, type CustomerBooking, type SavedAddress } from '../api/customer'
 import { customerDemoDataEnabled } from '../constants/demo'
@@ -276,6 +278,7 @@ export default function BookingScreen() {
   const createBooking = useCreateCustomerBooking()
   const servicesQuery = useCustomerServices()
   const razorpay = useRazorpayPayment()
+  const [paymentFailure, setPaymentFailure] = useState<CheckoutError | null>(null)
   const couponValidation = useCouponValidation()
   const user = useAuthStore((state) => state.user)
   const isRegisteredCustomer = Boolean(user && !user.username.startsWith('guest_'))
@@ -659,6 +662,7 @@ export default function BookingScreen() {
   async function confirmBooking() {
     setIsSubmitting(true)
     setError(null)
+    setPaymentFailure(null)
     try {
       const primaryService = serviceItems[0]
       if (!primaryService) throw new Error(c.errors.selectServiceBeforeConfirm)
@@ -699,9 +703,43 @@ export default function BookingScreen() {
       sessionStorage.removeItem(BOOKING_DRAFT_KEY)
       setStep('success')
     } catch (paymentError) {
-      setError(paymentError instanceof Error && paymentError.message === 'Payment cancelled' ? c.errors.paymentCancelled : paymentError instanceof Error ? paymentError.message : c.errors.bookingFailed)
+      if (paymentError instanceof CheckoutError) setPaymentFailure(paymentError)
+      else setError(paymentError instanceof Error ? paymentError.message : c.errors.bookingFailed)
     } finally { setIsSubmitting(false) }
   }
+
+  // Only cancelled or failed checkouts can fall back to COD. A verification failure may already be paid, so it must not.
+  async function retryVerification() {
+    if (!paymentFailure?.pending) return
+    setIsSubmitting(true)
+    setError(null)
+    try {
+      await razorpay.verifyPending(paymentFailure.pending)
+      setPaymentFailure(null)
+      sessionStorage.removeItem(BOOKING_DRAFT_KEY)
+      setStep('success')
+    } catch (verifyError) {
+      if (verifyError instanceof CheckoutError) setPaymentFailure(verifyError)
+      else setError(verifyError instanceof Error ? verifyError.message : c.errors.bookingFailed)
+    } finally { setIsSubmitting(false) }
+  }
+
+  async function payOnDeliveryInstead() {
+    if (!bookingId) return
+    setIsSubmitting(true)
+    setError(null)
+    try {
+      await customerApi.switchBookingToCashOnDelivery(bookingId)
+      setValue('paymentMethod', 'cod')
+      setPaymentFailure(null)
+      sessionStorage.removeItem(BOOKING_DRAFT_KEY)
+      setStep('success')
+    } catch (switchError) {
+      setError(switchError instanceof Error ? switchError.message : c.errors.bookingFailed)
+    } finally { setIsSubmitting(false) }
+  }
+
+  const paymentFailureMessage = paymentFailure?.kind === 'cancelled' ? c.errors.paymentCancelled : paymentFailure?.kind === 'failed' ? c.errors.paymentFailed : c.errors.paymentVerifyFailed
 
   const summaryItems: BookingSummaryItem[] = serviceItems.map((item, index) => {
     const serviceName = options.find((option) => option.code === item.serviceId)?.label ?? item.serviceId
@@ -713,7 +751,7 @@ export default function BookingScreen() {
     return { id: activeServiceEntries[index]?.id ?? `${item.serviceId}-${index}`, label: duplicateCount ? c.serviceSummary.duplicateLabel(serviceName, duplicateCount + 1) : serviceName, detail: details, amount: estimatedServiceAmount(item, serviceOption), estimatePending }
   })
 
-  if (step === 'success') return <section className="booking-screen"><BookingHero onBack={() => navigate('home')} /><div className="booking-new-shell"><div className="surface booking-success"><span className="success-mark">✓</span><p className="eyebrow">{c.success.eyebrow}</p><h2>{c.success.heading}</h2><p>{c.success.referenceLead} <strong>{bookingId ?? c.success.referenceFallback}</strong> {c.success.referenceTrail}</p><div className="action-row"><button className="button button-primary" type="button" onClick={() => navigate('home')}>{c.success.returnHome} <ArrowRight size={15} /></button></div></div></div></section>
+  if (step === 'success') return <section className="booking-screen"><BookingHero onBack={() => navigate('home')} /><div className="booking-new-shell"><div className="surface booking-success"><span className="success-mark">✓</span><p className="eyebrow">{c.success.eyebrow}</p><h2>{c.success.heading}</h2><p>{c.success.referenceLead} <strong>{bookingId ?? c.success.referenceFallback}</strong> {c.success.referenceTrail}</p>{bookingId && !customerDemoDataEnabled && paymentMethod === 'gateway' && <PaymentReceiptCard bookingId={bookingId} />}<div className="action-row"><button className="button button-primary" type="button" onClick={() => navigate('home')}>{c.success.returnHome} <ArrowRight size={15} /></button></div></div></div></section>
 
   if (step === 'review' || step === 'payment') return <section className="booking-screen">
     <BookingHero onBack={() => navigate('home')} />
@@ -740,7 +778,17 @@ export default function BookingScreen() {
               <label className={paymentMethod === 'wallet' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'wallet'} onChange={() => setValue('paymentMethod', 'wallet')} /><Wallet size={18} /><span><b>{c.payment.methods[0].title}</b><small>{c.payment.methods[0].detail}</small></span></label>
               <label className={paymentMethod === 'gateway' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'gateway'} onChange={() => setValue('paymentMethod', 'gateway')} /><CreditCard size={18} /><span><b>{c.payment.methods[1].title}</b><small>{c.payment.methods[1].detail}</small></span></label>
               <label className={paymentMethod === 'cod' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'cod'} onChange={() => setValue('paymentMethod', 'cod')} /><Wallet size={18} /><span><b>{c.payment.methods[2].title}</b><small>{c.payment.methods[2].detail}</small></span></label>
-              <button className="button button-primary button-large" disabled={isSubmitting || gstRate === undefined} onClick={() => void confirmBooking()}>{isSubmitting ? c.payment.processing : c.payment.confirmBooking(total.toLocaleString('en-IN'))} <Check size={16} /></button>
+              {paymentFailure ? <div className="payment-recovery" role="alert">
+                <p>{paymentFailureMessage}</p>
+                <div className="action-row">
+                  {paymentFailure.kind === 'verification'
+                    ? <button className="button button-primary" type="button" disabled={isSubmitting} onClick={() => void retryVerification()}>{c.payment.retryConfirmation}</button>
+                    : <>
+                        <button className="button button-primary" type="button" disabled={isSubmitting} onClick={() => { setPaymentFailure(null); void confirmBooking() }}>{c.payment.tryAgain}</button>
+                        <button className="button button-quiet" type="button" disabled={isSubmitting} onClick={() => void payOnDeliveryInstead()}>{c.payment.payOnDelivery}</button>
+                      </>}
+                </div>
+              </div> : <button className="button button-primary button-large" disabled={isSubmitting || gstRate === undefined} onClick={() => void confirmBooking()}>{isSubmitting ? c.payment.processing : c.payment.confirmBooking(total.toLocaleString('en-IN'))} <Check size={16} /></button>}
             </div>
           </>}
           {error && <p className="login-error" role="alert">{error}</p>}

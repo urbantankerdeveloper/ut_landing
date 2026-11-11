@@ -1,4 +1,4 @@
-import { apiFetch } from './client'
+import { ApiError, apiFetch } from './client'
 import { feedbackContent } from '../content/feedback'
 
 export type CustomerBooking = { id: string; service: string; services: BookingServiceDetails[]; location: string; status: string; amount: number; scheduledAt: string; phone?: string; notes?: string; paymentMethod?: BookingPaymentMethod; latitude?: number; longitude?: number }
@@ -15,6 +15,7 @@ export type CustomerProfileUpdate = Pick<CustomerProfile, 'name' | 'email'> & { 
 export type TrackingSnapshot = { orderId: string; status: string; latitude?: number; longitude?: number; customerLatitude?: number; customerLongitude?: number; eta?: string; vehicle?: string; driver?: string; otpRequired?: boolean; recorded_at?: string; recordedAt?: string; trackingAvailable?: boolean }
 export type PaymentOrder = { id: string; amount: number; currency: string; keyId?: string }
 export type PaymentVerification = { verified: boolean; orderId: string }
+export type PaymentReceipt = { status: 'pending' | 'paid' | 'failed' | 'refunded'; amountPaise: number; currency: string; method: string | null; cardNetwork: string | null; cardLast4: string | null; bank: string | null; wallet: string | null; vpa: string | null; capturedAt: string | null; feePaise: number | null; taxPaise: number | null; refundedPaise: number | null }
 export type BookingPaymentMethod = 'wallet' | 'gateway' | 'cod'
 export type BookingServiceDetails = { serviceId: string; capacity?: string; waterType?: string; tankerCount?: string; serviceType?: string; quantity?: string; depth?: string; grade?: string; pump?: string; pickupLocation?: string; materialType?: string; details: string; deliveryDate?: string; preferredTime?: string; location?: string; phone?: string; latitude?: number; longitude?: number; phoneVerificationChallengeId?: string }
 export type CreateBookingPayload = { idempotencyKey: string; serviceId: string; services: BookingServiceDetails[]; capacity: string; location: string; deliveryDate: string; preferredTime?: string; notes?: string; couponCode?: string; phone?: string; phoneVerificationChallengeId?: string; latitude?: number; longitude?: number; paymentMethod?: BookingPaymentMethod }
@@ -108,6 +109,26 @@ function normalizeBooking(item: Record<string, unknown>): CustomerBooking {
 }
 function normalizeSubscription(item: Record<string, unknown>): CustomerSubscription { return { id: String(item.id), name: String(item.name ?? item.plan_id ?? 'Subscription'), status: item.status as CustomerSubscription['status'], nextDelivery: item.nextDelivery as string | undefined ?? item.next_delivery as string | undefined, amount: Number(item.amount ?? 0) } }
 
+// A 409 "already been processed" means the webhook or an earlier verify already settled this payment, so it counts as success.
+async function verifyRazorpayPayment(payload: { orderId: string; paymentId: string; signature: string }): Promise<PaymentVerification> {
+  try {
+    return await apiFetch<PaymentVerification>('/payment/razorpay/verify', { method: 'POST', body: JSON.stringify(payload) })
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 409 && /already been processed/i.test(error.serverMessage ?? '')) return { verified: true, orderId: payload.orderId }
+    throw error
+  }
+}
+
+// Returns null when the booking has no payment row yet.
+async function fetchPaymentReceipt(bookingId: string): Promise<PaymentReceipt | null> {
+  try {
+    return await apiFetch<PaymentReceipt>(`/customer/payments/${bookingId}`)
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return null
+    throw error
+  }
+}
+
 export const customerApi = {
   requestGuestOtp: (phone: string) => apiFetch<GuestOtpChallenge>('/auth/guest/request-otp', { method: 'POST', successMessage: feedbackContent.success.codeSent, body: JSON.stringify({ phone }) }),
   verifyGuestOtp: (payload: { challengeId: string; phone: string; otp: string; name?: string }) => apiFetch<GuestSession>('/auth/guest/verify-otp', { method: 'POST', body: JSON.stringify(payload) }),
@@ -130,7 +151,9 @@ export const customerApi = {
   cancelBooking: (orderId: string) => apiFetch<CustomerBooking>(`/customer/orders/${orderId}/status`, { method: 'PATCH', successMessage: feedbackContent.success.cancelled, body: JSON.stringify({ status: 'cancelled' }) }),
   rateBooking: (orderId: string, rating: number, review?: string) => apiFetch<unknown>(`/customer/orders/${orderId}/rating`, { method: 'POST', body: JSON.stringify({ rating, review }) }),
   createPaymentOrder: (payload: { amount: number; bookingId: string }) => apiFetch<PaymentOrder>('/payment/razorpay/order', { method: 'POST', body: JSON.stringify(payload) }),
-  verifyPayment: (payload: { orderId: string; paymentId: string; signature: string }) => apiFetch<PaymentVerification>('/payment/razorpay/verify', { method: 'POST', body: JSON.stringify(payload) }),
+  verifyPayment: verifyRazorpayPayment,
+  getPaymentReceipt: fetchPaymentReceipt,
+  switchBookingToCashOnDelivery: (orderId: string) => apiFetch<unknown>(`/customer/orders/${orderId}/payment-method`, { method: 'POST', successMessage: 'Booking set to pay on delivery.', body: JSON.stringify({ paymentMethod: 'cod' }) }),
   addresses: () => apiFetch<SavedAddress[]>('/customer/addresses'),
   createAddress: (payload: Omit<SavedAddress, 'id'>) => apiFetch<SavedAddress>('/customer/addresses', { method: 'POST', body: JSON.stringify(payload) }),
   deleteAddress: (id: string) => apiFetch<void>(`/customer/addresses/${id}`, { method: 'DELETE' }),

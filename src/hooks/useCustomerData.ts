@@ -3,10 +3,10 @@ import { customerApi, type CreateBookingPayload, type CreateSupportRequestPayloa
 import { customerDemoDataEnabled } from '../constants/demo'
 import { useRealtimeInvalidation } from './useRealtimeInvalidation'
 import { useRealtimeConnected } from '../stores/realtimeStore'
-import { loadRazorpayWidget } from './useFrontendFeatures'
+import { loadRazorpayWidget } from '../utils/razorpayCheckout'
 
 const customerQueryOptions = { enabled: !customerDemoDataEnabled, staleTime: 60_000 }
-export const customerQueryKeys = { bookings: ['customer', 'bookings'], addresses: ['customer', 'addresses'], subscriptions: ['customer', 'subscriptions'], invoices: ['customer', 'invoices'], support: ['customer', 'support'], profile: ['customer', 'profile'], wallet: ['customer', 'wallet'], contracts: ['customer', 'contracts'], offers: ['customer', 'offers'], membershipPlans: ['customer', 'membership-plans'], membership: ['customer', 'membership'], notifications: ['customer', 'notifications'], tracking: (orderId: string) => ['customer', 'tracking', orderId] } as const
+export const customerQueryKeys = { bookings: ['customer', 'bookings'], addresses: ['customer', 'addresses'], subscriptions: ['customer', 'subscriptions'], invoices: ['customer', 'invoices'], support: ['customer', 'support'], profile: ['customer', 'profile'], wallet: ['customer', 'wallet'], contracts: ['customer', 'contracts'], offers: ['customer', 'offers'], membershipPlans: ['customer', 'membership-plans'], membership: ['customer', 'membership'], notifications: ['customer', 'notifications'], paymentReceipt: (bookingId: string) => ['customer', 'payments', bookingId] as const, tracking: (orderId: string) => ['customer', 'tracking', orderId] } as const
 
 export function useCustomerBookings() { const query = useInfiniteQuery({ queryKey: customerQueryKeys.bookings, initialPageParam: 0, queryFn: ({ pageParam }) => customerApi.bookings(pageParam), getNextPageParam: (lastPage) => lastPage.nextOffset ?? undefined, ...customerQueryOptions }); useRealtimeInvalidation(customerQueryKeys.bookings); return { ...query, data: query.data?.pages.flatMap((page) => page.rows) } }
 export function useCustomerPhoneVerification(enabled: boolean) { return useQuery({ queryKey: ['customer', 'phone-verification'], queryFn: customerApi.phoneVerification, enabled: enabled && !customerDemoDataEnabled, staleTime: 60_000 }) }

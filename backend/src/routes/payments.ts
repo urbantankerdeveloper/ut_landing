@@ -6,9 +6,28 @@ import { requireAuth, requireRole } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 import { logger } from '../lib/logger.js'
 import { refundAmountInPaise, signaturesMatch } from '../services/paymentSecurity.js'
+import { epochSecondsToIso, extractPaymentDetails, type RazorpayPaymentEntity } from '../services/paymentDetails.js'
+import { refundCapturedAfterCod } from '../services/paymentReconciliation.js'
 import { failure } from '../lib/httpErrors.js'
 const router = Router()
 const razorpay = () => ({ key: process.env.RAZORPAY_KEY_ID, secret: process.env.RAZORPAY_KEY_SECRET })
+
+// Returns null (never throws) so a Razorpay hiccup cannot fail a verify that the signature already proves.
+async function fetchRazorpayPayment(paymentId: string, keys: { key?: string; secret?: string }): Promise<RazorpayPaymentEntity | null> {
+  if (!keys.key || !keys.secret) return null
+  const auth = Buffer.from(`${keys.key}:${keys.secret}`).toString('base64')
+  try {
+    const providerResponse = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}`, { headers: { Authorization: `Basic ${auth}` }, signal: AbortSignal.timeout(8000) })
+    if (!providerResponse.ok) {
+      logger.warn('payment.details_fetch_failed', { providerPaymentId: paymentId, providerStatus: providerResponse.status })
+      return null
+    }
+    return await providerResponse.json() as RazorpayPaymentEntity
+  } catch (error) {
+    logger.warn('payment.details_fetch_failed', { providerPaymentId: paymentId, reason: error instanceof Error ? error.name : 'unknown' })
+    return null
+  }
+}
 router.post('/razorpay/order', requireAuth, async (request, response) => {
   const parsed = z.object({ amount: z.number().positive().optional(), bookingId: z.string().uuid() }).safeParse(request.body)
   const keys = razorpay()
@@ -49,11 +68,18 @@ router.post('/razorpay/verify', requireAuth, async (request, response) => {
   const expectedBuffer = Buffer.from(expected)
   const receivedBuffer = Buffer.from(parsed.data.signature)
   if (expectedBuffer.length !== receivedBuffer.length || !crypto.timingSafeEqual(expectedBuffer, receivedBuffer)) return response.status(400).json({ error: 'Invalid payment signature' })
-  const { data: payment, error: paymentError } = await supabase.from('payments').select('id,booking_id').eq('provider_order_id', parsed.data.orderId).single()
+  const { data: payment, error: paymentError } = await supabase.from('payments').select('id,booking_id,amount_paise').eq('provider_order_id', parsed.data.orderId).single()
   if (paymentError || !payment) return response.status(404).json({ error: 'Payment order not found' })
   const { data: booking, error: bookingError } = await supabase.from('bookings').select('id').eq('id', payment.booking_id).eq('customer_id', request.authUser!.id).single()
   if (bookingError || !booking) return response.status(403).json({ error: 'Payment is not owned by this customer' })
-  const { data: settled, error } = await supabase.from('payments').update({ provider_payment_id: parsed.data.paymentId, status: 'paid', updated_at: new Date().toISOString() }).eq('id', payment.id).in('status', ['pending', 'failed']).select('id').maybeSingle()
+  const entity = await fetchRazorpayPayment(parsed.data.paymentId, keys)
+  if (entity && ((entity.order_id && entity.order_id !== parsed.data.orderId) || (typeof entity.amount === 'number' && entity.amount !== payment.amount_paise))) {
+    logger.error('payment.amount_mismatch', { providerOrderId: parsed.data.orderId, capturedPaise: entity.amount, expectedPaise: payment.amount_paise })
+    return response.status(409).json({ error: 'Payment amount does not match this booking. Contact support.' })
+  }
+  // Detail is written only when the fetch succeeded; otherwise the webhook fills it in later.
+  const details = entity ? { ...extractPaymentDetails(entity), captured_at: entity.status === 'captured' ? new Date().toISOString() : null } : {}
+  const { data: settled, error } = await supabase.from('payments').update({ provider_payment_id: parsed.data.paymentId, status: 'paid', ...details, updated_at: new Date().toISOString() }).eq('id', payment.id).in('status', ['pending', 'failed']).select('id').maybeSingle()
   if (error) return databaseFailure(response, 'payments.verify_failed', error, 400)
   if (!settled) return response.status(409).json({ error: 'This payment has already been processed.' })
   response.json({ verified: true, orderId: payment.booking_id })
@@ -66,20 +92,59 @@ router.post('/razorpay/webhook', async (request, response) => {
   if (!raw) return response.status(400).json({ error: 'Raw webhook body is unavailable' })
   const expected = crypto.createHmac('sha256', secret).update(raw).digest('hex')
   if (!signaturesMatch(expected, signature)) return response.status(400).json({ error: 'Invalid webhook signature' })
-  let event: { event?: string; payload?: { payment?: { entity?: { id?: string; order_id?: string; amount?: number } } } }
+  let event: { event?: string; created_at?: number; payload?: { payment?: { entity?: RazorpayPaymentEntity & { id?: string; order_id?: string; amount?: number } } } }
   try { event = JSON.parse(raw.toString('utf8')) as typeof event } catch { return response.status(400).json({ error: 'Invalid webhook payload' }) }
   const paymentEntity = event.payload?.payment?.entity
   const status = event.event === 'payment.captured' ? 'paid' : event.event === 'payment.authorized' ? 'pending' : event.event === 'payment.failed' ? 'failed' : null
   if (status && paymentEntity?.order_id && paymentEntity.id) {
-    const { data: payment, error: lookupError } = await supabase.from('payments').select('amount_paise').eq('provider_order_id', paymentEntity.order_id).maybeSingle()
+    const { data: payment, error: lookupError } = await supabase.from('payments').select('id,amount_paise,booking_id').eq('provider_order_id', paymentEntity.order_id).maybeSingle()
     if (lookupError) return databaseFailure(response, 'payments.webhook_lookup_failed', lookupError, 500, 'Payment event could not be persisted')
-    if (status === 'paid' && payment && paymentEntity.amount !== payment.amount_paise) {
+    if (!payment) {
+      if (status === 'paid') {
+        // Wallet top-ups have no payments row; mirror the client verify path for them.
+        const { data: topUp, error: topUpError } = await supabase.from('wallet_transactions').select('id,amount').eq('provider_reference', paymentEntity.order_id).eq('status', 'pending')
+        if (topUpError) return databaseFailure(response, 'payments.webhook_lookup_failed', topUpError, 500, 'Payment event could not be persisted')
+        const row = topUp?.[0]
+        if (row && Math.round(Number(row.amount) * 100) === paymentEntity.amount) {
+          const { error: settleError } = await supabase.from('wallet_transactions').update({ provider_reference: paymentEntity.id, status: 'completed' }).eq('id', row.id).eq('status', 'pending')
+          if (settleError) return databaseFailure(response, 'payments.webhook_update_failed', settleError, 500, 'Payment event could not be persisted')
+          return response.status(202).json({ accepted: true })
+        }
+      }
+      logger.warn('payment.webhook_no_matching_row', { providerOrderId: paymentEntity.order_id, status })
+      return response.status(202).json({ accepted: true })
+    }
+    if (status === 'paid' && paymentEntity.amount !== payment.amount_paise) {
       logger.error('payment.amount_mismatch', { providerOrderId: paymentEntity.order_id, capturedPaise: paymentEntity.amount, expectedPaise: payment.amount_paise })
       return response.status(202).json({ accepted: true })
     }
-    const { data: updated, error } = await supabase.from('payments').update({ provider_payment_id: paymentEntity.id, status, raw_webhook: event, updated_at: new Date().toISOString() }).eq('provider_order_id', paymentEntity.order_id).in('status', ['pending', 'failed']).select('id')
+    const update: Record<string, unknown> = { provider_payment_id: paymentEntity.id, status, raw_webhook: event, ...extractPaymentDetails(paymentEntity), updated_at: new Date().toISOString() }
+    if (status === 'paid') {
+      update.captured_at = epochSecondsToIso(event.created_at) ?? new Date().toISOString()
+      // The customer switched to cash after starting online payment, so this capture needs an admin to look at it.
+      const { data: booking, error: bookingError } = await supabase.from('bookings').select('payment_method').eq('id', payment.booking_id).maybeSingle()
+      if (bookingError) return databaseFailure(response, 'payments.webhook_lookup_failed', bookingError, 500, 'Payment event could not be persisted')
+      if (booking?.payment_method === 'cod') {
+        update.reconciliation_note = 'captured_after_cod_switch'
+        logger.warn('payment.captured_after_cod_switch', { providerOrderId: paymentEntity.order_id })
+      }
+    }
+    // A paid event may also refresh a row that verify already marked paid, but only for the same payment id.
+    const filtered = supabase.from('payments').update(update).eq('provider_order_id', paymentEntity.order_id)
+    const { data: updated, error } = await (status === 'paid'
+      ? filtered.or(`status.in.(pending,failed),and(status.eq.paid,provider_payment_id.eq.${paymentEntity.id})`)
+      : filtered.in('status', ['pending', 'failed'])
+    ).select('id')
     if (error) return databaseFailure(response, 'payments.webhook_update_failed', error, 500, 'Payment event could not be persisted')
     if (!updated?.length) logger.warn('payment.webhook_no_matching_row', { providerOrderId: paymentEntity.order_id, status })
+    else if (update.reconciliation_note === 'captured_after_cod_switch') {
+      // A failed refund stays flagged, and the reconciliation sweep retries it.
+      try {
+        await refundCapturedAfterCod({ id: payment.id, provider_payment_id: paymentEntity.id, amount_paise: payment.amount_paise })
+      } catch (refundError) {
+        logger.error('payment.cod_refund_failed', { paymentId: payment.id, error: refundError instanceof Error ? refundError.message : String(refundError) })
+      }
+    }
   }
   response.status(202).json({ accepted: true })
 })

@@ -1143,6 +1143,34 @@ alter table public.bookings drop constraint if exists bookings_customer_id_fkey;
 alter table public.bookings add constraint bookings_customer_id_fkey foreign key (customer_id) references public.profiles(id) on delete set null;
 alter table public.invoices drop constraint if exists invoices_customer_id_fkey;
 alter table public.invoices add constraint invoices_customer_id_fkey foreign key (customer_id) references public.profiles(id) on delete set null;
+
+-- ===== 16. Structured Razorpay payment details (additive; raw_webhook stays as the full-fidelity copy) =====
+-- Null means "not reported by Razorpay yet" (for example fee/tax before settlement), not zero.
+alter table public.payments add column if not exists method text;
+alter table public.payments add column if not exists bank text;
+alter table public.payments add column if not exists wallet text;
+alter table public.payments add column if not exists vpa text;
+alter table public.payments add column if not exists card_network text;
+alter table public.payments add column if not exists card_last4 text;
+alter table public.payments add column if not exists card_type text;
+alter table public.payments add column if not exists card_issuer text;
+alter table public.payments add column if not exists international boolean;
+alter table public.payments add column if not exists fee_paise integer check (fee_paise is null or fee_paise >= 0);
+alter table public.payments add column if not exists tax_paise integer check (tax_paise is null or tax_paise >= 0);
+alter table public.payments add column if not exists payer_email text;
+alter table public.payments add column if not exists payer_contact text;
+alter table public.payments add column if not exists captured_at timestamptz;
+alter table public.payments add column if not exists error_code text;
+alter table public.payments add column if not exists error_description text;
+alter table public.payments add column if not exists error_source text;
+alter table public.payments add column if not exists error_step text;
+alter table public.payments add column if not exists error_reason text;
+-- Audit trail for background reconciliation and flags that need admin attention (see services/paymentReconciliation.ts).
+alter table public.payments add column if not exists reconciled_at timestamptz;
+alter table public.payments add column if not exists reconciliation_note text;
+create index if not exists payments_status_captured_idx on public.payments (status, captured_at desc);
+create index if not exists payments_unreconciled_pending_idx on public.payments (created_at) where status = 'pending' and reconciled_at is null;
+create index if not exists payments_reconciliation_note_idx on public.payments (reconciliation_note) where reconciliation_note is not null;
 alter table public.ratings drop constraint if exists ratings_customer_id_fkey;
 alter table public.ratings add constraint ratings_customer_id_fkey foreign key (customer_id) references public.profiles(id) on delete set null;
 alter table public.complaints drop constraint if exists complaints_customer_id_fkey;
