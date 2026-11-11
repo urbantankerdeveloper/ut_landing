@@ -1,12 +1,14 @@
 import { supabase } from '../supabase.js'
 import { logger } from '../lib/logger.js'
 import { epochSecondsToIso, extractPaymentDetails, type RazorpayPaymentEntity } from './paymentDetails.js'
-import { notifyPaidOnlineAfterCodSwitch } from './codOnlineSwitch.js'
+import { notifyPaidOnlineAfterCodSwitch, notifyRevertedToCash, codSwitchStatuses } from './codOnlineSwitch.js'
 
 // Notes an admin should look at. Kept in one place so the admin filter and the writers agree.
 export const ATTENTION_NOTES = ['amount_mismatch', 'authorized_not_captured', 'captured_after_cod_switch', 'auto_refund_in_progress', 'auto_refunded_after_cod_switch'] as const
 
 const RECONCILE_AFTER_MS = 15 * 60 * 1000
+// A customer who chose online payment and has not paid after this long goes back to cash.
+const SWITCH_ABANDON_AFTER_MS = 15 * 60 * 1000
 // Orders still unpaid after this long are abandoned; the sweep stops re-checking them.
 const RECHECK_WINDOW_MS = 24 * 60 * 60 * 1000
 const BATCH_SIZE = 50
@@ -120,7 +122,7 @@ export async function runPaymentReconciliationSweep() {
     .eq('status', 'pending').not('provider_order_id', 'is', null)
     .gte('created_at', giveUpCutoff).lte('created_at', recheckCutoff)
     .or(`reconciled_at.is.null,reconciled_at.lte.${recheckCutoff}`)
-    .or('reconciliation_note.is.null,reconciliation_note.in.(no_capture_found,authorized_not_captured)')
+    .or('reconciliation_note.is.null,reconciliation_note.in.(no_capture_found,authorized_not_captured,switch_reverted)')
     .order('reconciled_at', { ascending: true, nullsFirst: true }).limit(BATCH_SIZE)
   if (error) throw new Error(`Payment reconciliation scan failed: ${error.message}`)
 
@@ -156,5 +158,60 @@ export async function runPaymentReconciliationSweep() {
       logger.warn('payment.cod_refund_failed', { paymentId: row.id, error: refundError instanceof Error ? refundError.message : String(refundError) })
     }
   }
+  // Last so its queries do not change the order of the scans above.
+  const switchCounts = await revertAbandonedCodSwitches()
+  return { ...counts, switchesReverted: switchCounts.reverted }
+}
+
+type StaleSwitch = { id: string; payment_switched_to_online_at: string }
+
+// Sends a booking back to cash when the customer chose online payment and never paid. Anything Razorpay
+// shows as captured is left alone, so the payment sweep can settle it.
+export async function revertAbandonedCodSwitches(now: Date = new Date()): Promise<{ reverted: number; skipped: number }> {
+  const counts = { reverted: 0, skipped: 0 }
+  const cutoff = new Date(now.getTime() - SWITCH_ABANDON_AFTER_MS).toISOString()
+  const { data, error } = await supabase.from('bookings').select('id,payment_switched_to_online_at')
+    .eq('payment_method', 'gateway').in('status', codSwitchStatuses).lte('payment_switched_to_online_at', cutoff)
+    .order('payment_switched_to_online_at', { ascending: true }).limit(BATCH_SIZE)
+  if (error) throw new Error(`Abandoned switch scan failed: ${error.message}`)
+
+  for (const booking of (data ?? []) as StaleSwitch[]) {
+    try {
+      if (await revertIfUnpaid(booking, now) === 'reverted') counts.reverted += 1
+      else counts.skipped += 1
+    } catch (revertError) {
+      counts.skipped += 1
+      logger.warn('payment.switch_revert_failed', { bookingId: booking.id, error: revertError instanceof Error ? revertError.message : String(revertError) })
+    }
+  }
   return counts
+}
+
+async function revertIfUnpaid(booking: StaleSwitch, now: Date): Promise<'reverted' | 'skipped'> {
+  const { data: payment, error: paymentError } = await supabase.from('payments').select('id,status,provider_order_id').eq('booking_id', booking.id).maybeSingle()
+  if (paymentError) throw new Error(`Payment lookup failed: ${paymentError.message}`)
+  if (payment?.status === 'paid') return 'skipped'
+  if (payment?.provider_order_id) {
+    const orderPayments = await fetchOrderPayments(payment.provider_order_id)
+    // No keys, or Razorpay shows a capture: the payment sweep settles it instead of reverting.
+    if (!orderPayments || orderPayments.some((entry) => entry.status === 'captured')) return 'skipped'
+  }
+
+  const nowIso = now.toISOString()
+  // Conditional on the switch timestamp, so a booking the customer re-switched in the meantime is not reverted.
+  const { data: reverted, error: revertError } = await supabase.from('bookings')
+    .update({ payment_method: 'cod', payment_switched_to_online_at: null, updated_at: nowIso })
+    .eq('id', booking.id).eq('payment_method', 'gateway').eq('payment_switched_to_online_at', booking.payment_switched_to_online_at)
+    .in('status', codSwitchStatuses).select('id')
+  if (revertError) throw new Error(`Switch revert failed: ${revertError.message}`)
+  if (!reverted?.length) return 'skipped'
+
+  if (payment?.status === 'pending') {
+    // Keeps the payment on the sweep, so a capture that lands later is refunded as a COD capture.
+    const { error: noteError } = await supabase.from('payments').update({ reconciliation_note: 'switch_reverted', reconciled_at: nowIso, updated_at: nowIso }).eq('id', payment.id).eq('status', 'pending')
+    if (noteError) logger.warn('payment.switch_revert_note_failed', { bookingId: booking.id, error: noteError.message })
+  }
+  logger.info('payment.switch_reverted', { bookingId: booking.id })
+  await notifyRevertedToCash(booking.id)
+  return 'reverted'
 }

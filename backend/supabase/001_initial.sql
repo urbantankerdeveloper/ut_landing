@@ -1174,8 +1174,10 @@ create index if not exists payments_reconciliation_note_idx on public.payments (
 -- COD bookings switched to online mid-journey. The notification claim makes vendor and driver alerts fire once.
 alter table public.bookings add column if not exists payment_switched_to_online_at timestamptz;
 alter table public.bookings add column if not exists cod_online_notified_at timestamptz;
+create index if not exists bookings_switched_online_idx on public.bookings (payment_switched_to_online_at) where payment_method = 'gateway';
 insert into public.sms_templates (template_key, body, variables) values
-  ('cod_switched_to_online', 'Urban Tanker: Booking {{reference}} is paid online. Do NOT collect any cash from the customer.', '{reference}')
+  ('cod_switched_to_online', 'Urban Tanker: Booking {{reference}} is paid online. Do NOT collect any cash from the customer.', '{reference}'),
+  ('cod_reverted_to_cash', 'Urban Tanker: Booking {{reference}} is back to cash on delivery. Collect the payment from the customer.', '{reference}')
 on conflict (template_key) do nothing;
 alter table public.ratings drop constraint if exists ratings_customer_id_fkey;
 alter table public.ratings add constraint ratings_customer_id_fkey foreign key (customer_id) references public.profiles(id) on delete set null;

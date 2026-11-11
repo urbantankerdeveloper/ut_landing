@@ -33,8 +33,14 @@ vi.mock('../supabase.js', () => ({
   supabase: { from: (table: string) => queryBuilder(table) },
 }))
 vi.mock('../lib/logger.js', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }))
+vi.mock('./codOnlineSwitch.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./codOnlineSwitch.js')>()),
+  notifyPaidOnlineAfterCodSwitch: vi.fn(),
+  notifyRevertedToCash: vi.fn(),
+}))
 
-import { reconcilePayment, refundCapturedAfterCod, runPaymentReconciliationSweep } from './paymentReconciliation.js'
+import { notifyRevertedToCash } from './codOnlineSwitch.js'
+import { reconcilePayment, refundCapturedAfterCod, revertAbandonedCodSwitches, runPaymentReconciliationSweep } from './paymentReconciliation.js'
 
 const ROW = { id: 'pay-1', booking_id: 'bk-1', provider_order_id: 'order_1', amount_paise: 50000 }
 
@@ -160,7 +166,7 @@ describe('runPaymentReconciliationSweep', () => {
     setResults('payments', { data: null, error: null })
 
     await expect(runPaymentReconciliationSweep()).resolves.toEqual({
-      scanned: 2, paid: 0, flagged: 0, noCapture: 1, skipped: 0, failed: 1, refunded: 0, refundFailed: 0,
+      scanned: 2, paid: 0, flagged: 0, noCapture: 1, skipped: 0, failed: 1, refunded: 0, refundFailed: 0, switchesReverted: 0,
     })
   })
 
@@ -234,5 +240,82 @@ describe('refundCapturedAfterCod', () => {
     await expect(refundCapturedAfterCod(PAYMENT)).resolves.toBe('refund_failed')
     expect(state.updates[1]!.values).toMatchObject({ reconciliation_note: 'captured_after_cod_switch' })
     expect(state.updates[1]!.values).not.toHaveProperty('status')
+  })
+})
+
+describe('revertAbandonedCodSwitches', () => {
+  const STALE = { id: 'bk-1', payment_switched_to_online_at: '2025-01-01T00:00:00.000Z' }
+
+  beforeEach(() => {
+    state.results.clear()
+    state.updates.length = 0
+    state.calls.length = 0
+    vi.mocked(notifyRevertedToCash).mockClear()
+    vi.stubEnv('RAZORPAY_KEY_ID', 'rzp_test_key')
+    vi.stubEnv('RAZORPAY_KEY_SECRET', 'rzp_test_secret')
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+  })
+
+  it('reverts a stale unpaid switch to cash and notifies the vendor and driver', async () => {
+    setResults('bookings', { data: [STALE], error: null })
+    setResults('payments', { data: { id: 'pay-1', status: 'pending', provider_order_id: null }, error: null })
+    setResults('bookings', { data: [{ id: 'bk-1' }], error: null })
+
+    await expect(revertAbandonedCodSwitches()).resolves.toEqual({ reverted: 1, skipped: 0 })
+    expect(state.updates.find((entry) => entry.table === 'bookings')!.values).toMatchObject({ payment_method: 'cod', payment_switched_to_online_at: null })
+    expect(state.calls).toContainEqual(expect.objectContaining({ table: 'bookings', method: 'eq', args: ['payment_switched_to_online_at', STALE.payment_switched_to_online_at] }))
+    expect(state.updates.find((entry) => entry.table === 'payments')!.values).toMatchObject({ reconciliation_note: 'switch_reverted' })
+    expect(notifyRevertedToCash).toHaveBeenCalledWith('bk-1')
+  })
+
+  it('leaves a switch alone when Razorpay shows a capture, so the payment sweep settles it', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => razorpayItems([CAPTURED])))
+    setResults('bookings', { data: [STALE], error: null })
+    setResults('payments', { data: { id: 'pay-1', status: 'pending', provider_order_id: 'order_1' }, error: null })
+
+    await expect(revertAbandonedCodSwitches()).resolves.toEqual({ reverted: 0, skipped: 1 })
+    expect(state.updates.some((entry) => entry.table === 'bookings')).toBe(false)
+    expect(notifyRevertedToCash).not.toHaveBeenCalled()
+  })
+
+  it('skips a booking whose payment is already paid', async () => {
+    setResults('bookings', { data: [STALE], error: null })
+    setResults('payments', { data: { id: 'pay-1', status: 'paid', provider_order_id: 'order_1' }, error: null })
+
+    await expect(revertAbandonedCodSwitches()).resolves.toEqual({ reverted: 0, skipped: 1 })
+    expect(state.updates).toHaveLength(0)
+  })
+
+  it('does not revert a booking the customer re-switched in the meantime', async () => {
+    setResults('bookings', { data: [STALE], error: null })
+    setResults('bookings', { data: [], error: null })
+
+    await expect(revertAbandonedCodSwitches()).resolves.toEqual({ reverted: 0, skipped: 1 })
+    expect(notifyRevertedToCash).not.toHaveBeenCalled()
+  })
+
+  it('does not revert when Razorpay cannot be checked', async () => {
+    vi.unstubAllEnvs()
+    vi.stubEnv('RAZORPAY_KEY_ID', '')
+    vi.stubGlobal('fetch', vi.fn())
+    setResults('bookings', { data: [STALE], error: null })
+    setResults('payments', { data: { id: 'pay-1', status: 'pending', provider_order_id: 'order_1' }, error: null })
+
+    await expect(revertAbandonedCodSwitches()).resolves.toEqual({ reverted: 0, skipped: 1 })
+    expect(state.updates).toHaveLength(0)
+  })
+
+  it('keeps reverting other bookings when one booking fails', async () => {
+    setResults('bookings', { data: [STALE, { id: 'bk-2', payment_switched_to_online_at: STALE.payment_switched_to_online_at }], error: null })
+    setResults('payments', { data: null, error: { message: 'boom' } })
+    setResults('payments', { data: null, error: null })
+    setResults('bookings', { data: [{ id: 'bk-2' }], error: null })
+
+    await expect(revertAbandonedCodSwitches()).resolves.toEqual({ reverted: 1, skipped: 1 })
+    expect(notifyRevertedToCash).toHaveBeenCalledWith('bk-2')
   })
 })

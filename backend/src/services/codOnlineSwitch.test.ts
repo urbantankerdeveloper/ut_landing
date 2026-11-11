@@ -52,7 +52,7 @@ import { logger } from '../lib/logger.js'
 import { sendPushNotification } from './pushNotifications.js'
 import { emitRealtimeToVendor } from './realtime.js'
 import { sendTemplateSms } from './sms.js'
-import { notifyPaidOnlineAfterCodSwitch } from './codOnlineSwitch.js'
+import { notifyPaidOnlineAfterCodSwitch, notifyRevertedToCash } from './codOnlineSwitch.js'
 import customerRouter from '../routes/customerExtended.js'
 
 const BOOKING_ID = '11111111-1111-4111-8111-111111111111'
@@ -134,6 +134,27 @@ describe('notifyPaidOnlineAfterCodSwitch', () => {
   })
 })
 
+describe('notifyRevertedToCash', () => {
+  it('tells the vendor and driver to collect cash with the revert template', async () => {
+    setResults('bookings', { data: { ...switchedBooking, payment_method: 'cod', payment_switched_to_online_at: null }, error: null })
+    setResults('vendors', { data: { owner_profile_id: 'owner-1', phone_e164: '+919000000001' }, error: null })
+    setResults('drivers', { data: { mobile_e164: '+919000000002' }, error: null })
+    setResults('notifications', { data: null, error: null })
+
+    await notifyRevertedToCash(BOOKING_ID)
+
+    expect(vi.mocked(sendTemplateSms).mock.calls.map((call) => call[0])).toEqual(['cod_reverted_to_cash', 'cod_reverted_to_cash'])
+    expect(vi.mocked(sendPushNotification).mock.calls[0]?.[0]).toMatchObject({ recipientId: 'owner-1', title: 'Booking is cash on delivery' })
+  })
+
+  it('never throws when the booking lookup fails', async () => {
+    setResults('bookings', { data: null, error: { message: 'db down' } })
+
+    await expect(notifyRevertedToCash(BOOKING_ID)).resolves.toBeUndefined()
+    expect(vi.mocked(sendTemplateSms)).not.toHaveBeenCalled()
+  })
+})
+
 describe('POST /orders/:orderId/payment-method/online', () => {
   function app() {
     const instance = express()
@@ -160,6 +181,18 @@ describe('POST /orders/:orderId/payment-method/online', () => {
     expect(response.status).toBe(200)
     expect(response.body).toEqual({ id: BOOKING_ID, paymentMethod: 'gateway' })
     expect(updatePayloads('bookings')).toHaveLength(0)
+  })
+
+  it('returns 503 when the kill switch disables online switching', async () => {
+    vi.stubEnv('COD_ONLINE_SWITCH_ENABLED', 'false')
+    try {
+      const response = await request(app()).post(switchRoute)
+
+      expect(response.status).toBe(503)
+      expect(state.calls.some((call) => call.table === 'bookings')).toBe(false)
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it('rejects a switch once the driver has started the trip', async () => {
