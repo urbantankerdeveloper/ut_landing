@@ -63,6 +63,7 @@ const schema = z.object({
   SLOW_REQUEST_MS: z.coerce.number().int().nonnegative().default(800),
   CATALOG_CACHE_TTL_SECONDS: z.coerce.number().int().nonnegative().default(60),
   APPLIED_GST_PERCENTAGE: z.coerce.number({ error: 'APPLIED_GST_PERCENTAGE must be a number from 0 to 100 (see backend/.env.example)' }).min(0).max(100).default(18),
+  TEST_PRICING_ENABLED: z.preprocess((value) => value === undefined ? undefined : value === 'true', z.boolean().default(false)),
 })
 // Blank values (for example SUPABASE_SECRET_KEY= in .env.example) mean "not set".
 const environment = Object.fromEntries(Object.entries(process.env).map(([key, value]) => [key, value === '' ? undefined : value]))
@@ -82,6 +83,9 @@ if (parsed.NODE_ENV === 'production' && parsed.USE_DEFAULT_VERIFICATION_CODE) {
 }
 if (parsed.NODE_ENV === 'production' && parsed.SUPABASE_DB_URL && !parsed.DB_SSL_CA) {
   throw new Error('DB_SSL_CA is required in production so the database TLS certificate is verified. For local runs set NODE_ENV=development in backend/.env.local.')
+}
+if (parsed.NODE_ENV === 'production' && parsed.TEST_PRICING_ENABLED) {
+  throw new Error('TEST_PRICING_ENABLED must be false in production. It charges every service ₹1 with no GST.')
 }
 if (parsed.NODE_ENV === 'production' && parsed.REDIS_URL && !parsed.REDIS_URL.startsWith('rediss://')) {
   throw new Error('REDIS_URL must use the rediss:// (TLS) scheme in production.')

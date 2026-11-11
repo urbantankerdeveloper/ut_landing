@@ -44,7 +44,7 @@ export const bookingSchema = z.object({
   couponCode: z.string().max(80).optional(),
   phone: z.string().regex(/^\d{10}$/).optional(),
   phoneVerificationChallengeId: z.string().uuid().optional(),
-  paymentMethod: z.enum(['wallet', 'gateway', 'cod']).default('wallet'),
+  paymentMethod: z.enum(['wallet', 'gateway', 'cod']).optional(),
   latitude: z.number().finite().min(-90).max(90).optional(),
   longitude: z.number().finite().min(-180).max(180).optional(),
 })

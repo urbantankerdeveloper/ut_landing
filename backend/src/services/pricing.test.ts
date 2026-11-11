@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildVendorPayouts, isServiceInEffectiveWindow, sumServiceItemPrices } from './pricingMath.js'
 import { GST_PERCENTAGE, GST_RATE, quoteServices } from './pricing.js'
 
-const mock = vi.hoisted(() => ({ tables: new Map<string, { data: unknown; error: unknown }>() }))
+const mock = vi.hoisted(() => ({ tables: new Map<string, { data: unknown; error: unknown }>(), testPricing: false }))
+vi.mock('../config.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../config.js')>()
+  return { config: Object.defineProperty({ ...actual.config }, 'TEST_PRICING_ENABLED', { get: () => mock.testPricing, enumerable: true }) }
+})
 vi.mock('../supabase.js', () => {
   const builder = (table: string): Record<string, unknown> => {
     const chain: Record<string, unknown> = {}
@@ -122,6 +126,24 @@ describe('quoteServices', () => {
   }
   beforeEach(() => mock.tables.clear())
 
+  it('charges ₹1 per service line with no GST and ignores coupons when test pricing is enabled', async () => {
+    mock.testPricing = true
+    try {
+      seed({ service_catalog: { data: [waterTanker] }, coupons: { data: { id: 'c1', discount_type: 'flat', discount_value: 100, valid_until: null } } })
+      await expect(quoteServices([{ serviceId: 'water_tanker' }, { serviceId: 'water_tanker' }], 'save100', 'customer-1')).resolves.toEqual({ subtotalPaise: 200, gstPaise: 0, gstRate: 0, discountPaise: 0, totalPaise: 200, couponId: undefined })
+    } finally {
+      mock.testPricing = false
+    }
+  })
+  it('still rejects unavailable services when test pricing is enabled', async () => {
+    mock.testPricing = true
+    try {
+      seed({ service_catalog: { data: [] } })
+      await expect(quoteServices([{ serviceId: 'water_tanker' }])).rejects.toThrow('One or more selected services are unavailable')
+    } finally {
+      mock.testPricing = false
+    }
+  })
   it('prices a flat coupon and returns the coupon id', async () => {
     seed({ service_catalog: { data: [waterTanker] }, coupons: { data: { id: 'c1', discount_type: 'flat', discount_value: 100, valid_until: null } } })
     await expect(quoteServices([{ serviceId: 'water_tanker' }], 'save100', 'customer-1')).resolves.toEqual({ subtotalPaise: 250000, gstPaise: 45000, gstRate: 0.18, discountPaise: 10000, totalPaise: 285000, couponId: 'c1' })

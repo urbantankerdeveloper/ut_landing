@@ -7,7 +7,7 @@ import { requireAuth } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 import { logger } from '../lib/logger.js'
 import { bookingSchema } from '../lib/schemas.js'
-import { customerHasGstWaiver, GST_PERCENTAGE, GST_RATE, quoteServices } from '../services/pricing.js'
+import { customerHasGstWaiver, GST_PERCENTAGE, GST_RATE, quoteServices, testPricingPerServicePaise } from '../services/pricing.js'
 import { emitRealtimeToUser, emitRealtimeToVendor } from '../services/realtime.js'
 import { sendPushNotification } from '../services/pushNotifications.js'
 import { isJpeg, selfieBucket, selfieMaxBytes, selfieObjectPath } from '../services/selfie.js'
@@ -109,7 +109,7 @@ router.get('/services', async (_request, response) => {
 // Offers filter on the current time. The 60 s TTL means an offer can stay listed up to 60 s after valid_until (accepted by product).
 router.get('/pricing', (_request, response) => {
   response.setHeader('Cache-Control', catalogCacheControl)
-  response.json({ gstPercentage: GST_PERCENTAGE, gstRate: GST_RATE })
+  response.json({ gstPercentage: GST_PERCENTAGE, gstRate: GST_RATE, testPricingPerServicePaise: testPricingPerServicePaise() })
 })
 router.get('/offers', async (_request, response) => {
   try {
@@ -125,7 +125,7 @@ router.use(requireAuth)
 router.get('/pricing/me', async (request, response) => {
   try {
     const gstWaived = await customerHasGstWaiver(request.authUser!.id)
-    response.json({ gstPercentage: GST_PERCENTAGE, gstRate: gstWaived ? 0 : GST_RATE, gstWaived })
+    response.json({ gstPercentage: GST_PERCENTAGE, gstRate: gstWaived ? 0 : GST_RATE, gstWaived, testPricingPerServicePaise: testPricingPerServicePaise() })
   } catch (error) {
     return failure(response, 500, 'GST eligibility could not be checked. Please try again.', 'customer.pricing_failed', error)
   }
@@ -283,6 +283,7 @@ function quoteFailure(response: Response, error: unknown) {
 async function placeQuotedBooking(request: Request, response: Response, includeQuote: boolean) {
   const parsed = bookingSchema.safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Invalid booking', details: parsed.error.flatten() })
+  if (!parsed.data.paymentMethod) return response.status(400).json({ error: 'Choose a payment method: wallet, online payment, or cash on delivery.' })
   const customerId = request.authUser!.id
   if (!config.REQUIRE_BOOKING_PHONE_VERIFICATION) {
     const { data: profile, error } = await supabase.from('profiles').select('phone_e164').eq('id', customerId).maybeSingle()

@@ -32,7 +32,7 @@ const bookingFormSchema = z.object({
   capacity: z.string().optional(),
   phone: z.string().regex(/^\d{10}$/, c.validation.phone),
   notes: z.string().max(500, c.validation.accessNotesMax).optional(),
-  paymentMethod: z.enum(['wallet', 'gateway', 'cod']),
+  paymentMethod: z.enum(['wallet', 'gateway', 'cod'], { error: 'Choose a payment method before booking.' }),
   couponCode: z.string().optional(),
   guestName: z.string().trim().max(60, c.validation.guestNameMax).optional(),
 })
@@ -49,7 +49,7 @@ type BookingDraft = {
   locationAddress?: string
   coordinates?: { latitude: number; longitude: number } | null
   locationStatus?: string | null
-  paymentMethod: BookingPaymentMethod
+  paymentMethod?: BookingPaymentMethod
   couponCode: string
   couponDiscount: number
   phone?: string
@@ -210,7 +210,8 @@ function calculateDiscount(coupon: CouponRecord, subtotal: number) {
   return Math.min(isPercentage ? Math.round(subtotal * value / 100) : Math.round(value), subtotal)
 }
 
-function estimatedServiceAmount(item: BookingServiceDetails, service: { price: number; optionSurchargesPaise?: Record<string, Record<string, number>> } | undefined) {
+function estimatedServiceAmount(item: BookingServiceDetails, service: { price: number; optionSurchargesPaise?: Record<string, Record<string, number>> } | undefined, testAmountRupees: number | null = null) {
+  if (testAmountRupees !== null) return testAmountRupees
   const basePrice = service?.price ?? 0
   const capacityMatch = item.capacity?.match(/^\s*([\d,.]+)\s*(kl|k l|litres?|l)?\s*$/i)
   const capacityValue = capacityMatch ? Number(capacityMatch[1].replace(/,/g, '')) : 0
@@ -286,6 +287,8 @@ export default function BookingScreen() {
   const gstPercentage = pricingQuery.data?.gstPercentage
   const gstRate = pricingQuery.data?.gstRate
   const gstWaived = pricingQuery.data?.gstWaived === true
+  // Set only when the backend runs in test pricing mode (TEST_PRICING_ENABLED), so every line shows the test amount.
+  const testAmountRupees = pricingQuery.data?.testPricingPerServicePaise == null ? null : pricingQuery.data.testPricingPerServicePaise / 100
   const phoneVerificationQuery = useCustomerPhoneVerification(isRegisteredCustomer)
   const addressesQuery = useCustomerAddresses(isRegisteredCustomer)
   const createAddress = useCreateCustomerAddress()
@@ -301,13 +304,13 @@ export default function BookingScreen() {
       capacity: draft.capacity ?? '',
       phone: draft.phone ?? '',
       notes: draft.details?.notes ?? '',
-      paymentMethod: draft.paymentMethod ?? 'wallet',
+      paymentMethod: draft.paymentMethod,
       couponCode: draft.couponCode ?? '',
       guestName: draft.guestName ?? user?.name ?? '',
     },
   })
   const phone = useWatch({ control, name: 'phone' }) ?? ''
-  const paymentMethod = useWatch({ control, name: 'paymentMethod' }) ?? 'wallet'
+  const paymentMethod = useWatch({ control, name: 'paymentMethod' })
   const capacity = getValues('capacity') ?? '5000'
   const details = { notes: getValues('notes') ?? '' }
   const couponCode = getValues('couponCode') ?? ''
@@ -379,7 +382,7 @@ export default function BookingScreen() {
 
   const subtotal = serviceItems.reduce((sum, item) => {
     const serviceOption = options.find((option) => option.code === item.serviceId)
-    return sum + estimatedServiceAmount(item, serviceOption)
+    return sum + estimatedServiceAmount(item, serviceOption, testAmountRupees)
   }, 0)
   const gst = gstRate === undefined ? undefined : Math.round(subtotal * gstRate)
   const total = Math.max(0, subtotal + (gst ?? 0) - couponDiscount)
@@ -748,7 +751,7 @@ export default function BookingScreen() {
     const serviceOption = options.find((option) => option.code === item.serviceId)
     const unitPrice = serviceOption?.price ?? 0
     const estimatePending = unitPrice <= 0
-    return { id: activeServiceEntries[index]?.id ?? `${item.serviceId}-${index}`, label: duplicateCount ? c.serviceSummary.duplicateLabel(serviceName, duplicateCount + 1) : serviceName, detail: details, amount: estimatedServiceAmount(item, serviceOption), estimatePending }
+    return { id: activeServiceEntries[index]?.id ?? `${item.serviceId}-${index}`, label: duplicateCount ? c.serviceSummary.duplicateLabel(serviceName, duplicateCount + 1) : serviceName, detail: details, amount: estimatedServiceAmount(item, serviceOption, testAmountRupees), estimatePending }
   })
 
   if (step === 'success') return <section className="booking-screen"><BookingHero onBack={() => navigate('home')} /><div className="booking-new-shell"><div className="surface booking-success"><span className="success-mark">✓</span><p className="eyebrow">{c.success.eyebrow}</p><h2>{c.success.heading}</h2><p>{c.success.referenceLead} <strong>{bookingId ?? c.success.referenceFallback}</strong> {c.success.referenceTrail}</p>{bookingId && !customerDemoDataEnabled && paymentMethod === 'gateway' && <PaymentReceiptCard bookingId={bookingId} />}<div className="action-row"><button className="button button-primary" type="button" onClick={() => navigate('home')}>{c.success.returnHome} <ArrowRight size={15} /></button></div></div></div></section>
@@ -764,7 +767,7 @@ export default function BookingScreen() {
             const duplicateCount = serviceItems.slice(0, index).filter((other) => other.serviceId === item.serviceId).length
             const unitPrice = options.find((option) => option.code === item.serviceId)?.price ?? 0
             const estimatePending = unitPrice <= 0
-            return <div className="review-item" key={activeServiceEntries[index]?.id ?? index}><h3>{duplicateCount ? c.serviceSummary.duplicateLabel(name, duplicateCount + 1) : name}</h3><p>{[item.serviceType, item.waterType, item.capacity, item.tankerCount ? c.serviceSummary.tankers(item.tankerCount) : '', item.depth ? c.serviceSummary.depth(item.depth) : '', item.quantity, item.grade, item.pump, item.pickupLocation, item.materialType, item.details].filter(Boolean).join(c.serviceSummary.separator)}</p><p>{estimatePending ? c.serviceSummary.quotePending : c.review.estimatedLine(estimatedServiceAmount(item, options.find((option) => option.code === item.serviceId)).toLocaleString('en-IN'), sharedDate, sharedLocation)}</p></div>
+            return <div className="review-item" key={activeServiceEntries[index]?.id ?? index}><h3>{duplicateCount ? c.serviceSummary.duplicateLabel(name, duplicateCount + 1) : name}</h3><p>{[item.serviceType, item.waterType, item.capacity, item.tankerCount ? c.serviceSummary.tankers(item.tankerCount) : '', item.depth ? c.serviceSummary.depth(item.depth) : '', item.quantity, item.grade, item.pump, item.pickupLocation, item.materialType, item.details].filter(Boolean).join(c.serviceSummary.separator)}</p><p>{estimatePending ? c.serviceSummary.quotePending : c.review.estimatedLine(estimatedServiceAmount(item, options.find((option) => option.code === item.serviceId), testAmountRupees).toLocaleString('en-IN'), sharedDate, sharedLocation)}</p></div>
           })}
           {step === 'review' && <>
             <label className="check-line booking-consent"><input type="checkbox" checked={reviewConsent} onChange={(event) => setReviewConsent(event.target.checked)} /> {c.review.consent}</label>
@@ -778,6 +781,7 @@ export default function BookingScreen() {
               <label className={paymentMethod === 'wallet' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'wallet'} onChange={() => setValue('paymentMethod', 'wallet')} /><Wallet size={18} /><span><b>{c.payment.methods[0].title}</b><small>{c.payment.methods[0].detail}</small></span></label>
               <label className={paymentMethod === 'gateway' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'gateway'} onChange={() => setValue('paymentMethod', 'gateway')} /><CreditCard size={18} /><span><b>{c.payment.methods[1].title}</b><small>{c.payment.methods[1].detail}</small></span></label>
               <label className={paymentMethod === 'cod' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'cod'} onChange={() => setValue('paymentMethod', 'cod')} /><Wallet size={18} /><span><b>{c.payment.methods[2].title}</b><small>{c.payment.methods[2].detail}</small></span></label>
+              {errors.paymentMethod?.message && <small className="booking-field-error" role="alert">{errors.paymentMethod.message}</small>}
               {paymentFailure ? <div className="payment-recovery" role="alert">
                 <p>{paymentFailureMessage}</p>
                 <div className="action-row">

@@ -24,6 +24,10 @@ describe('request schemas', () => {
   it('accepts a valid login payload', () => { expect(credentialsSchema.safeParse({ email: 'user@example.com', password: 'password123' }).success).toBe(true) })
   it('rejects a short password', () => { expect(credentialsSchema.safeParse({ email: 'user@example.com', password: 'short' }).success).toBe(false) })
   it('requires booking location and date', () => { expect(bookingSchema.safeParse({ serviceId: 'water', location: 'ECR', deliveryDate: soon(2) }).success).toBe(true); expect(bookingSchema.safeParse({ serviceId: 'water' }).success).toBe(false) })
+  it('does not default a missing payment method, so the route can reject it', () => {
+    const parsed = bookingSchema.safeParse({ serviceId: 'water', location: 'ECR', deliveryDate: soon(2) })
+    expect(parsed.success && parsed.data.paymentMethod).toBeUndefined()
+  })
   it('requires booking coordinates to be supplied as a pair', () => {
     expect(bookingSchema.safeParse({ serviceId: 'water', location: 'ECR', deliveryDate: soon(2), latitude: 12.9, longitude: 77.6 }).success).toBe(true)
     expect(bookingSchema.safeParse({ serviceId: 'water', location: 'ECR', deliveryDate: soon(2), latitude: 12.9 }).success).toBe(false)

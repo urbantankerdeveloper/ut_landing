@@ -12,10 +12,10 @@ type Role = 'customer' | 'vendor' | 'dispatcher' | 'admin'
 type Account = { role: Role; email: string; name: string; phone: string }
 
 const accounts: Account[] = [
-  { role: 'customer', email: 'customer.test@urbantanker.in', name: 'Urban Test Customer', phone: '9000000001' },
-  { role: 'vendor', email: 'vendor.test@urbantanker.in', name: 'Urban Test Vendor', phone: '9000000002' },
-  { role: 'dispatcher', email: 'dispatcher.test@urbantanker.in', name: 'Urban Test Dispatcher', phone: '9000000003' },
-  { role: 'admin', email: 'admin.test@urbantanker.in', name: 'Urban Test Admin', phone: '9000000004' },
+  { role: 'customer', email: 'customer.test@urbantanker.in', name: 'Urban Test Customer', phone: '+919000000001' },
+  { role: 'vendor', email: 'vendor.test@urbantanker.in', name: 'Urban Test Vendor', phone: '+919000000002' },
+  { role: 'dispatcher', email: 'dispatcher.test@urbantanker.in', name: 'Urban Test Dispatcher', phone: '+919000000003' },
+  { role: 'admin', email: 'admin.test@urbantanker.in', name: 'Urban Test Admin', phone: '+919000000004' },
 ]
 
 function password() { return `UT-${crypto.randomBytes(12).toString('base64url')}` }

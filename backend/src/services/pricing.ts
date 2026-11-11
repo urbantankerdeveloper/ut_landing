@@ -2,8 +2,14 @@ import { config } from '../config.js'
 import { supabase } from '../supabase.js'
 import { assertPayableAmount, istToday, isServiceInEffectiveWindow, PricingError, sumServiceItemPrices, type PriceableServiceItem } from './pricingMath.js'
 
-export const GST_PERCENTAGE = config.APPLIED_GST_PERCENTAGE
+// Test mode (TEST_PRICING_ENABLED=true) charges each service line this flat amount with no GST.
+export const TEST_PRICING_PER_SERVICE_PAISE = 100
+export const GST_PERCENTAGE = config.TEST_PRICING_ENABLED ? 0 : config.APPLIED_GST_PERCENTAGE
 export const GST_RATE = GST_PERCENTAGE / 100
+// Null when test pricing is off, so clients only override their estimates when it is on.
+export function testPricingPerServicePaise() {
+  return config.TEST_PRICING_ENABLED ? TEST_PRICING_PER_SERVICE_PAISE : null
+}
 
 // A customer with an active recurring subscription or an active membership pays no GST.
 export async function customerHasGstWaiver(customerId: string) {
@@ -24,6 +30,10 @@ export async function quoteServices(items: PriceableServiceItem[], couponCode?: 
   const activeServices = (services ?? []).filter((service) => isServiceInEffectiveWindow(service.config, today))
   if (activeServices.length !== new Set(codes).size) throw new PricingError('One or more selected services are unavailable')
   const subtotalPaise = sumServiceItemPrices(serviceItems, activeServices)
+  if (config.TEST_PRICING_ENABLED) {
+    const testSubtotalPaise = TEST_PRICING_PER_SERVICE_PAISE * serviceItems.length
+    return { subtotalPaise: testSubtotalPaise, gstPaise: 0, gstRate: 0, discountPaise: 0, totalPaise: testSubtotalPaise, couponId: undefined }
+  }
   const gstWaived = customerId ? await customerHasGstWaiver(customerId) : false
   const appliedGstRate = gstWaived ? 0 : GST_RATE
   const gstPaise = Math.round(subtotalPaise * appliedGstRate)

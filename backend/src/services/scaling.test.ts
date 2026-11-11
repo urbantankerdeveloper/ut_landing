@@ -20,7 +20,7 @@ vi.mock('redis', () => ({
   },
 }))
 
-const base = { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k', SUPABASE_DB_URL: '', APPLIED_GST_PERCENTAGE: '18' }
+const base = { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k', SUPABASE_DB_URL: '', APPLIED_GST_PERCENTAGE: '18', TEST_PRICING_ENABLED: 'false' }
 
 describe('horizontal scaling switch', () => {
   const original = { ...process.env }
