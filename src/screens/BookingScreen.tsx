@@ -706,7 +706,7 @@ export default function BookingScreen() {
           paymentMethod,
         })
         currentBookingId = booking.id
-        payableTotal = Number(booking.quotedAmountPaise ?? 0) / 100 || total
+        payableTotal = Number(booking.quote?.totalPaise ?? booking.quoted_amount_paise ?? 0) / 100 || total
         setQuotedTotal(payableTotal)
         setBookingId(currentBookingId)
         trackBookingCreated(currentBookingId)
