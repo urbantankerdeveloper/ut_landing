@@ -394,7 +394,7 @@ async function startGatewayCheckout(response: Response, customerId: string, data
   if (error || !checkout) return databaseFailure(response, 'customer.checkout_failed', error, 500, 'Booking could not be saved. Please try again.')
   return response.status(201).json({ status: 'awaiting_payment', checkoutId: checkout.id, quote })
 }
-// Returns the new balance check result: null when the wallet cannot cover the amount. The debit is written first, then the balance re-read, so concurrent debits cannot overspend.
+// Returns the debit transaction id, or null when the wallet cannot cover the amount. The debit is written first, then the balance re-read, so concurrent debits cannot overspend.
 async function debitWalletForBooking(customerId: string, amountPaise: number): Promise<string | null> {
   const { data: debit, error } = await supabase.from('wallet_transactions').insert({ customer_id: customerId, type: 'debit', amount: amountPaise / 100, status: 'completed' }).select('id').single()
   if (error || !debit) throw error ?? new Error('Wallet debit could not be recorded')
