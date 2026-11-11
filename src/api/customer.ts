@@ -154,6 +154,7 @@ export const customerApi = {
   verifyPayment: verifyRazorpayPayment,
   getPaymentReceipt: fetchPaymentReceipt,
   switchBookingToCashOnDelivery: (orderId: string) => apiFetch<unknown>(`/customer/orders/${orderId}/payment-method`, { method: 'POST', successMessage: 'Booking set to pay on delivery.', body: JSON.stringify({ paymentMethod: 'cod' }) }),
+  switchBookingToOnline: (orderId: string) => apiFetch<unknown>(`/customer/orders/${orderId}/payment-method/online`, { method: 'POST' }),
   addresses: () => apiFetch<SavedAddress[]>('/customer/addresses'),
   createAddress: (payload: Omit<SavedAddress, 'id'>) => apiFetch<SavedAddress>('/customer/addresses', { method: 'POST', body: JSON.stringify(payload) }),
   deleteAddress: (id: string) => apiFetch<void>(`/customer/addresses/${id}`, { method: 'DELETE' }),

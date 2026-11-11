@@ -34,4 +34,13 @@ describe('customerApi payment calls', () => {
 
     await expect(customerApi.getPaymentReceipt('booking_1')).resolves.toBeNull()
   })
+
+  it('posts the COD-to-online switch and surfaces a rejection once cash is collected', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ error: 'Online payment is no longer available for this booking.' }, 409))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(customerApi.switchBookingToOnline('booking_1')).rejects.toThrow('Online payment is no longer available for this booking.')
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/customer/orders/booking_1/payment-method/online')
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'POST' })
+  })
 })

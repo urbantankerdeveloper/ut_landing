@@ -433,6 +433,18 @@ export const customerContent = {
       gateway: 'Card or UPI',
       wallet: 'Urban Tanker wallet',
     },
+    payOnline: {
+      action: 'Pay online now',
+      hint: 'Switch from cash on delivery and pay securely by card or UPI. Your vendor and driver will be told not to collect cash.',
+      working: 'Opening secure payment…',
+      paid: 'Payment received. Your vendor and driver have been notified.',
+      verifyFailed: 'We could not confirm your payment yet. Retry confirmation, or wait a few minutes; we will confirm it automatically.',
+      retryConfirmation: 'Retry confirmation',
+      cancelled: 'Payment was cancelled. Your booking is still set to cash on delivery.',
+      failed: 'Payment failed. Your booking is still set to cash on delivery.',
+      switchFailed: 'Could not switch this booking to online payment. Please try again.',
+      revertFailed: 'Payment was not completed, and we could not switch this booking back to cash on delivery. Please contact support.',
+    },
     demo: {
       waterTanker: 'Water tanker · 9 KL',
       tankerCapacity: '9 KL',

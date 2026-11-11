@@ -4,11 +4,17 @@ import { ArrowRight, MoreVertical } from 'lucide-react'
 import { customerDemoDataEnabled } from '../constants/demo'
 import { REPEAT_BOOKING_KEY } from '../constants/bookingDraft'
 import { useCustomerBookings } from '../hooks/useCustomerData'
-import type { CustomerBooking } from '../api/customer'
+import { useRazorpayPayment } from '../hooks/useFrontendFeatures'
+import { customerApi, type CustomerBooking } from '../api/customer'
+import { useAuthStore } from '../stores/authStore'
+import { CheckoutError, type CheckoutSuccess } from '../utils/razorpayCheckout'
 import { Modal } from '../components/Modal'
 import { customerContent as c } from '../content/customer'
 
 type Props = { onNavigate: (screen: 'booking' | 'bookings' | 'offers' | 'home') => void }
+// Statuses before the driver collects cash. Matches the backend codSwitchStatuses.
+const payOnlineStatuses = ['pending_vendor', 'vendor_assigned', 'accepted']
+type PayState = { kind: 'idle' } | { kind: 'working' } | { kind: 'paid' } | { kind: 'verify'; pending: CheckoutSuccess } | { kind: 'error'; message: string }
 const demoRows: CustomerBooking[] = customerDemoDataEnabled ? [
   { id: 'UT-2408', service: c.bookingsTable.demo.waterTanker, services: [{ serviceId: 'water_tanker', capacity: c.bookingsTable.demo.tankerCapacity, details: c.bookingsTable.demo.potableWater, deliveryDate: '2026-10-20' }], location: c.bookingsTable.demo.ecr, status: c.bookingsTable.demo.inProgress, amount: 1850, scheduledAt: '2026-10-20' },
   { id: 'UT-2394', service: c.bookingsTable.demo.tankAndSump, services: [{ serviceId: 'tank_cleaning', capacity: c.bookingsTable.demo.twoTanks, details: c.bookingsTable.demo.cleanTanks, deliveryDate: '2026-10-22' }], location: c.bookingsTable.demo.adyar, status: c.bookingsTable.demo.delivered, amount: 2400, scheduledAt: '2026-10-22' },
@@ -37,7 +43,7 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
   const [filter, setFilter] = useState('all')
   const [sort, setSort] = useState<'recent' | 'status' | 'amount'>('recent')
   const [page, setPage] = useState(1)
-  const [selectedBooking, setSelectedBooking] = useState<CustomerBooking | null>(null)
+  const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null)
   const [openActionsBookingId, setOpenActionsBookingId] = useState<string | null>(null)
   const [actionMenuPosition, setActionMenuPosition] = useState<{ top: number; left: number } | null>(null)
   const actionTriggerRef = useRef<HTMLButtonElement>(null)
@@ -49,6 +55,63 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
   const pageCount = Math.max(1, Math.ceil(sortedRows.length / pageSize))
   const currentPage = Math.min(page, pageCount)
   const visibleRows = sortedRows.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+  const razorpay = useRazorpayPayment()
+  const user = useAuthStore((state) => state.user)
+  const [payState, setPayState] = useState<PayState>({ kind: 'idle' })
+  // Derived from the rows so the modal reflects refetched data (e.g. a switched payment method) without reopening.
+  const selectedBooking = selectedBookingId ? rows.find((row) => row.id === selectedBookingId) ?? null : null
+
+  function closeBookingModal() {
+    setSelectedBookingId(null)
+    setPayState({ kind: 'idle' })
+  }
+
+  async function payOnlineNow(booking: CustomerBooking) {
+    setPayState({ kind: 'working' })
+    try {
+      await customerApi.switchBookingToOnline(booking.id)
+    } catch {
+      setPayState({ kind: 'error', message: c.bookingsTable.payOnline.switchFailed })
+      return
+    }
+    try {
+      const normalizedPhone = booking.phone?.replace(/\D/g, '').slice(-10)
+      await razorpay.pay(booking.amount, booking.id, {
+        name: user?.name ?? 'Urban Tanker customer',
+        email: user?.username,
+        phone: normalizedPhone && normalizedPhone.length === 10 ? `+91${normalizedPhone}` : undefined,
+      })
+      setPayState({ kind: 'paid' })
+    } catch (paymentError) {
+      if (paymentError instanceof CheckoutError && paymentError.kind === 'verification' && paymentError.pending) {
+        setPayState({ kind: 'verify', pending: paymentError.pending })
+        void query.refetch()
+        return
+      }
+      // Cancelled or failed: move the booking back to cash on delivery so the driver still expects cash.
+      let reverted = true
+      try { await customerApi.switchBookingToCashOnDelivery(booking.id) } catch { reverted = false }
+      const message = !reverted
+        ? c.bookingsTable.payOnline.revertFailed
+        : paymentError instanceof CheckoutError && paymentError.kind === 'cancelled'
+          ? c.bookingsTable.payOnline.cancelled
+          : c.bookingsTable.payOnline.failed
+      setPayState({ kind: 'error', message })
+    }
+    void query.refetch()
+  }
+
+  async function retryPaymentVerification(pending: CheckoutSuccess) {
+    setPayState({ kind: 'working' })
+    try {
+      await razorpay.verifyPending(pending)
+      setPayState({ kind: 'paid' })
+      void query.refetch()
+    } catch (verifyError) {
+      if (verifyError instanceof CheckoutError && verifyError.pending) setPayState({ kind: 'verify', pending: verifyError.pending })
+      else setPayState({ kind: 'error', message: c.bookingsTable.payOnline.verifyFailed })
+    }
+  }
 
   useLayoutEffect(() => {
     if (!openActionsBookingId) return
@@ -159,12 +222,15 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
         <button type="button" role="menuitem" onClick={() => {
           const booking = rows.find((row) => row.id === openActionsBookingId)
           setOpenActionsBookingId(null)
-          if (booking) setSelectedBooking(booking)
+          if (booking) {
+            setPayState({ kind: 'idle' })
+            setSelectedBookingId(booking.id)
+          }
         }}>{c.bookingsTable.view}</button>
       </div>,
       document.body,
     )}
-    {selectedBooking && <Modal title={c.bookingsTable.modalTitle(selectedBooking.id)} onClose={() => setSelectedBooking(null)}>
+    {selectedBooking && <Modal title={c.bookingsTable.modalTitle(selectedBooking.id)} onClose={closeBookingModal}>
       <div className="customer-booking-details">
         <div className="customer-booking-detail-grid">
           <div><span>{c.bookingsTable.detail.status}</span><strong>{selectedBooking.status}</strong></div>
@@ -174,6 +240,19 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
           <div><span>{c.bookingsTable.detail.deliveryLocation}</span><strong>{selectedBooking.location || c.common.notProvided}</strong></div>
           <div><span>{c.bookingsTable.detail.mobileNumber}</span><strong>{selectedBooking.phone || c.common.notProvided}</strong></div>
         </div>
+        {!customerDemoDataEnabled && (payState.kind !== 'idle' || (payOnlineStatuses.includes(selectedBooking.status) && selectedBooking.paymentMethod === 'cod')) && <section className="customer-booking-pay-online">
+          {payState.kind === 'idle' && <>
+            <p>{c.bookingsTable.payOnline.hint}</p>
+            <button className="button button-primary" type="button" onClick={() => void payOnlineNow(selectedBooking)}>{c.bookingsTable.payOnline.action}</button>
+          </>}
+          {payState.kind === 'working' && <p role="status">{c.bookingsTable.payOnline.working}</p>}
+          {payState.kind === 'paid' && <p role="status">{c.bookingsTable.payOnline.paid}</p>}
+          {payState.kind === 'verify' && <>
+            <p role="alert">{c.bookingsTable.payOnline.verifyFailed}</p>
+            <button className="button button-primary" type="button" onClick={() => void retryPaymentVerification(payState.pending)}>{c.bookingsTable.payOnline.retryConfirmation}</button>
+          </>}
+          {payState.kind === 'error' && <p role="alert">{payState.message}</p>}
+        </section>}
         <section><h3>{c.bookingsTable.serviceDetails}</h3>{selectedBooking.services.length
           ? <ul>{selectedBooking.services.map((service) => <li key={service.serviceId}><strong>{serviceLabel(service.serviceId)}</strong>{service.capacity && <span>{c.bookingsTable.capacitySeparator}{service.capacity}</span>}{service.deliveryDate && <p>{c.bookingsTable.preferredDate(formatDate(service.deliveryDate))}</p>}<p>{service.details || c.bookingsTable.noAdditionalDetails}</p></li>)}</ul>
           : <p>{c.bookingsTable.noServiceDetails}</p>}</section>
