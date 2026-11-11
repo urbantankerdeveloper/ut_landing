@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { customerApi } from '../api/customer'
+import { customerApi, type PaymentTarget, type PaymentVerification } from '../api/customer'
 import { apiFetch } from '../api/client'
 import { CheckoutError, openRazorpayCheckout, type CheckoutSuccess, type RazorpayCustomer } from '../utils/razorpayCheckout'
 
@@ -17,22 +17,24 @@ export function useRazorpayPayment() {
   const [error, setError] = useState<string | null>(null)
   const [completed, setCompleted] = useState(false)
   // Throws CheckoutError('verification') carrying the Razorpay ids, so the caller can retry without paying again.
-  async function verifyPending(pending: CheckoutSuccess) {
+  async function verifyPending(pending: CheckoutSuccess): Promise<PaymentVerification> {
     try {
-      await customerApi.verifyPayment({ orderId: pending.orderId, paymentId: pending.paymentId, signature: pending.signature })
+      const verification = await customerApi.verifyPayment({ orderId: pending.orderId, paymentId: pending.paymentId, signature: pending.signature })
       setCompleted(true)
+      return verification
     } catch (verificationError) {
       throw new CheckoutError('verification', verificationError instanceof Error ? verificationError.message : undefined, pending)
     }
   }
-  async function pay(amount: number, bookingId: string, customer: RazorpayCustomer) {
+  // Resolves with the booking id once Razorpay payment is verified. For a checkout, this is when the booking is created.
+  async function pay(amount: number, target: PaymentTarget, customer: RazorpayCustomer): Promise<PaymentVerification> {
     if (loading) throw new Error('A payment is already in progress.')
     setLoading(true); setError(null)
     setCompleted(false)
     try {
-      const order = await customerApi.createPaymentOrder({ amount, bookingId })
+      const order = await customerApi.createPaymentOrder({ amount, ...target })
       const result = await openRazorpayCheckout(order, customer)
-      await verifyPending(result)
+      return await verifyPending(result)
     } catch (paymentError) { const message = paymentError instanceof Error ? paymentError.message : 'Payment could not be completed.'; setError(message); throw paymentError } finally { setLoading(false) }
   }
   return { pay, verifyPending, loading, error, completed }

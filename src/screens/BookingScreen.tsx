@@ -66,6 +66,7 @@ type BookingDraft = {
   phoneChallenges?: Record<string, string>
   guestChallengeId?: string | null
   bookingId: string | null
+  checkoutId?: string | null
   quotedTotal: number | null
 }
 
@@ -145,6 +146,7 @@ function loadBookingDraft(): Partial<BookingDraft> {
           preferredTime: booking.services[0]?.preferredTime ?? '07:00',
           phoneChallenges: {},
           bookingId: null,
+          checkoutId: null,
           quotedTotal: null,
         }
       }
@@ -348,6 +350,7 @@ export default function BookingScreen() {
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [bookingId, setBookingId] = useState<string | null>(draft.bookingId ?? null)
+  const [checkoutId, setCheckoutId] = useState<string | null>(draft.checkoutId ?? null)
   const [quotedTotal, setQuotedTotal] = useState<number | null>(draft.quotedTotal ?? null)
   const [idempotencyKey] = useState(() => draft.idempotencyKey ?? crypto.randomUUID())
   const selectedServices = useMemo(() => serviceEntries.map((entry) => entry.serviceId), [serviceEntries])
@@ -406,11 +409,11 @@ export default function BookingScreen() {
       return
     }
     const timer = window.setTimeout(() => {
-      const bookingDraft: BookingDraft = { idempotencyKey, selectedServices, serviceEntries, serviceItemsInitialized: hasInitializedServiceEntries, serviceDetails, capacity, step, details: { notes: getValues('notes') ?? '' }, locationAddress: sharedLocation, coordinates: sharedCoordinates ? { latitude: sharedCoordinates.lat, longitude: sharedCoordinates.lng } : null, region, addressLabel, addressCity, addressPincode, saveAddress: saveAddressForFuture, savedAddressId, sharedDate, preferredTime, phone, paymentMethod, couponCode, couponDiscount, guestName, phoneChallenges, bookingId, quotedTotal }
+      const bookingDraft: BookingDraft = { idempotencyKey, selectedServices, serviceEntries, serviceItemsInitialized: hasInitializedServiceEntries, serviceDetails, capacity, step, details: { notes: getValues('notes') ?? '' }, locationAddress: sharedLocation, coordinates: sharedCoordinates ? { latitude: sharedCoordinates.lat, longitude: sharedCoordinates.lng } : null, region, addressLabel, addressCity, addressPincode, saveAddress: saveAddressForFuture, savedAddressId, sharedDate, preferredTime, phone, paymentMethod, couponCode, couponDiscount, guestName, phoneChallenges, bookingId, checkoutId, quotedTotal }
       sessionStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify(bookingDraft))
     }, DRAFT_PERSIST_DELAY_MS)
     return () => window.clearTimeout(timer)
-  }, [idempotencyKey, selectedServices, serviceEntries, hasInitializedServiceEntries, serviceDetails, capacity, step, getValues, sharedLocation, sharedCoordinates, sharedDate, region, addressLabel, addressCity, addressPincode, saveAddressForFuture, savedAddressId, preferredTime, phone, paymentMethod, couponCode, couponDiscount, guestName, phoneChallenges, bookingId, quotedTotal])
+  }, [idempotencyKey, selectedServices, serviceEntries, hasInitializedServiceEntries, serviceDetails, capacity, step, getValues, sharedLocation, sharedCoordinates, sharedDate, region, addressLabel, addressCity, addressPincode, saveAddressForFuture, savedAddressId, preferredTime, phone, paymentMethod, couponCode, couponDiscount, guestName, phoneChallenges, bookingId, checkoutId, quotedTotal])
   useEffect(() => {
     let timer: number | undefined
     const subscription = watch((values) => {
@@ -662,6 +665,10 @@ export default function BookingScreen() {
       setOtpMessages((current) => ({ ...current, [normalizedPhone]: otpError instanceof Error ? otpError.message : c.otp.verifyFailed }))
     } finally { setOtpPendingPhone(null) }
   }
+  function trackBookingCreated(createdBookingId: string) {
+    trackEvent('booking.created', { service: servicesForQuote.join(','), capacity: Number(capacity) || 0, paymentMethod, bookingId: createdBookingId, locationDetected: Boolean(serviceItems[0]?.latitude) })
+  }
+
   async function confirmBooking() {
     setIsSubmitting(true)
     setError(null)
@@ -678,8 +685,10 @@ export default function BookingScreen() {
         setSaveAddressForFuture(false)
       }
       let currentBookingId = bookingId
+      let currentCheckoutId = paymentMethod === 'gateway' ? checkoutId : null
       let payableTotal = quotedTotal ?? total
-      if (!customerDemoDataEnabled && !currentBookingId) {
+      let bookingCreated = false
+      if (!customerDemoDataEnabled && !currentBookingId && !currentCheckoutId) {
         const booking = await createBooking.mutateAsync({
           idempotencyKey,
           serviceId: primaryService.serviceId,
@@ -696,13 +705,30 @@ export default function BookingScreen() {
           longitude: sharedCoordinates?.lng,
           paymentMethod,
         })
-        currentBookingId = booking.id
-        payableTotal = Number(booking.quotedAmountPaise ?? 0) / 100 || total
-        setQuotedTotal(payableTotal)
-        setBookingId(currentBookingId)
-        trackEvent('booking.created', { service: servicesForQuote.join(','), capacity: Number(capacity) || 0, paymentMethod, bookingId: currentBookingId, locationDetected: Boolean(primaryService.latitude) })
+        if ('checkoutId' in booking) {
+          // Online payment: no booking exists until Razorpay confirms the payment.
+          currentCheckoutId = booking.checkoutId
+          payableTotal = Number(booking.quote.totalPaise) / 100 || total
+          setQuotedTotal(payableTotal)
+          setCheckoutId(currentCheckoutId)
+        } else {
+          currentBookingId = booking.id
+          payableTotal = Number(booking.quotedAmountPaise ?? 0) / 100 || total
+          setQuotedTotal(payableTotal)
+          setBookingId(currentBookingId)
+          bookingCreated = true
+        }
       }
-      if (!customerDemoDataEnabled && paymentMethod === 'gateway' && currentBookingId) await razorpay.pay(payableTotal, currentBookingId, { name: user?.name ?? (guestName || 'Urban Tanker customer'), email: user?.username, phone: `+91${normalizedPhone}` })
+      if (!customerDemoDataEnabled && paymentMethod === 'gateway' && (currentCheckoutId || currentBookingId)) {
+        const target = currentCheckoutId ? { checkoutId: currentCheckoutId } : { bookingId: currentBookingId! }
+        const verified = await razorpay.pay(payableTotal, target, { name: user?.name ?? (guestName || 'Urban Tanker customer'), email: user?.username, phone: `+91${normalizedPhone}` })
+        if (!currentBookingId) {
+          currentBookingId = verified.orderId
+          setBookingId(currentBookingId)
+          bookingCreated = true
+        }
+      }
+      if (bookingCreated && currentBookingId) trackBookingCreated(currentBookingId)
       sessionStorage.removeItem(BOOKING_DRAFT_KEY)
       setStep('success')
     } catch (paymentError) {
@@ -717,7 +743,9 @@ export default function BookingScreen() {
     setIsSubmitting(true)
     setError(null)
     try {
-      await razorpay.verifyPending(paymentFailure.pending)
+      const verified = await razorpay.verifyPending(paymentFailure.pending)
+      setBookingId(verified.orderId)
+      trackBookingCreated(verified.orderId)
       setPaymentFailure(null)
       sessionStorage.removeItem(BOOKING_DRAFT_KEY)
       setStep('success')
@@ -728,11 +756,18 @@ export default function BookingScreen() {
   }
 
   async function payOnDeliveryInstead() {
-    if (!bookingId) return
+    if (!bookingId && !checkoutId) return
     setIsSubmitting(true)
     setError(null)
     try {
-      await customerApi.switchBookingToCashOnDelivery(bookingId)
+      // A checkout only becomes a booking here, when the customer chooses cash on delivery.
+      if (checkoutId) {
+        const booking = await customerApi.payCheckoutOnDelivery(checkoutId)
+        setBookingId(booking.id)
+        trackBookingCreated(booking.id)
+      } else if (bookingId) {
+        await customerApi.switchBookingToCashOnDelivery(bookingId)
+      }
       setValue('paymentMethod', 'cod')
       setPaymentFailure(null)
       sessionStorage.removeItem(BOOKING_DRAFT_KEY)

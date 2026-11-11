@@ -280,6 +280,136 @@ function quoteFailure(response: Response, error: unknown) {
   if (error instanceof PricingError) return response.status(400).json({ error: error.message })
   return failure(response, 500, 'Booking quote could not be calculated. Please try again.', 'customer.quote_failed', error)
 }
+// A gateway booking is written only after Razorpay confirms payment, so until then the request waits in booking_checkouts.
+const claimableCheckoutStatuses = ['awaiting_payment', 'order_created', 'failed']
+export type CheckoutRow = {
+  id: string
+  customer_id: string
+  booking_request: z.infer<typeof bookingSchema>
+  quoted_amount_paise: number
+  coupon_id: string | null
+  status: string
+  provider_order_id: string | null
+  booking_id: string | null
+}
+type BookingSummary = { id: string; reference: string; vendor_id: string | null; quoted_amount_paise?: number; payment_method?: string }
+export type SettleResult = { status: 'booked'; booking: BookingSummary; created: boolean } | { status: 'conflict' } | { status: 'coupon_used' }
+
+async function loadCheckout(checkoutId: string) {
+  const { data, error } = await supabase.from('booking_checkouts').select('*').eq('id', checkoutId).single()
+  if (error || !data) throw error ?? new Error('Checkout not found')
+  return data as CheckoutRow
+}
+async function bookingSummary(bookingId: string) {
+  const { data, error } = await supabase.from('bookings').select('id,reference,vendor_id,quoted_amount_paise,payment_method').eq('id', bookingId).single()
+  if (error || !data) throw error ?? new Error('Booking not found')
+  return data as BookingSummary
+}
+async function createCheckoutBooking(checkout: CheckoutRow, method: 'gateway' | 'cod') {
+  let redeemed = false
+  if (checkout.coupon_id) {
+    const { error } = await supabase.from('coupon_redemptions').insert({ coupon_id: checkout.coupon_id, customer_id: checkout.customer_id, redeemed_at: new Date().toISOString() })
+    if (error?.code === '23505') {
+      if (method === 'cod') return null
+      // The customer has already paid, so the booking proceeds without a second redemption.
+      logger.warn('customer.checkout_coupon_already_redeemed', { checkoutId: checkout.id })
+    } else if (error) throw error
+    else redeemed = true
+  }
+  const data = checkout.booking_request
+  let result: Awaited<ReturnType<typeof createBookingAndNotifications>>
+  try {
+    const services = getBookingServices(data)
+    const vendors = await findNearbyVendors(data.latitude, data.longitude)
+    result = await createBookingAndNotifications({
+      customerId: checkout.customer_id,
+      reference: bookingReference(),
+      idempotencyKey: checkout.id,
+      booking: { ...bookingInsert(data, services, null, checkout.quoted_amount_paise), payment_method: method },
+      vendors,
+      payment: method === 'cod' ? { provider: 'cash_on_delivery', amount_paise: checkout.quoted_amount_paise, currency: 'INR', status: 'pending' } : undefined,
+    })
+  } catch (error) {
+    if (redeemed) await supabase.from('coupon_redemptions').delete().eq('coupon_id', checkout.coupon_id!).eq('customer_id', checkout.customer_id)
+    throw error
+  }
+  const { error: linkError } = await supabase.from('booking_checkouts').update({ booking_id: result.booking.id, updated_at: new Date().toISOString() }).eq('id', checkout.id)
+  if (linkError) throw linkError
+  if (result.created) emitRealtimeToUser(checkout.customer_id, 'booking.created', result.booking)
+  return { booking: result.booking as BookingSummary, created: result.created }
+}
+async function recordCheckoutPayment(bookingId: string, checkout: CheckoutRow, payment: Record<string, unknown>) {
+  const { error } = await supabase.from('payments').insert({ booking_id: bookingId, provider: 'razorpay', provider_order_id: checkout.provider_order_id, amount_paise: checkout.quoted_amount_paise, currency: 'INR', ...payment })
+  if (!error) return
+  if (error.code !== '23505') throw error
+  // A retry after a partial failure: the row already exists, so refresh it with the latest payment details.
+  const { error: updateError } = await supabase.from('payments').update({ ...payment, updated_at: new Date().toISOString() }).eq('booking_id', bookingId)
+  if (updateError) throw updateError
+}
+// Creates the booking for a checkout once payment is confirmed (gateway) or on the customer's cash choice (cod).
+// Safe to call again for the same checkout: an already-booked checkout just re-links its payment row.
+export async function settleBookingCheckout(checkout: CheckoutRow, method: 'gateway' | 'cod', payment: Record<string, unknown> | null = null): Promise<SettleResult> {
+  let bookingId = checkout.booking_id
+  let booking: BookingSummary | null = null
+  let created = false
+  if (!bookingId) {
+    const { data: claimed, error: claimError } = await supabase.from('booking_checkouts').update({ status: method === 'gateway' ? 'booked' : 'cod', updated_at: new Date().toISOString() }).eq('id', checkout.id).in('status', claimableCheckoutStatuses).select('id').maybeSingle()
+    if (claimError) throw claimError
+    if (!claimed) {
+      const latest = await loadCheckout(checkout.id)
+      if (!latest.booking_id) return { status: 'conflict' }
+      bookingId = latest.booking_id
+    } else {
+      let outcome: Awaited<ReturnType<typeof createCheckoutBooking>>
+      try {
+        outcome = await createCheckoutBooking(checkout, method)
+      } catch (error) {
+        await supabase.from('booking_checkouts').update({ status: checkout.status, updated_at: new Date().toISOString() }).eq('id', checkout.id)
+        throw error
+      }
+      if (!outcome) {
+        await supabase.from('booking_checkouts').update({ status: checkout.status, updated_at: new Date().toISOString() }).eq('id', checkout.id)
+        return { status: 'coupon_used' }
+      }
+      booking = outcome.booking
+      created = outcome.created
+      bookingId = outcome.booking.id
+    }
+  }
+  if (!bookingId) return { status: 'conflict' }
+  if (method === 'gateway' && payment) await recordCheckoutPayment(bookingId, checkout, payment)
+  if (method === 'cod' && checkout.provider_order_id) {
+    // A Razorpay order created before the customer switched to cash can still be captured, so the webhook must find this row.
+    const { error } = await supabase.from('payments').update({ provider_order_id: checkout.provider_order_id }).eq('booking_id', bookingId)
+    if (error) throw error
+  }
+  return { status: 'booked', booking: booking ?? await bookingSummary(bookingId), created }
+}
+async function startGatewayCheckout(response: Response, customerId: string, data: z.infer<typeof bookingSchema>, quote: Awaited<ReturnType<typeof quoteServices>>) {
+  const row = { customer_id: customerId, idempotency_key: data.idempotencyKey ?? null, booking_request: data, quoted_amount_paise: quote.totalPaise, coupon_id: quote.couponId ?? null }
+  let { data: checkout, error } = await supabase.from('booking_checkouts').insert(row).select('*').single()
+  if (error?.code === '23505' && data.idempotencyKey) {
+    ;({ data: checkout, error } = await supabase.from('booking_checkouts').select('*').eq('customer_id', customerId).eq('idempotency_key', data.idempotencyKey).single())
+  }
+  if (error || !checkout) return databaseFailure(response, 'customer.checkout_failed', error, 500, 'Booking could not be saved. Please try again.')
+  return response.status(201).json({ status: 'awaiting_payment', checkoutId: checkout.id, quote })
+}
+// Returns the new balance check result: null when the wallet cannot cover the amount. The debit is written first, then the balance re-read, so concurrent debits cannot overspend.
+async function debitWalletForBooking(customerId: string, amountPaise: number): Promise<string | null> {
+  const { data: debit, error } = await supabase.from('wallet_transactions').insert({ customer_id: customerId, type: 'debit', amount: amountPaise / 100, status: 'completed' }).select('id').single()
+  if (error || !debit) throw error ?? new Error('Wallet debit could not be recorded')
+  const { data: rows, error: balanceError } = await supabase.from('wallet_transactions').select('type,amount').eq('customer_id', customerId).eq('status', 'completed')
+  if (balanceError) {
+    await supabase.from('wallet_transactions').delete().eq('id', debit.id)
+    throw balanceError
+  }
+  const balancePaise = (rows ?? []).reduce((sum, row) => sum + (row.type === 'credit' ? 1 : -1) * Math.round(Number(row.amount) * 100), 0)
+  if (balancePaise < 0) {
+    await supabase.from('wallet_transactions').delete().eq('id', debit.id)
+    return null
+  }
+  return debit.id as string
+}
 async function placeQuotedBooking(request: Request, response: Response, includeQuote: boolean) {
   const parsed = bookingSchema.safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Invalid booking', details: parsed.error.flatten() })
@@ -302,10 +432,37 @@ async function placeQuotedBooking(request: Request, response: Response, includeQ
   } catch (error) {
     return quoteFailure(response, error)
   }
+  const method = parsed.data.paymentMethod
+  if (method === 'gateway') return startGatewayCheckout(response, customerId, parsed.data, quote)
+  if (method === 'wallet' && parsed.data.idempotencyKey) {
+    // A retried wallet booking must not debit the wallet a second time.
+    const { data: existing, error: existingError } = await supabase.from('bookings').select('id,reference,vendor_id,quoted_amount_paise,payment_method').eq('customer_id', customerId).eq('idempotency_key', parsed.data.idempotencyKey).maybeSingle()
+    if (existingError) return databaseFailure(response, 'customer.booking_failed', existingError, 500)
+    if (existing) return response.status(200).json(includeQuote ? { ...existing, quote } : existing)
+  }
+  let debitId: string | null = null
+  if (method === 'wallet') {
+    try {
+      debitId = await debitWalletForBooking(customerId, quote.totalPaise)
+    } catch (error) {
+      return databaseFailure(response, 'customer.wallet_debit_failed', error, 500, 'Booking could not be saved. Please try again.')
+    }
+    if (!debitId) return response.status(402).json({ error: 'Insufficient wallet balance. Add money to your wallet or choose another payment method.' })
+  }
+  const releaseHold = async (couponRedeemed: boolean) => {
+    if (couponRedeemed && quote.couponId) await supabase.from('coupon_redemptions').delete().eq('coupon_id', quote.couponId).eq('customer_id', customerId)
+    if (debitId) await supabase.from('wallet_transactions').delete().eq('id', debitId)
+  }
   if (quote.couponId) {
     const { error: redemptionError } = await supabase.from('coupon_redemptions').insert({ coupon_id: quote.couponId, customer_id: customerId, redeemed_at: new Date().toISOString() })
-    if (redemptionError?.code === '23505') return response.status(409).json({ error: 'This coupon has already been used on this account.' })
-    if (redemptionError) return failure(response, 500, 'Booking could not be saved. Please try again.', 'customer.coupon_redemption_failed', redemptionError)
+    if (redemptionError?.code === '23505') {
+      await releaseHold(false)
+      return response.status(409).json({ error: 'This coupon has already been used on this account.' })
+    }
+    if (redemptionError) {
+      await releaseHold(false)
+      return failure(response, 500, 'Booking could not be saved. Please try again.', 'customer.coupon_redemption_failed', redemptionError)
+    }
   }
   try {
     const vendors = await findNearbyVendors(parsed.data.latitude, parsed.data.longitude)
@@ -315,17 +472,32 @@ async function placeQuotedBooking(request: Request, response: Response, includeQ
       idempotencyKey: parsed.data.idempotencyKey,
       booking: bookingInsert(parsed.data, services, null, quote.totalPaise),
       vendors,
-      payment: parsed.data.paymentMethod === 'cod' ? { provider: 'cash_on_delivery', amount_paise: quote.totalPaise, currency: 'INR', status: 'pending' } : undefined,
+      payment: method === 'cod' ? { provider: 'cash_on_delivery', amount_paise: quote.totalPaise, currency: 'INR', status: 'pending' } : undefined,
     })
     emitRealtimeToUser(customerId, 'booking.created', result.booking)
     return response.status(result.created ? 201 : 200).json(includeQuote ? { ...result.booking, quote } : result.booking)
   } catch (error) {
-    if (quote.couponId) await supabase.from('coupon_redemptions').delete().eq('coupon_id', quote.couponId).eq('customer_id', customerId)
+    await releaseHold(Boolean(quote.couponId))
     return databaseFailure(response, 'customer.booking_failed', error, 500, 'Booking could not be saved. Please try again.')
   }
 }
 router.post('/orders', async (request, response) => placeQuotedBooking(request, response, false))
 router.post('/orders/quote', quoteLimit, async (request, response) => placeQuotedBooking(request, response, true))
+router.post('/checkouts/:checkoutId/cash-on-delivery', async (request, response) => {
+  const customerId = request.authUser!.id
+  const { data: checkout, error } = await supabase.from('booking_checkouts').select('*').eq('id', request.params.checkoutId).eq('customer_id', customerId).maybeSingle()
+  if (error) return databaseFailure(response, 'customer.checkout_failed', error, 500)
+  if (!checkout) return response.status(404).json({ error: 'Checkout not found' })
+  if (checkout.status === 'booked') return response.status(409).json({ error: 'This booking has already been paid.' })
+  try {
+    const result = await settleBookingCheckout(checkout as CheckoutRow, 'cod')
+    if (result.status === 'coupon_used') return response.status(409).json({ error: 'This coupon has already been used on this account.' })
+    if (result.status === 'conflict') return response.status(409).json({ error: 'This booking is already being processed. Refresh and try again.' })
+    return response.status(result.created ? 201 : 200).json(result.booking)
+  } catch (settleError) {
+    return databaseFailure(response, 'customer.booking_failed', settleError, 500, 'Booking could not be saved. Please try again.')
+  }
+})
 
 router.post('/orders/quote-preview', quoteLimit, async (request, response) => {
   const parsed = bookingSchema.safeParse(request.body)

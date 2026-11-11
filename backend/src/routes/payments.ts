@@ -1,5 +1,5 @@
 import { databaseFailure } from '../lib/httpErrors.js'
-import { Router } from 'express'
+import { Router, type Response } from 'express'
 import crypto from 'node:crypto'
 import { z } from 'zod'
 import { requireAuth, requireRole } from '../middleware/auth.js'
@@ -10,8 +10,10 @@ import { epochSecondsToIso, extractPaymentDetails, type RazorpayPaymentEntity } 
 import { refundCapturedAfterCod } from '../services/paymentReconciliation.js'
 import { notifyPaidOnlineAfterCodSwitch } from '../services/codOnlineSwitch.js'
 import { failure } from '../lib/httpErrors.js'
+import { settleBookingCheckout, type CheckoutRow } from './customer.js'
 const router = Router()
 const razorpay = () => ({ key: process.env.RAZORPAY_KEY_ID, secret: process.env.RAZORPAY_KEY_SECRET })
+type RazorpayKeys = { key?: string; secret?: string }
 
 // Returns null (never throws) so a Razorpay hiccup cannot fail a verify that the signature already proves.
 async function fetchRazorpayPayment(paymentId: string, keys: { key?: string; secret?: string }): Promise<RazorpayPaymentEntity | null> {
@@ -29,11 +31,57 @@ async function fetchRazorpayPayment(paymentId: string, keys: { key?: string; sec
     return null
   }
 }
+async function createRazorpayOrder(response: Response, keys: RazorpayKeys, amountPaise: number, receipt: string) {
+  const auth = Buffer.from(`${keys.key}:${keys.secret}`).toString('base64')
+  let providerResponse: Awaited<ReturnType<typeof fetch>>
+  try {
+    providerResponse = await fetch('https://api.razorpay.com/v1/orders', { method: 'POST', headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ amount: amountPaise, currency: 'INR', receipt }), signal: AbortSignal.timeout(8000) })
+  } catch (error) {
+    failure(response, 502, 'Payment provider unavailable', 'payments.order_request_failed', error)
+    return null
+  }
+  if (!providerResponse.ok) {
+    response.status(502).json({ error: 'Payment provider unavailable' })
+    return null
+  }
+  return await providerResponse.json() as { id: string; amount: number; currency: string }
+}
+// Checkout orders are not tied to a booking yet, so the Razorpay order id is stored on the checkout instead of payments.
+async function checkoutPaymentOrder(response: Response, customerId: string, checkoutId: string, keys: RazorpayKeys) {
+  const { data: checkout, error } = await supabase.from('booking_checkouts').select('*').eq('id', checkoutId).eq('customer_id', customerId).maybeSingle()
+  if (error) return databaseFailure(response, 'payments.checkout_lookup_failed', error, 500)
+  if (!checkout) return response.status(404).json({ error: 'Booking not found' })
+  if (checkout.status === 'booked') return response.status(409).json({ error: 'This booking has already been paid.' })
+  if (checkout.status === 'cod') return response.status(409).json({ error: 'This booking is set to cash on delivery.' })
+  const amountPaise = Number(checkout.quoted_amount_paise)
+  if (!Number.isInteger(amountPaise) || amountPaise <= 0) return response.status(409).json({ error: 'Booking does not have an authoritative quote' })
+  if (!keys.key || !keys.secret) return response.status(503).json({ error: 'Payment provider is not configured' })
+  let orderId = checkout.provider_order_id as string | null
+  if (!orderId) {
+    const order = await createRazorpayOrder(response, keys, amountPaise, checkout.id)
+    if (!order) return
+    // Retries reuse the stored order, so a payment started earlier on it still matches this checkout.
+    const { data: claimed, error: claimError } = await supabase.from('booking_checkouts').update({ provider_order_id: order.id, status: 'order_created', updated_at: new Date().toISOString() }).eq('id', checkout.id).is('provider_order_id', null).select('id').maybeSingle()
+    if (claimError) return databaseFailure(response, 'payments.checkout_update_failed', claimError, 500)
+    if (claimed) orderId = order.id
+    else {
+      const { data: latest, error: latestError } = await supabase.from('booking_checkouts').select('provider_order_id').eq('id', checkout.id).single()
+      if (latestError || !latest?.provider_order_id) return databaseFailure(response, 'payments.checkout_update_failed', latestError, 500)
+      orderId = latest.provider_order_id
+    }
+  }
+  response.status(201).json({ id: orderId, amount: amountPaise, currency: 'INR', keyId: keys.key })
+}
 router.post('/razorpay/order', requireAuth, async (request, response) => {
-  const parsed = z.object({ amount: z.number().positive().optional(), bookingId: z.string().uuid() }).safeParse(request.body)
+  const parsed = z.object({ amount: z.number().positive().optional(), bookingId: z.string().uuid().optional(), checkoutId: z.string().uuid().optional() })
+    .refine((body) => Number(Boolean(body.bookingId)) + Number(Boolean(body.checkoutId)) === 1, { error: 'Provide exactly one of bookingId or checkoutId' })
+    .safeParse(request.body)
   const keys = razorpay()
   if (!parsed.success) return response.status(400).json({ error: 'Invalid payment order' })
-  const { data: booking, error: bookingError } = await supabase.from('bookings').select('id,status,quoted_amount_paise').eq('id', parsed.data.bookingId).eq('customer_id', request.authUser!.id).single()
+  if (parsed.data.checkoutId) return checkoutPaymentOrder(response, request.authUser!.id, parsed.data.checkoutId, keys)
+  const bookingId = parsed.data.bookingId
+  if (!bookingId) return response.status(400).json({ error: 'Invalid payment order' })
+  const { data: booking, error: bookingError } = await supabase.from('bookings').select('id,status,quoted_amount_paise').eq('id', bookingId).eq('customer_id', request.authUser!.id).single()
   if (bookingError || !booking) return response.status(404).json({ error: 'Booking not found' })
   if (['cancelled', 'delivered'].includes(booking.status)) return response.status(409).json({ error: 'This booking can no longer be paid.' })
   const { data: existing, error: existingError } = await supabase.from('payments').select('status').eq('booking_id', booking.id).maybeSingle()
@@ -42,15 +90,8 @@ router.post('/razorpay/order', requireAuth, async (request, response) => {
   const amountPaise = Number(booking.quoted_amount_paise)
   if (!Number.isInteger(amountPaise) || amountPaise <= 0) return response.status(409).json({ error: 'Booking does not have an authoritative quote' })
   if (!keys.key || !keys.secret) return response.status(503).json({ error: 'Payment provider is not configured' })
-  const auth = Buffer.from(`${keys.key}:${keys.secret}`).toString('base64')
-  let providerResponse: Awaited<ReturnType<typeof fetch>>
-  try {
-    providerResponse = await fetch('https://api.razorpay.com/v1/orders', { method: 'POST', headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ amount: amountPaise, currency: 'INR', receipt: parsed.data.bookingId }), signal: AbortSignal.timeout(8000) })
-  } catch (error) {
-    return failure(response, 502, 'Payment provider unavailable', 'payments.order_request_failed', error)
-  }
-  if (!providerResponse.ok) return response.status(502).json({ error: 'Payment provider unavailable' })
-  const order = await providerResponse.json() as { id: string; amount: number; currency: string }
+  const order = await createRazorpayOrder(response, keys, amountPaise, bookingId)
+  if (!order) return
   const orderFields = { provider: 'razorpay', provider_order_id: order.id, amount_paise: order.amount, currency: order.currency, status: 'pending' }
   const { error: insertError } = await supabase.from('payments').insert({ booking_id: booking.id, ...orderFields })
   if (insertError) {
@@ -61,6 +102,26 @@ router.post('/razorpay/order', requireAuth, async (request, response) => {
   }
   response.status(201).json({ id: order.id, amount: order.amount, currency: order.currency, keyId: keys.key })
 })
+// Verify for a checkout: the booking is created here only after Razorpay has captured the payment.
+async function verifyCheckoutPayment(response: Response, customerId: string, orderId: string, paymentId: string, keys: RazorpayKeys) {
+  const { data: checkout, error } = await supabase.from('booking_checkouts').select('*').eq('provider_order_id', orderId).maybeSingle()
+  if (error) return databaseFailure(response, 'payments.verify_failed', error, 500)
+  if (!checkout) return response.status(404).json({ error: 'Payment order not found' })
+  if (checkout.customer_id !== customerId) return response.status(403).json({ error: 'Payment is not owned by this customer' })
+  const entity = await fetchRazorpayPayment(paymentId, keys)
+  if (entity && ((entity.order_id && entity.order_id !== orderId) || (typeof entity.amount === 'number' && entity.amount !== Number(checkout.quoted_amount_paise)))) {
+    logger.error('payment.amount_mismatch', { providerOrderId: orderId, capturedPaise: entity.amount, expectedPaise: checkout.quoted_amount_paise })
+    return response.status(409).json({ error: 'Payment amount does not match this booking. Contact support.' })
+  }
+  const details = entity ? { ...extractPaymentDetails(entity), captured_at: entity.status === 'captured' ? new Date().toISOString() : null } : {}
+  try {
+    const outcome = await settleBookingCheckout(checkout as CheckoutRow, 'gateway', { provider_payment_id: paymentId, status: 'paid', ...details })
+    if (outcome.status !== 'booked') return response.status(409).json({ error: 'This booking is already being processed. Refresh and try again.' })
+    response.json({ verified: true, orderId: outcome.booking.id })
+  } catch (settleError) {
+    return databaseFailure(response, 'payments.verify_failed', settleError, 500)
+  }
+}
 router.post('/razorpay/verify', requireAuth, async (request, response) => {
   const parsed = z.object({ orderId: z.string(), paymentId: z.string(), signature: z.string() }).safeParse(request.body)
   const keys = razorpay()
@@ -69,10 +130,13 @@ router.post('/razorpay/verify', requireAuth, async (request, response) => {
   const expectedBuffer = Buffer.from(expected)
   const receivedBuffer = Buffer.from(parsed.data.signature)
   if (expectedBuffer.length !== receivedBuffer.length || !crypto.timingSafeEqual(expectedBuffer, receivedBuffer)) return response.status(400).json({ error: 'Invalid payment signature' })
-  const { data: payment, error: paymentError } = await supabase.from('payments').select('id,booking_id,amount_paise').eq('provider_order_id', parsed.data.orderId).single()
-  if (paymentError || !payment) return response.status(404).json({ error: 'Payment order not found' })
+  const { data: payment, error: paymentError } = await supabase.from('payments').select('id,booking_id,amount_paise,status,provider_payment_id').eq('provider_order_id', parsed.data.orderId).maybeSingle()
+  if (paymentError) return response.status(404).json({ error: 'Payment order not found' })
+  if (!payment) return verifyCheckoutPayment(response, request.authUser!.id, parsed.data.orderId, parsed.data.paymentId, keys)
   const { data: booking, error: bookingError } = await supabase.from('bookings').select('id').eq('id', payment.booking_id).eq('customer_id', request.authUser!.id).single()
   if (bookingError || !booking) return response.status(403).json({ error: 'Payment is not owned by this customer' })
+  // A webhook may have settled this payment first; a repeated verify for the same payment should still succeed.
+  if (payment.status === 'paid' && payment.provider_payment_id === parsed.data.paymentId) return response.json({ verified: true, orderId: payment.booking_id })
   const entity = await fetchRazorpayPayment(parsed.data.paymentId, keys)
   if (entity && ((entity.order_id && entity.order_id !== parsed.data.orderId) || (typeof entity.amount === 'number' && entity.amount !== payment.amount_paise))) {
     logger.error('payment.amount_mismatch', { providerOrderId: parsed.data.orderId, capturedPaise: entity.amount, expectedPaise: payment.amount_paise })
@@ -86,6 +150,33 @@ router.post('/razorpay/verify', requireAuth, async (request, response) => {
   await notifyPaidOnlineAfterCodSwitch(payment.booking_id)
   response.json({ verified: true, orderId: payment.booking_id })
 })
+// The webhook is the source of truth for checkouts too, so a payment still lands when the client never calls verify.
+async function settleCheckoutFromWebhook(response: Response, checkout: CheckoutRow, status: 'paid' | 'pending' | 'failed', event: unknown, entity: RazorpayPaymentEntity & { id?: string; order_id?: string; amount?: number }) {
+  if (status === 'failed') {
+    const { error } = await supabase.from('booking_checkouts').update({ status: 'failed', updated_at: new Date().toISOString() }).eq('id', checkout.id).in('status', ['awaiting_payment', 'order_created'])
+    if (error) return databaseFailure(response, 'payments.webhook_update_failed', error, 500, 'Payment event could not be persisted')
+    return response.status(202).json({ accepted: true })
+  }
+  if (status !== 'paid' || !entity.id) return response.status(202).json({ accepted: true })
+  if (entity.amount !== Number(checkout.quoted_amount_paise)) {
+    logger.error('payment.amount_mismatch', { providerOrderId: entity.order_id, capturedPaise: entity.amount, expectedPaise: checkout.quoted_amount_paise })
+    return response.status(202).json({ accepted: true })
+  }
+  try {
+    const outcome = await settleBookingCheckout(checkout, 'gateway', {
+      provider_payment_id: entity.id,
+      status: 'paid',
+      raw_webhook: event,
+      ...extractPaymentDetails(entity),
+      captured_at: epochSecondsToIso((event as { created_at?: number }).created_at) ?? new Date().toISOString(),
+    })
+    // Returning 500 makes Razorpay retry the event until the booking can be created.
+    if (outcome.status === 'conflict') return response.status(500).json({ error: 'Payment event could not be persisted' })
+  } catch (error) {
+    return databaseFailure(response, 'payments.webhook_update_failed', error, 500, 'Payment event could not be persisted')
+  }
+  response.status(202).json({ accepted: true })
+}
 router.post('/razorpay/webhook', async (request, response) => {
   const signature = request.headers['x-razorpay-signature']
   const secret = process.env.RAZORPAY_WEBHOOK_SECRET
@@ -102,6 +193,9 @@ router.post('/razorpay/webhook', async (request, response) => {
     const { data: payment, error: lookupError } = await supabase.from('payments').select('id,amount_paise,booking_id').eq('provider_order_id', paymentEntity.order_id).maybeSingle()
     if (lookupError) return databaseFailure(response, 'payments.webhook_lookup_failed', lookupError, 500, 'Payment event could not be persisted')
     if (!payment) {
+      const { data: checkout, error: checkoutError } = await supabase.from('booking_checkouts').select('*').eq('provider_order_id', paymentEntity.order_id).maybeSingle()
+      if (checkoutError) return databaseFailure(response, 'payments.webhook_lookup_failed', checkoutError, 500, 'Payment event could not be persisted')
+      if (checkout) return settleCheckoutFromWebhook(response, checkout as CheckoutRow, status, event, paymentEntity)
       if (status === 'paid') {
         // Wallet top-ups have no payments row; mirror the client verify path for them.
         const { data: topUp, error: topUpError } = await supabase.from('wallet_transactions').select('id,amount').eq('provider_reference', paymentEntity.order_id).eq('status', 'pending')

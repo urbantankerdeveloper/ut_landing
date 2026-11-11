@@ -76,7 +76,7 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
     }
     try {
       const normalizedPhone = booking.phone?.replace(/\D/g, '').slice(-10)
-      await razorpay.pay(booking.amount, booking.id, {
+      await razorpay.pay(booking.amount, { bookingId: booking.id }, {
         name: user?.name ?? 'Urban Tanker customer',
         email: user?.username,
         phone: normalizedPhone && normalizedPhone.length === 10 ? `+91${normalizedPhone}` : undefined,

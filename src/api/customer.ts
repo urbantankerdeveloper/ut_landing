@@ -15,6 +15,9 @@ export type CustomerProfileUpdate = Pick<CustomerProfile, 'name' | 'email'> & { 
 export type TrackingSnapshot = { orderId: string; status: string; latitude?: number; longitude?: number; customerLatitude?: number; customerLongitude?: number; eta?: string; vehicle?: string; driver?: string; otpRequired?: boolean; recorded_at?: string; recordedAt?: string; trackingAvailable?: boolean }
 export type PaymentOrder = { id: string; amount: number; currency: string; keyId?: string }
 export type PaymentVerification = { verified: boolean; orderId: string }
+// Online payments create a checkout first; the booking exists only after Razorpay or the wallet confirms payment.
+export type CreateBookingResult = { id: string; quotedAmountPaise?: number } | { status: 'awaiting_payment'; checkoutId: string; quote: { totalPaise: number } }
+export type PaymentTarget = { bookingId: string } | { checkoutId: string }
 export type PaymentReceipt = { status: 'pending' | 'paid' | 'failed' | 'refunded'; amountPaise: number; currency: string; method: string | null; cardNetwork: string | null; cardLast4: string | null; bank: string | null; wallet: string | null; vpa: string | null; capturedAt: string | null; feePaise: number | null; taxPaise: number | null; refundedPaise: number | null }
 export type BookingPaymentMethod = 'wallet' | 'gateway' | 'cod'
 export type BookingServiceDetails = { serviceId: string; capacity?: string; waterType?: string; tankerCount?: string; serviceType?: string; quantity?: string; depth?: string; grade?: string; pump?: string; pickupLocation?: string; materialType?: string; details: string; deliveryDate?: string; preferredTime?: string; location?: string; phone?: string; latitude?: number; longitude?: number; phoneVerificationChallengeId?: string }
@@ -143,14 +146,15 @@ export const customerApi = {
   services: () => apiFetch<CustomerService[]>('/customer/services'),
   pricing: () => apiFetch<{ gstPercentage: number; gstRate: number; gstWaived?: boolean; testPricingPerServicePaise?: number | null }>('/customer/pricing'),
   pricingForCustomer: () => apiFetch<{ gstPercentage: number; gstRate: number; gstWaived: boolean; testPricingPerServicePaise?: number | null }>('/customer/pricing/me'),
-  createBooking: (payload: CreateBookingPayload) => apiFetch<{ id: string; quotedAmountPaise?: number }>('/customer/orders/quote', { method: 'POST', body: JSON.stringify(payload) }),
+  createBooking: (payload: CreateBookingPayload) => apiFetch<CreateBookingResult>('/customer/orders/quote', { method: 'POST', body: JSON.stringify(payload) }),
   tracking: (orderId: string) => apiFetch<TrackingSnapshot>(`/customer/orders/${orderId}/tracking`),
   publicTracking: (token: string) => apiFetch<PublicTracking>(`/public/tracking/${encodeURIComponent(token)}`),
   requestDeliveryOtp: (orderId: string) => apiFetch<{ expiresAt: string }>(`/customer/orders/${orderId}/delivery-otp`, { method: 'POST' }),
   rescheduleBooking: (orderId: string, scheduledFor: string) => apiFetch<CustomerBooking>(`/customer/orders/${orderId}/reschedule`, { method: 'PATCH', body: JSON.stringify({ scheduledFor }) }),
   cancelBooking: (orderId: string) => apiFetch<CustomerBooking>(`/customer/orders/${orderId}/status`, { method: 'PATCH', successMessage: feedbackContent.success.cancelled, body: JSON.stringify({ status: 'cancelled' }) }),
   rateBooking: (orderId: string, rating: number, review?: string) => apiFetch<unknown>(`/customer/orders/${orderId}/rating`, { method: 'POST', body: JSON.stringify({ rating, review }) }),
-  createPaymentOrder: (payload: { amount: number; bookingId: string }) => apiFetch<PaymentOrder>('/payment/razorpay/order', { method: 'POST', body: JSON.stringify(payload) }),
+  createPaymentOrder: (payload: { amount: number } & PaymentTarget) => apiFetch<PaymentOrder>('/payment/razorpay/order', { method: 'POST', body: JSON.stringify(payload) }),
+  payCheckoutOnDelivery: (checkoutId: string) => apiFetch<{ id: string; quotedAmountPaise?: number }>(`/customer/checkouts/${checkoutId}/cash-on-delivery`, { method: 'POST', successMessage: 'Booking set to pay on delivery.' }),
   verifyPayment: verifyRazorpayPayment,
   getPaymentReceipt: fetchPaymentReceipt,
   switchBookingToCashOnDelivery: (orderId: string) => apiFetch<unknown>(`/customer/orders/${orderId}/payment-method`, { method: 'POST', successMessage: 'Booking set to pay on delivery.', body: JSON.stringify({ paymentMethod: 'cod' }) }),

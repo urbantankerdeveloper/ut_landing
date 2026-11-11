@@ -16,7 +16,7 @@ function nextResult(table: string) {
 function queryBuilder(table: string) {
   const result = nextResult(table)
   const builder: Record<string, unknown> = {}
-  for (const method of ['select', 'eq', 'in', 'or', 'update', 'insert', 'order', 'range', 'limit']) {
+  for (const method of ['select', 'eq', 'in', 'is', 'or', 'update', 'insert', 'order', 'range', 'limit']) {
     builder[method] = (...args: unknown[]) => {
       state.calls.push({ table, method, args })
       return builder
@@ -372,6 +372,50 @@ describe('switch gateway booking to cash on delivery', () => {
 
     expect(response.status).toBe(409)
     expect(updatePayloads('bookings').map((payload) => payload.payment_method)).toEqual(['cod', 'gateway'])
+  })
+})
+
+describe('checkout payments before a booking exists', () => {
+  const checkout = { id: 'checkout-1', customer_id: 'cust-1', status: 'awaiting_payment', quoted_amount_paise: 50000, provider_order_id: null, booking_id: null }
+
+  it('creates the Razorpay order on the checkout without writing any booking or payment row', async () => {
+    setResults('booking_checkouts', { data: checkout, error: null }, { data: { id: 'checkout-1' }, error: null })
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 'order_9', amount: 50000, currency: 'INR' }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const response = await request(buildApp()).post('/api/payment/razorpay/order').send({ checkoutId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11' })
+
+    expect(response.status).toBe(201)
+    expect(response.body).toEqual({ id: 'order_9', amount: 50000, currency: 'INR', keyId: 'rzp_test_key' })
+    expect(state.calls.some((call) => call.table === 'payments')).toBe(false)
+    expect(updatePayloads('booking_checkouts')[0]).toMatchObject({ provider_order_id: 'order_9', status: 'order_created' })
+  })
+
+  it('rejects a request that names both a booking and a checkout', async () => {
+    const response = await request(buildApp()).post('/api/payment/razorpay/order').send({
+      bookingId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+      checkoutId: 'b0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+    })
+
+    expect(response.status).toBe(400)
+    expect(state.calls).toHaveLength(0)
+  })
+
+  it('marks the checkout failed on a failed payment event and leaves no booking behind', async () => {
+    setResults('payments', { data: null, error: null })
+    setResults('booking_checkouts', { data: checkout, error: null })
+    const failedEvent = {
+      event: 'payment.failed',
+      created_at: 1700000000,
+      payload: { payment: { entity: { id: 'pay_3', order_id: 'order_9', amount: 50000, status: 'failed' } } },
+    }
+
+    const response = await signedWebhook(failedEvent)
+
+    expect(response.status).toBe(202)
+    expect(updatePayloads('booking_checkouts')[0]).toMatchObject({ status: 'failed' })
+    expect(state.calls.some((call) => call.table === 'bookings')).toBe(false)
+    expect(state.calls.some((call) => call.table === 'payments' && call.method === 'insert')).toBe(false)
   })
 })
 

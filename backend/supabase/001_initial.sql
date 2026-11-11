@@ -1175,6 +1175,11 @@ create index if not exists payments_reconciliation_note_idx on public.payments (
 alter table public.bookings add column if not exists payment_switched_to_online_at timestamptz;
 alter table public.bookings add column if not exists cod_online_notified_at timestamptz;
 create index if not exists bookings_switched_online_idx on public.bookings (payment_switched_to_online_at) where payment_method = 'gateway';
+-- An online-payment booking exists only after Razorpay confirms payment. Until then the request waits here.
+create table if not exists public.booking_checkouts (id uuid primary key default gen_random_uuid(), customer_id uuid not null references public.profiles(id) on delete cascade, idempotency_key uuid, booking_request jsonb not null, quoted_amount_paise integer not null check (quoted_amount_paise > 0), coupon_id uuid references public.coupons(id) on delete set null, status text not null default 'awaiting_payment' check (status in ('awaiting_payment','order_created','failed','cod','booked')), provider_order_id text unique, booking_id uuid unique references public.bookings(id) on delete set null, created_at timestamptz not null default now(), updated_at timestamptz not null default now());
+create unique index if not exists booking_checkouts_customer_idempotency_idx on public.booking_checkouts (customer_id, idempotency_key) where idempotency_key is not null;
+create index if not exists booking_checkouts_status_created_idx on public.booking_checkouts (status, created_at);
+alter table public.booking_checkouts enable row level security;
 insert into public.sms_templates (template_key, body, variables) values
   ('cod_switched_to_online', 'Urban Tanker: Booking {{reference}} is paid online. Do NOT collect any cash from the customer.', '{reference}'),
   ('cod_reverted_to_cash', 'Urban Tanker: Booking {{reference}} is back to cash on delivery. Collect the payment from the customer.', '{reference}')
