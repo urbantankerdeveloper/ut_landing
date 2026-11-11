@@ -60,6 +60,29 @@ router.post('/orders/:orderId/payment-method', async (request, response) => {
   }
   response.json({ id: booking.id, paymentMethod: 'cod' })
 })
+router.post('/orders/:orderId/payment-method/online', async (request, response) => {
+  const customerId = request.authUser!.id
+  const { data: booking, error: bookingError } = await supabase.from('bookings').select('id,status,payment_method').eq('id', request.params.orderId).eq('customer_id', customerId).maybeSingle()
+  if (bookingError) return databaseFailure(response, 'customerExtended.database_error', bookingError, 500)
+  if (!booking) return response.status(404).json({ error: 'Booking not found' })
+  if (booking.payment_method === 'gateway') return response.json({ id: booking.id, paymentMethod: 'gateway' })
+  if (booking.payment_method !== 'cod') return response.status(409).json({ error: 'Payment method cannot be changed for this booking' })
+  if (!codSwitchStatuses.includes(booking.status)) return response.status(409).json({ error: 'Online payment can only be chosen before the driver starts the trip' })
+  const { data: payment, error: paymentError } = await supabase.from('payments').select('status').eq('booking_id', booking.id).maybeSingle()
+  if (paymentError) return databaseFailure(response, 'customerExtended.database_error', paymentError, 500)
+  if (payment?.status === 'paid') return response.status(409).json({ error: 'This booking has already been paid' })
+  const now = new Date().toISOString()
+  const { data: switched, error: switchError } = await supabase.from('bookings').update({ payment_method: 'gateway', payment_switched_to_online_at: now, updated_at: now }).eq('id', booking.id).eq('customer_id', customerId).eq('payment_method', 'cod').in('status', codSwitchStatuses).select('id').maybeSingle()
+  if (switchError) return databaseFailure(response, 'customerExtended.database_error', switchError, 500)
+  if (!switched) return response.status(409).json({ error: 'Online payment can only be chosen before the driver starts the trip' })
+  // A capture can land between the check and the update. Keep it as COD in that case so the driver does not get a conflicting instruction.
+  const { data: latest } = await supabase.from('payments').select('status').eq('booking_id', booking.id).maybeSingle()
+  if (latest?.status === 'paid') {
+    await supabase.from('bookings').update({ payment_method: 'cod', payment_switched_to_online_at: null }).eq('id', booking.id).eq('customer_id', customerId)
+    return response.status(409).json({ error: 'This booking has already been paid' })
+  }
+  response.json({ id: booking.id, paymentMethod: 'gateway' })
+})
 router.get('/payments/:bookingId', async (request, response) => {
   const { data: booking, error: bookingError } = await supabase.from('bookings').select('id').eq('id', request.params.bookingId).eq('customer_id', request.authUser!.id).maybeSingle()
   if (bookingError) return databaseFailure(response, 'customerExtended.database_error', bookingError, 500)

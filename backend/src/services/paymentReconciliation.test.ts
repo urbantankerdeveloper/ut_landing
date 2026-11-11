@@ -93,7 +93,7 @@ describe('reconcilePayment', () => {
     setResults('payments', { data: null, error: null })
 
     await expect(reconcilePayment(ROW)).resolves.toBe('flagged')
-    const update = state.updates[0].values
+    const update = state.updates[0]!.values
     expect(update.reconciliation_note).toBe('amount_mismatch')
     expect(update).not.toHaveProperty('status')
   })
@@ -103,7 +103,7 @@ describe('reconcilePayment', () => {
     setResults('payments', { data: null, error: null })
 
     await expect(reconcilePayment(ROW)).resolves.toBe('flagged')
-    expect(state.updates[0].values.reconciliation_note).toBe('authorized_not_captured')
+    expect(state.updates[0]!.values.reconciliation_note).toBe('authorized_not_captured')
   })
 
   it('marks an order with no payment attempts as checked without settling it', async () => {
@@ -111,8 +111,8 @@ describe('reconcilePayment', () => {
     setResults('payments', { data: null, error: null })
 
     await expect(reconcilePayment(ROW)).resolves.toBe('no_capture')
-    expect(state.updates[0].values.reconciliation_note).toBe('no_capture_found')
-    expect(state.updates[0].values).not.toHaveProperty('status')
+    expect(state.updates[0]!.values.reconciliation_note).toBe('no_capture_found')
+    expect(state.updates[0]!.values).not.toHaveProperty('status')
   })
 
   it('leaves the row untouched when Razorpay returns an error', async () => {
@@ -214,7 +214,7 @@ describe('refundCapturedAfterCod', () => {
     expect(url).toBe('https://api.razorpay.com/v1/payments/pay_c/refund')
     expect(JSON.parse(String(init.body))).toEqual({ amount: 50000 })
     expect((init.headers as Record<string, string>)['X-Razorpay-Idempotency']).toBe('cod-refund-pay-c')
-    expect(state.updates[1].values).toMatchObject({ status: 'refunded', refunded_paise: 50000, reconciliation_note: 'auto_refunded_after_cod_switch' })
+    expect(state.updates[1]!.values).toMatchObject({ status: 'refunded', refunded_paise: 50000, reconciliation_note: 'auto_refunded_after_cod_switch' })
   })
 
   it('does not call Razorpay when another worker already claimed the refund', async () => {
@@ -232,7 +232,7 @@ describe('refundCapturedAfterCod', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })))
 
     await expect(refundCapturedAfterCod(PAYMENT)).resolves.toBe('refund_failed')
-    expect(state.updates[1].values).toMatchObject({ reconciliation_note: 'captured_after_cod_switch' })
-    expect(state.updates[1].values).not.toHaveProperty('status')
+    expect(state.updates[1]!.values).toMatchObject({ reconciliation_note: 'captured_after_cod_switch' })
+    expect(state.updates[1]!.values).not.toHaveProperty('status')
   })
 })

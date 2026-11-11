@@ -162,7 +162,7 @@ describe('razorpay webhook payment details', () => {
       { data: [{ id: 'row-1' }], error: null },
     )
     setResults('bookings', { data: { payment_method: 'cod' }, error: null })
-    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }))
+    const fetchMock = vi.fn<(url: string) => Promise<Response>>(async () => new Response('{}', { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
 
     const response = await signedWebhook(capturedEvent)

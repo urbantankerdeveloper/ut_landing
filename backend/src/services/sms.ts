@@ -10,6 +10,7 @@ export const smsTemplateKeys = [
   'vendor_acceptance',
   'delivery_confirmation',
   'delivery_otp',
+  'cod_switched_to_online',
 ] as const
 
 export type SmsTemplateKey = (typeof smsTemplateKeys)[number]
@@ -22,6 +23,7 @@ export const smsTemplateVariables: Record<SmsTemplateKey, readonly string[]> = {
   vendor_acceptance: ['reference', 'vehicle', 'driver', 'trackingUrl'],
   delivery_confirmation: ['reference'],
   delivery_otp: ['reference', 'otp'],
+  cod_switched_to_online: ['reference'],
 }
 
 // Placeholders an edited body must keep. An OTP message without {{otp}} cannot do its job.
@@ -32,6 +34,7 @@ export const smsTemplateRequiredVariables: Record<SmsTemplateKey, readonly strin
   vendor_acceptance: ['reference'],
   delivery_confirmation: ['reference'],
   delivery_otp: ['otp'],
+  cod_switched_to_online: ['reference'],
 }
 
 // OTP templates cannot be deactivated, because the code paths that send them would then fail.
@@ -90,6 +93,7 @@ function resolveMsg91TemplateId(key: string, stored: string | null): string | un
     vendor_acceptance: config.MSG91_TEMPLATE_ID_VENDOR_ACCEPTANCE,
     delivery_confirmation: config.MSG91_TEMPLATE_ID_DELIVERY_CONFIRMATION,
     delivery_otp: config.MSG91_TEMPLATE_ID_DELIVERY_OTP,
+    cod_switched_to_online: config.MSG91_TEMPLATE_ID_COD_SWITCHED_TO_ONLINE,
   }
   return ids[key as SmsTemplateKey]
 }

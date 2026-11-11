@@ -8,6 +8,7 @@ import { logger } from '../lib/logger.js'
 import { refundAmountInPaise, signaturesMatch } from '../services/paymentSecurity.js'
 import { epochSecondsToIso, extractPaymentDetails, type RazorpayPaymentEntity } from '../services/paymentDetails.js'
 import { refundCapturedAfterCod } from '../services/paymentReconciliation.js'
+import { notifyPaidOnlineAfterCodSwitch } from '../services/codOnlineSwitch.js'
 import { failure } from '../lib/httpErrors.js'
 const router = Router()
 const razorpay = () => ({ key: process.env.RAZORPAY_KEY_ID, secret: process.env.RAZORPAY_KEY_SECRET })
@@ -82,6 +83,7 @@ router.post('/razorpay/verify', requireAuth, async (request, response) => {
   const { data: settled, error } = await supabase.from('payments').update({ provider_payment_id: parsed.data.paymentId, status: 'paid', ...details, updated_at: new Date().toISOString() }).eq('id', payment.id).in('status', ['pending', 'failed']).select('id').maybeSingle()
   if (error) return databaseFailure(response, 'payments.verify_failed', error, 400)
   if (!settled) return response.status(409).json({ error: 'This payment has already been processed.' })
+  await notifyPaidOnlineAfterCodSwitch(payment.booking_id)
   response.json({ verified: true, orderId: payment.booking_id })
 })
 router.post('/razorpay/webhook', async (request, response) => {
@@ -137,12 +139,15 @@ router.post('/razorpay/webhook', async (request, response) => {
     ).select('id')
     if (error) return databaseFailure(response, 'payments.webhook_update_failed', error, 500, 'Payment event could not be persisted')
     if (!updated?.length) logger.warn('payment.webhook_no_matching_row', { providerOrderId: paymentEntity.order_id, status })
-    else if (update.reconciliation_note === 'captured_after_cod_switch') {
-      // A failed refund stays flagged, and the reconciliation sweep retries it.
-      try {
-        await refundCapturedAfterCod({ id: payment.id, provider_payment_id: paymentEntity.id, amount_paise: payment.amount_paise })
-      } catch (refundError) {
-        logger.error('payment.cod_refund_failed', { paymentId: payment.id, error: refundError instanceof Error ? refundError.message : String(refundError) })
+    else {
+      if (status === 'paid') await notifyPaidOnlineAfterCodSwitch(payment.booking_id)
+      if (update.reconciliation_note === 'captured_after_cod_switch') {
+        // A failed refund stays flagged, and the reconciliation sweep retries it.
+        try {
+          await refundCapturedAfterCod({ id: payment.id, provider_payment_id: paymentEntity.id, amount_paise: payment.amount_paise })
+        } catch (refundError) {
+          logger.error('payment.cod_refund_failed', { paymentId: payment.id, error: refundError instanceof Error ? refundError.message : String(refundError) })
+        }
       }
     }
   }

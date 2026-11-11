@@ -1,6 +1,7 @@
 import { supabase } from '../supabase.js'
 import { logger } from '../lib/logger.js'
 import { epochSecondsToIso, extractPaymentDetails, type RazorpayPaymentEntity } from './paymentDetails.js'
+import { notifyPaidOnlineAfterCodSwitch } from './codOnlineSwitch.js'
 
 // Notes an admin should look at. Kept in one place so the admin filter and the writers agree.
 export const ATTENTION_NOTES = ['amount_mismatch', 'authorized_not_captured', 'captured_after_cod_switch', 'auto_refund_in_progress', 'auto_refunded_after_cod_switch'] as const
@@ -106,6 +107,7 @@ export async function reconcilePayment(row: PendingPayment, now: Date = new Date
   if (!settled?.length) return 'skipped'
 
   logger.info('payment.reconciled', { paymentId: row.id, note })
+  await notifyPaidOnlineAfterCodSwitch(row.booking_id)
   return note === 'reconciled_from_razorpay' ? 'paid' : 'flagged'
 }
 
