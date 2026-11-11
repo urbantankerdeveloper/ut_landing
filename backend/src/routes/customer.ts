@@ -280,7 +280,7 @@ function quoteFailure(response: Response, error: unknown) {
   if (error instanceof PricingError) return response.status(400).json({ error: error.message })
   return failure(response, 500, 'Booking quote could not be calculated. Please try again.', 'customer.quote_failed', error)
 }
-// A gateway booking is written only after Razorpay confirms payment, so until then the request waits in booking_checkouts.
+// Checkouts created before bookings were written up front. Still settled here so in-flight requests finish.
 const claimableCheckoutStatuses = ['awaiting_payment', 'order_created', 'failed']
 export type CheckoutRow = {
   id: string
@@ -385,15 +385,6 @@ export async function settleBookingCheckout(checkout: CheckoutRow, method: 'gate
   }
   return { status: 'booked', booking: booking ?? await bookingSummary(bookingId), created }
 }
-async function startGatewayCheckout(response: Response, customerId: string, data: z.infer<typeof bookingSchema>, quote: Awaited<ReturnType<typeof quoteServices>>) {
-  const row = { customer_id: customerId, idempotency_key: data.idempotencyKey ?? null, booking_request: data, quoted_amount_paise: quote.totalPaise, coupon_id: quote.couponId ?? null }
-  let { data: checkout, error } = await supabase.from('booking_checkouts').insert(row).select('*').single()
-  if (error?.code === '23505' && data.idempotencyKey) {
-    ;({ data: checkout, error } = await supabase.from('booking_checkouts').select('*').eq('customer_id', customerId).eq('idempotency_key', data.idempotencyKey).single())
-  }
-  if (error || !checkout) return databaseFailure(response, 'customer.checkout_failed', error, 500, 'Booking could not be saved. Please try again.')
-  return response.status(201).json({ status: 'awaiting_payment', checkoutId: checkout.id, quote })
-}
 // Returns the debit transaction id, or null when the wallet cannot cover the amount. The debit is written first, then the balance re-read, so concurrent debits cannot overspend.
 async function debitWalletForBooking(customerId: string, amountPaise: number): Promise<string | null> {
   const { data: debit, error } = await supabase.from('wallet_transactions').insert({ customer_id: customerId, type: 'debit', amount: amountPaise / 100, status: 'completed' }).select('id').single()
@@ -433,7 +424,6 @@ async function placeQuotedBooking(request: Request, response: Response, includeQ
     return quoteFailure(response, error)
   }
   const method = parsed.data.paymentMethod
-  if (method === 'gateway') return startGatewayCheckout(response, customerId, parsed.data, quote)
   if (method === 'wallet' && parsed.data.idempotencyKey) {
     // A retried wallet booking must not debit the wallet a second time.
     const { data: existing, error: existingError } = await supabase.from('bookings').select('id,reference,vendor_id,quoted_amount_paise,payment_method').eq('customer_id', customerId).eq('idempotency_key', parsed.data.idempotencyKey).maybeSingle()
@@ -499,6 +489,39 @@ router.post('/checkouts/:checkoutId/cash-on-delivery', async (request, response)
   }
 })
 
+// Releases a coupon hold taken by a booking that is being removed. The redemption must sit within minutes of the booking's creation,
+// so a customer cannot free a coupon they used on an earlier, paid booking.
+async function releaseCouponForCancelledBooking(customerId: string, couponCode: string, bookingCreatedAt: string) {
+  const { data: coupon } = await supabase.from('coupons').select('id').eq('code', couponCode.toUpperCase()).maybeSingle()
+  if (!coupon) return
+  const { data: redemption } = await supabase.from('coupon_redemptions').select('redeemed_at').eq('coupon_id', coupon.id).eq('customer_id', customerId).maybeSingle()
+  if (!redemption) return
+  if (Math.abs(Date.parse(redemption.redeemed_at) - Date.parse(bookingCreatedAt)) > 5 * 60 * 1000) return
+  await supabase.from('coupon_redemptions').delete().eq('coupon_id', coupon.id).eq('customer_id', customerId)
+}
+// The customer closed Razorpay checkout without paying, so the unpaid online booking is removed. Paid bookings are never removed here.
+router.post('/bookings/:bookingId/cancel-online-payment', async (request, response) => {
+  const customerId = request.authUser!.id
+  const parsed = z.object({ couponCode: z.string().max(80).optional() }).safeParse(request.body ?? {})
+  if (!parsed.success) return response.status(400).json({ error: 'Invalid cancellation request' })
+  const { data: booking, error } = await supabase.from('bookings').select('id,status,payment_method,created_at').eq('id', request.params.bookingId).eq('customer_id', customerId).maybeSingle()
+  if (error) return databaseFailure(response, 'customer.booking_failed', error, 500)
+  if (!booking) return response.status(404).json({ error: 'Booking not found' })
+  if (booking.payment_method !== 'gateway') return response.status(409).json({ error: 'Only an online payment booking can be removed this way.' })
+  if (!['pending_vendor', 'vendor_assigned'].includes(booking.status)) return response.status(409).json({ error: 'This booking has already been accepted and cannot be removed.' })
+  const { data: payment, error: paymentError } = await supabase.from('payments').select('status').eq('booking_id', booking.id).maybeSingle()
+  if (paymentError) return databaseFailure(response, 'customer.booking_failed', paymentError, 500)
+  if (payment?.status === 'paid') return response.status(409).json({ error: 'This booking has already been paid.' })
+  if (payment) {
+    const { error: deletePaymentError } = await supabase.from('payments').delete().eq('booking_id', booking.id).neq('status', 'paid')
+    if (deletePaymentError) return databaseFailure(response, 'customer.booking_failed', deletePaymentError, 500)
+  }
+  const { data: deleted, error: deleteError } = await supabase.from('bookings').delete().eq('id', booking.id).eq('customer_id', customerId).eq('payment_method', 'gateway').in('status', ['pending_vendor', 'vendor_assigned']).select('id').maybeSingle()
+  if (deleteError) return databaseFailure(response, 'customer.booking_failed', deleteError, 500)
+  if (!deleted) return response.status(409).json({ error: 'This booking has already been accepted and cannot be removed.' })
+  if (parsed.data.couponCode) await releaseCouponForCancelledBooking(customerId, parsed.data.couponCode, booking.created_at)
+  response.status(204).send()
+})
 router.post('/orders/quote-preview', quoteLimit, async (request, response) => {
   const parsed = bookingSchema.safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Invalid booking', details: parsed.error.flatten() })

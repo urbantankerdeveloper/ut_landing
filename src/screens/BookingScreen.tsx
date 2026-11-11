@@ -32,7 +32,7 @@ const bookingFormSchema = z.object({
   capacity: z.string().optional(),
   phone: z.string().regex(/^\d{10}$/, c.validation.phone),
   notes: z.string().max(500, c.validation.accessNotesMax).optional(),
-  paymentMethod: z.enum(['wallet', 'gateway', 'cod'], { error: 'Choose a payment method before booking.' }),
+  paymentMethod: z.enum(['wallet', 'gateway', 'cod']).optional(),
   couponCode: z.string().optional(),
   guestName: z.string().trim().max(60, c.validation.guestNameMax).optional(),
 })
@@ -66,7 +66,6 @@ type BookingDraft = {
   phoneChallenges?: Record<string, string>
   guestChallengeId?: string | null
   bookingId: string | null
-  checkoutId?: string | null
   quotedTotal: number | null
 }
 
@@ -146,7 +145,6 @@ function loadBookingDraft(): Partial<BookingDraft> {
           preferredTime: booking.services[0]?.preferredTime ?? '07:00',
           phoneChallenges: {},
           bookingId: null,
-          checkoutId: null,
           quotedTotal: null,
         }
       }
@@ -350,7 +348,6 @@ export default function BookingScreen() {
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [bookingId, setBookingId] = useState<string | null>(draft.bookingId ?? null)
-  const [checkoutId, setCheckoutId] = useState<string | null>(draft.checkoutId ?? null)
   const [quotedTotal, setQuotedTotal] = useState<number | null>(draft.quotedTotal ?? null)
   const [idempotencyKey] = useState(() => draft.idempotencyKey ?? crypto.randomUUID())
   const selectedServices = useMemo(() => serviceEntries.map((entry) => entry.serviceId), [serviceEntries])
@@ -409,11 +406,11 @@ export default function BookingScreen() {
       return
     }
     const timer = window.setTimeout(() => {
-      const bookingDraft: BookingDraft = { idempotencyKey, selectedServices, serviceEntries, serviceItemsInitialized: hasInitializedServiceEntries, serviceDetails, capacity, step, details: { notes: getValues('notes') ?? '' }, locationAddress: sharedLocation, coordinates: sharedCoordinates ? { latitude: sharedCoordinates.lat, longitude: sharedCoordinates.lng } : null, region, addressLabel, addressCity, addressPincode, saveAddress: saveAddressForFuture, savedAddressId, sharedDate, preferredTime, phone, paymentMethod, couponCode, couponDiscount, guestName, phoneChallenges, bookingId, checkoutId, quotedTotal }
+      const bookingDraft: BookingDraft = { idempotencyKey, selectedServices, serviceEntries, serviceItemsInitialized: hasInitializedServiceEntries, serviceDetails, capacity, step, details: { notes: getValues('notes') ?? '' }, locationAddress: sharedLocation, coordinates: sharedCoordinates ? { latitude: sharedCoordinates.lat, longitude: sharedCoordinates.lng } : null, region, addressLabel, addressCity, addressPincode, saveAddress: saveAddressForFuture, savedAddressId, sharedDate, preferredTime, phone, paymentMethod, couponCode, couponDiscount, guestName, phoneChallenges,       bookingId, quotedTotal }
       sessionStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify(bookingDraft))
     }, DRAFT_PERSIST_DELAY_MS)
     return () => window.clearTimeout(timer)
-  }, [idempotencyKey, selectedServices, serviceEntries, hasInitializedServiceEntries, serviceDetails, capacity, step, getValues, sharedLocation, sharedCoordinates, sharedDate, region, addressLabel, addressCity, addressPincode, saveAddressForFuture, savedAddressId, preferredTime, phone, paymentMethod, couponCode, couponDiscount, guestName, phoneChallenges, bookingId, checkoutId, quotedTotal])
+  }, [idempotencyKey, selectedServices, serviceEntries, hasInitializedServiceEntries, serviceDetails, capacity, step, getValues, sharedLocation, sharedCoordinates, sharedDate, region, addressLabel, addressCity, addressPincode, saveAddressForFuture, savedAddressId, preferredTime, phone, paymentMethod, couponCode, couponDiscount, guestName, phoneChallenges, bookingId, quotedTotal])
   useEffect(() => {
     let timer: number | undefined
     const subscription = watch((values) => {
@@ -673,6 +670,11 @@ export default function BookingScreen() {
     setIsSubmitting(true)
     setError(null)
     setPaymentFailure(null)
+    if (!paymentMethod) {
+      setError(c.errors.choosePaymentMethod)
+      setIsSubmitting(false)
+      return
+    }
     try {
       const primaryService = serviceItems[0]
       if (!primaryService) throw new Error(c.errors.selectServiceBeforeConfirm)
@@ -685,10 +687,8 @@ export default function BookingScreen() {
         setSaveAddressForFuture(false)
       }
       let currentBookingId = bookingId
-      let currentCheckoutId = paymentMethod === 'gateway' ? checkoutId : null
       let payableTotal = quotedTotal ?? total
-      let bookingCreated = false
-      if (!customerDemoDataEnabled && !currentBookingId && !currentCheckoutId) {
+      if (!customerDemoDataEnabled && !currentBookingId) {
         const booking = await createBooking.mutateAsync({
           idempotencyKey,
           serviceId: primaryService.serviceId,
@@ -705,30 +705,26 @@ export default function BookingScreen() {
           longitude: sharedCoordinates?.lng,
           paymentMethod,
         })
-        if ('checkoutId' in booking) {
-          // Online payment: no booking exists until Razorpay confirms the payment.
-          currentCheckoutId = booking.checkoutId
-          payableTotal = Number(booking.quote.totalPaise) / 100 || total
-          setQuotedTotal(payableTotal)
-          setCheckoutId(currentCheckoutId)
-        } else {
-          currentBookingId = booking.id
-          payableTotal = Number(booking.quotedAmountPaise ?? 0) / 100 || total
-          setQuotedTotal(payableTotal)
-          setBookingId(currentBookingId)
-          bookingCreated = true
+        currentBookingId = booking.id
+        payableTotal = Number(booking.quotedAmountPaise ?? 0) / 100 || total
+        setQuotedTotal(payableTotal)
+        setBookingId(currentBookingId)
+        trackBookingCreated(currentBookingId)
+      }
+      if (!customerDemoDataEnabled && paymentMethod === 'gateway' && currentBookingId) {
+        try {
+          await razorpay.pay(payableTotal, { bookingId: currentBookingId }, { name: user?.name ?? (guestName || 'Urban Tanker customer'), email: user?.username, phone: `+91${normalizedPhone}` })
+        } catch (paymentError) {
+          // Closing Razorpay without paying removes the booking, so the customer starts clean on the next attempt.
+          if (paymentError instanceof CheckoutError && paymentError.kind === 'cancelled') {
+            await customerApi.cancelOnlinePayment(currentBookingId, couponCode || undefined)
+            setBookingId(null)
+            setError(c.errors.paymentCancelled)
+            return
+          }
+          throw paymentError
         }
       }
-      if (!customerDemoDataEnabled && paymentMethod === 'gateway' && (currentCheckoutId || currentBookingId)) {
-        const target = currentCheckoutId ? { checkoutId: currentCheckoutId } : { bookingId: currentBookingId! }
-        const verified = await razorpay.pay(payableTotal, target, { name: user?.name ?? (guestName || 'Urban Tanker customer'), email: user?.username, phone: `+91${normalizedPhone}` })
-        if (!currentBookingId) {
-          currentBookingId = verified.orderId
-          setBookingId(currentBookingId)
-          bookingCreated = true
-        }
-      }
-      if (bookingCreated && currentBookingId) trackBookingCreated(currentBookingId)
       sessionStorage.removeItem(BOOKING_DRAFT_KEY)
       setStep('success')
     } catch (paymentError) {
@@ -756,18 +752,11 @@ export default function BookingScreen() {
   }
 
   async function payOnDeliveryInstead() {
-    if (!bookingId && !checkoutId) return
+    if (!bookingId) return
     setIsSubmitting(true)
     setError(null)
     try {
-      // A checkout only becomes a booking here, when the customer chooses cash on delivery.
-      if (checkoutId) {
-        const booking = await customerApi.payCheckoutOnDelivery(checkoutId)
-        setBookingId(booking.id)
-        trackBookingCreated(booking.id)
-      } else if (bookingId) {
-        await customerApi.switchBookingToCashOnDelivery(bookingId)
-      }
+      await customerApi.switchBookingToCashOnDelivery(bookingId)
       setValue('paymentMethod', 'cod')
       setPaymentFailure(null)
       sessionStorage.removeItem(BOOKING_DRAFT_KEY)
@@ -816,7 +805,6 @@ export default function BookingScreen() {
               <label className={paymentMethod === 'wallet' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'wallet'} onChange={() => setValue('paymentMethod', 'wallet')} /><Wallet size={18} /><span><b>{c.payment.methods[0].title}</b><small>{c.payment.methods[0].detail}</small></span></label>
               <label className={paymentMethod === 'gateway' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'gateway'} onChange={() => setValue('paymentMethod', 'gateway')} /><CreditCard size={18} /><span><b>{c.payment.methods[1].title}</b><small>{c.payment.methods[1].detail}</small></span></label>
               <label className={paymentMethod === 'cod' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'cod'} onChange={() => setValue('paymentMethod', 'cod')} /><Wallet size={18} /><span><b>{c.payment.methods[2].title}</b><small>{c.payment.methods[2].detail}</small></span></label>
-              {errors.paymentMethod?.message && <small className="booking-field-error" role="alert">{errors.paymentMethod.message}</small>}
               {paymentFailure ? <div className="payment-recovery" role="alert">
                 <p>{paymentFailureMessage}</p>
                 <div className="action-row">
@@ -841,7 +829,7 @@ export default function BookingScreen() {
   return <section className="booking-screen">
     <BookingHero onBack={() => navigate('home')} />
     <div className="booking-new-shell"><BookingProgress activeStep={1} />
-      <form noValidate className="booking-new-grid" onSubmit={handleSubmit(review, (invalid) => setError(invalid.selectedServices?.message ?? invalid.phone?.message ?? invalid.notes?.message ?? c.submit.fallbackError))}>
+      <form noValidate className="booking-new-grid" onSubmit={handleSubmit(review, (invalid) => setError(invalid.selectedServices?.message ?? invalid.phone?.message ?? invalid.guestName?.message ?? invalid.notes?.message ?? c.submit.fallbackError))}>
         <div className="booking-form">
           <BookingSection number="01" title={c.sections.services.title} description={c.sections.services.description}>
             {activeServiceEntries.map((entry, index) => <BookingServiceItem key={entry.id} entry={entry} index={index} options={options} value={serviceDetails[entry.id] ?? serviceDraftFor(entry.serviceId)} errors={serviceFieldErrors[entry.id]} onServiceChange={changeServiceEntry} onFieldChange={updateServiceDetails} onRemove={removeServiceEntry} />)}

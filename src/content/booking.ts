@@ -418,6 +418,7 @@ export const bookingContent = {
   errors: {
     keepOneService: 'Keep at least one service in your booking.',
     correctServiceDetails: 'Please correct the highlighted service details.',
+    choosePaymentMethod: 'Choose a payment method before booking.',
     verifyPhoneBeforeContinuing: 'Verify the shared mobile number with OTP before continuing.',
     customerNameRequired: 'Enter the customer or company name.',
     addressDetailsRequired: 'Add an address label, city, and valid pincode to save this address.',
