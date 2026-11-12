@@ -21,6 +21,8 @@
     "preview": "vite preview",
     "test:e2e": "playwright test",
     "test:e2e:booking": "playwright test --config=playwright.booking.config.ts",
+    "test:e2e:realtime": "playwright test --config=playwright.realtime.config.ts",
+    "test:realtime:smoke": "node e2e/realtime-smoke.mjs",
     "reference": "node scripts/serve-reference.mjs",
     "reference:list": "node scripts/serve-reference.mjs --list"
   },
