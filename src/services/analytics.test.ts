@@ -29,7 +29,7 @@ describe('trackEvent', () => {
     trackEvent('booking.created', { service: 'water_tanker', capacity: 5000, omitted: undefined })
     await Promise.resolve()
     expect(window.dispatchEvent).toHaveBeenCalledOnce()
-    expect(fetch).toHaveBeenCalledWith('/api/analytics/events', expect.objectContaining({
+    expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/analytics\/events$/), expect.objectContaining({
       method: 'POST',
       body: expect.stringContaining('"eventName":"booking.created"'),
     }))

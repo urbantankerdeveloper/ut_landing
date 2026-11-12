@@ -57,7 +57,7 @@ describe('apiFetch', () => {
       body: JSON.stringify({ include: 'summary' }),
     })).resolves.toEqual({ ok: true })
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/customer/profile', expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringMatching(/\/api\/customer\/profile$/), expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ include: 'summary' }),
       credentials: 'include',

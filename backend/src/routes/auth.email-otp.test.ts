@@ -3,7 +3,7 @@ import request from 'supertest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  respond: vi.fn((_table: string, _ops: Array<{ name: string; args: unknown[] }>): unknown => ({ data: null, error: null })),
+  respond: vi.fn<(table: string, ops: Array<{ name: string; args: unknown[] }>) => unknown>(() => ({ data: null, error: null })),
   rpc: vi.fn(),
   createUser: vi.fn(),
   deleteUser: vi.fn(),
