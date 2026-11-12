@@ -2,10 +2,14 @@ import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@ta
 import { useEffect, type PropsWithChildren } from 'react'
 import { ApiError } from '../api/client'
 import { ToastHost } from '../components/ToastHost'
-import { describeError, notifyError, wasReported } from '../utils/notify'
+import { subscribeToRealtime } from '../services/realtime'
+import { useAuthStore } from '../stores/authStore'
+import { describeError, notifyError, notifyInfo, wasReported } from '../utils/notify'
+import { getRealtimeToastMessage } from '../utils/realtimeNotifications'
 
 // Network and timeout failures are retried inside apiFetch for GETs, so the query layer only retries server errors.
 const retryTransientFailures = (failureCount: number, error: Error) => failureCount < 2 && error instanceof ApiError && error.status >= 500
+const realtimeUrl = import.meta.env.VITE_REALTIME_URL ?? (import.meta.env.PROD ? window.location.origin : 'http://localhost:8080')
 
 // apiFetch already toasts API and network failures. These handlers cover everything else, such as a thrown parse error or a bug in a query function.
 function reportUnhandled(error: unknown) {
@@ -31,8 +35,22 @@ function useGlobalErrorToasts() {
   }, [])
 }
 
+function useGlobalRealtimeToasts() {
+  const accessToken = useAuthStore((state) => state.accessToken)
+  const role = useAuthStore((state) => state.user?.role ?? null)
+  const hasHydrated = useAuthStore((state) => state.hasHydrated)
+  useEffect(() => {
+    if (!hasHydrated || !accessToken || role !== 'customer') return
+    return subscribeToRealtime(realtimeUrl, (message) => {
+      const toastMessage = getRealtimeToastMessage(role, message)
+      if (toastMessage) notifyInfo(toastMessage)
+    })
+  }, [accessToken, hasHydrated, role])
+}
+
 function ToastLayer() {
   useGlobalErrorToasts()
+  useGlobalRealtimeToasts()
   return <ToastHost />
 }
 
