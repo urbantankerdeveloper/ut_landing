@@ -153,12 +153,21 @@ describe('admin order status events', () => {
     const response = await request(buildApp()).patch(`/api/admin/orders/${BOOKING_ID}/status`).set('x-test-role', 'admin').send({ status: 'delivered' })
 
     expect(response.status).toBe(200)
-    expect(mocks.emitRealtime).toHaveBeenCalledWith('booking.updated', { bookingId: BOOKING_ID, status: 'delivered' })
+    expect(mocks.emitRealtime).toHaveBeenCalledWith('booking.updated', { bookingId: BOOKING_ID, status: 'delivered' }, 'cust-9')
     expect(mocks.emitBookingLifecycleEvent).toHaveBeenCalledWith(
       'booking.delivered',
       { bookingId: BOOKING_ID, reference: 'UT-1', deliveredAt: expect.any(String) },
       'cust-9',
     )
+  })
+
+  it('tells the customer room about admin cancellations so customers outside the booking room are notified', async () => {
+    mocks.transitionBooking.mockResolvedValueOnce({ data: { id: BOOKING_ID, reference: 'UT-1', customer_id: 'cust-9', status: 'cancelled' }, error: null })
+
+    const response = await request(buildApp()).post(`/api/admin/orders/${BOOKING_ID}/cancel`).set('x-test-role', 'admin').send({ reason: 'Vendor unavailable' })
+
+    expect(response.status).toBe(200)
+    expect(mocks.emitRealtime).toHaveBeenCalledWith('booking.updated', { bookingId: BOOKING_ID, status: 'cancelled' }, 'cust-9')
   })
 
   it('does not emit booking.delivered for other admin status changes', async () => {
