@@ -105,8 +105,9 @@ async function main() {
   await waitForEvent(customer, 'booking.vendor_accepted', booking.id)
   s.pass()
 
-  s = step('vendor sets En route, then Delivered')
+  s = step('vendor sets En route, Arrived, then Delivered')
   await request('PATCH', `/api/vendor/orders/${booking.id}/transition`, vendorToken, { action: 'status', status: 'En route' })
+  await request('PATCH', `/api/vendor/orders/${booking.id}/transition`, vendorToken, { action: 'status', status: 'Arrived' })
   await request('PATCH', `/api/vendor/orders/${booking.id}/transition`, vendorToken, { action: 'status', status: 'Delivered' })
   s.pass()
 

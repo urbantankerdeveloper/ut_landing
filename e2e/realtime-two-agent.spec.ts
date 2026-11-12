@@ -78,14 +78,21 @@ test('customer and vendor windows see live booking notices end to end', async ({
 
     const booking = await createCodBooking(env, customerToken)
     await expect(toast(vendorPage, realtimeContent.vendor.newOrder(booking.reference))).toBeVisible({ timeout: noticeTimeout })
-    await expect(vendorPage.locator('.nav-unread-badge')).toBeVisible({ timeout: noticeTimeout })
+    await expect(vendorPage.locator('.nav-group-unread, .nav-unread-badge').first()).toBeVisible({ timeout: noticeTimeout })
 
-    await acceptWithFleet(env, vendorToken, booking.id)
-    await expect(toast(customerPage, realtimeContent.customer.accepted)).toBeVisible({ timeout: noticeTimeout })
+    await Promise.all([
+      expect(toast(customerPage, realtimeContent.customer.accepted)).toBeVisible({ timeout: noticeTimeout }),
+      acceptWithFleet(env, vendorToken, booking.id),
+    ])
 
-    await updateVendorOrder(env, vendorToken, booking.id, { action: 'status', status: 'En route' })
-    await updateVendorOrder(env, vendorToken, booking.id, { action: 'status', status: 'Delivered' })
-    await expect(toast(customerPage, realtimeContent.customer.delivered)).toBeVisible({ timeout: noticeTimeout })
+    await Promise.all([
+      expect(toast(customerPage, realtimeContent.customer.delivered)).toBeVisible({ timeout: noticeTimeout }),
+      (async () => {
+        await updateVendorOrder(env, vendorToken, booking.id, { action: 'status', status: 'En route' })
+        await updateVendorOrder(env, vendorToken, booking.id, { action: 'status', status: 'Arrived' })
+        await updateVendorOrder(env, vendorToken, booking.id, { action: 'status', status: 'Delivered' })
+      })(),
+    ])
   } catch (error) {
     await attachDiagnostics(testInfo, [
       { name: 'customer', page: customerPage, socket: customerSocket },

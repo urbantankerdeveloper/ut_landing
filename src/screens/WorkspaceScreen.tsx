@@ -82,7 +82,7 @@ export default function WorkspaceScreen() {
       const items = data.nav.filter((item) => group.keys.includes(item.key))
       return <div className="workspace-nav-group" key={group.label}>
         <button className="workspace-nav-group-toggle" type="button" aria-expanded={isExpanded} onClick={() => setExpandedAdminGroups((current) => current.has(group.label) ? new Set() : new Set([group.label]))} title={sidebarCollapsed ? group.label : undefined}>
-          <GroupIcon size={16} /><span>{group.label}</span><ChevronDown className="workspace-nav-group-chevron" size={14} />
+          <GroupIcon size={16} /><span>{group.label}</span>{!isExpanded && unreadRealtime > 0 && group.keys.includes('notifications') && <span className="nav-group-unread" role="img" aria-label={realtimeContent.unreadLabel(unreadRealtime)} />}<ChevronDown className="workspace-nav-group-chevron" size={14} />
         </button>
         <div className={`workspace-nav-group-items ${isExpanded ? 'is-expanded' : ''}`}>
           {items.map(renderNavItem)}
