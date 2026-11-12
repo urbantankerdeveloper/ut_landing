@@ -5,6 +5,8 @@ import { Modal } from '../components/Modal'
 import { useVendorDeliveryVerification, useVendorDrivers, useVendorLocation, useVendorOrderMutation, useVendorOrders, useVendorVehicles } from '../hooks/useVendorData'
 import { useFileUpload } from '../hooks/useFrontendFeatures'
 import { vendorContent as c } from '../content/vendor'
+import { useVendorOrderRequestStore } from '../stores/vendorOrderRequestStore'
+import { dismissNotice } from '../utils/notify'
 
 type OrderStatus = 'Available' | 'Assigned' | 'Accepted' | 'En route' | 'Arrived' | 'Delivered' | 'Rejected' | 'Unavailable'
 type VendorOrder = { id: string; reference?: string; service: string; serviceDetails?: { service: string; capacity?: string; waterType?: string; tankerCount?: string; details?: string; deliveryDate?: string; location?: string }[]; location: string; distance?: number | null; amount: string; status: OrderStatus; statusMessage?: string; vehicle?: string; driver?: string }
@@ -27,6 +29,8 @@ export default function VendorOrderPanel({ onNotice }: Props) {
   const [dialog, setDialog] = useState<'assignment' | 'delivery' | null>(null)
   const [deliveryError, setDeliveryError] = useState<string | null>(null)
   const [offline, setOffline] = useState(!navigator.onLine)
+  const orderRequest = useVendorOrderRequestStore((state) => state.request)
+  const clearOrderRequest = useVendorOrderRequestStore((state) => state.clearRequest)
   const activeTrackingOrderId = orders.find((order) => order.status === 'En route')?.id ?? null
   useVendorLocation(activeTrackingOrderId)
   const filtered = useMemo(() => orders.filter((order) => (typeof order.distance !== 'number' || order.distance <= Number(radius)) && order.status !== 'Rejected'), [orders, radius])
@@ -39,12 +43,26 @@ export default function VendorOrderPanel({ onNotice }: Props) {
     const sync = window.setTimeout(() => setOrders(ordersQuery.data as VendorOrder[]), 0)
     return () => window.clearTimeout(sync)
   }, [ordersQuery.data])
+  // A new-order toast asks for an action on one order. It waits until the list has loaded, then acts only if the order is still available.
+  // The effect must set dialog state once the list arrives, so the set-state rule is disabled for this block only.
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (!orderRequest || orders.length === 0) return
+    clearOrderRequest()
+    const order = orders.find((item) => item.id === orderRequest.orderId)
+    if (!order || order.status !== 'Available') return
+    if (orderRequest.intent === 'reject') reject(order)
+    else { setSelected(order); setDialog('assignment') }
+    // reject is rebuilt each render, but the effect only acts on a pending request, so it is left out on purpose.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderRequest, orders, clearOrderRequest])
+  /* eslint-enable react-hooks/set-state-in-effect */
   function updateOrder(id: string, update: Partial<VendorOrder>) { setOrders((items) => items.map((order) => order.id === id ? { ...order, ...update } : order)) }
-  function mutateOrder(order: VendorOrder, update: Partial<VendorOrder>, payload: Parameters<typeof orderMutation.mutate>[0], success: string) { updateOrder(order.id, update); orderMutation.mutate(payload, { onSuccess: () => onNotice(success), onError: () => { updateOrder(order.id, order); onNotice(c.orders.messages.updateFailed(order.id)) } }) }
+  function mutateOrder(order: VendorOrder, update: Partial<VendorOrder>, payload: Parameters<typeof orderMutation.mutate>[0], success: string) { updateOrder(order.id, update); orderMutation.mutate(payload, { onSuccess: () => { dismissNotice(`offer:${order.id}`); onNotice(success) }, onError: () => { updateOrder(order.id, order); onNotice(c.orders.messages.updateFailed(order.id)) } }) }
   function accept(order: VendorOrder) { mutateOrder(order, { status: 'Accepted' }, { orderId: order.id, action: 'accept', status: 'Accepted' }, c.orders.messages.accepted(order.id)) }
   function reject(order: VendorOrder) { const reason = window.prompt(c.orders.messages.rejectReasonPrompt(order.reference ?? order.id))?.trim(); if (!reason) return; mutateOrder(order, { status: 'Rejected' }, { orderId: order.id, action: 'reject', status: 'Rejected', reason }, c.orders.messages.rejected(order.id)) }
   function advance(order: VendorOrder) { const status = nextStatus[order.status]; if (status) mutateOrder(order, { status }, { orderId: order.id, action: 'status', status }, c.orders.messages.marked(order.id, status)) }
-  function assign(event: FormEvent<HTMLFormElement>) { event.preventDefault(); if (!selected) return; const values = new FormData(event.currentTarget); const vehicle = String(values.get('vehicle')); const driver = String(values.get('driver')); const vehicleId = vehicleRecords.find((item) => item.label === vehicle)?.id; const driverId = driverRecords.find((item) => item.label === driver)?.id; if (!vehicleId || !driverId || !vehicle || !driver) return; const previous = selected; updateOrder(selected.id, { status: 'Accepted', vehicle, driver }); orderMutation.mutate({ orderId: selected.id, action: 'accept', status: 'Accepted', vehicleId, driverId }, { onSuccess: () => { setDialog(null); onNotice(c.orders.messages.acceptedAssigned(selected.id)) }, onError: () => { updateOrder(selected.id, previous); onNotice(c.orders.messages.acceptFailed(selected.id)) } }) }
+  function assign(event: FormEvent<HTMLFormElement>) { event.preventDefault(); if (!selected) return; const values = new FormData(event.currentTarget); const vehicle = String(values.get('vehicle')); const driver = String(values.get('driver')); const vehicleId = vehicleRecords.find((item) => item.label === vehicle)?.id; const driverId = driverRecords.find((item) => item.label === driver)?.id; if (!vehicleId || !driverId || !vehicle || !driver) return; const previous = selected; updateOrder(selected.id, { status: 'Accepted', vehicle, driver }); orderMutation.mutate({ orderId: selected.id, action: 'accept', status: 'Accepted', vehicleId, driverId }, { onSuccess: () => { setDialog(null); dismissNotice(`offer:${selected.id}`); onNotice(c.orders.messages.acceptedAssigned(selected.id)) }, onError: () => { updateOrder(selected.id, previous); onNotice(c.orders.messages.acceptFailed(selected.id)) } }) }
   async function completeDelivery(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!selected) return

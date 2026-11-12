@@ -15,6 +15,9 @@ export function ToastHost() {
         <Icon className="toast-icon" size={20} aria-hidden="true" />
         <p className="toast-message">{toast.message}</p>
         <button className="toast-dismiss" type="button" aria-label={c.toast.dismiss} onClick={() => dismiss(toast.id)}><X size={16} aria-hidden="true" /></button>
+        {toast.actions && toast.actions.length > 0 && <div className="toast-actions">
+          {toast.actions.map((action) => <button key={action.label} className={`toast-action ${action.variant === 'quiet' ? 'toast-action-quiet' : ''}`} type="button" onClick={action.onSelect}>{action.label}</button>)}
+        </div>}
       </div>
     })}
   </div>

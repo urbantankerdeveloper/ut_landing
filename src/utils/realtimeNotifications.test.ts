@@ -22,17 +22,21 @@ describe('getRealtimeNotice', () => {
     })
   })
 
-  it('flags a new vendor order as a new-order alert with its reference', () => {
+  it('flags a new vendor order as a new-order alert with its booking and reference', () => {
     expect(getRealtimeNotice('vendor', { type: 'vendor.order.created', payload: { bookingId: 'booking-9', reference: 'UT-9' } })).toEqual({
       key: 'offer:booking-9',
       message: realtimeContent.vendor.newOrder('UT-9'),
       tone: 'info',
       newOrder: true,
+      offer: { bookingId: 'booking-9', reference: 'UT-9' },
     })
   })
 
-  it('prefers the server message when another vendor takes an order', () => {
-    expect(getRealtimeNotice('vendor', { type: 'vendor.order.taken', payload: { bookingId: 'booking-9', reference: 'UT-9', message: 'Taken elsewhere' } })?.message).toBe('Taken elsewhere')
+  it('prefers the server message when another vendor takes an order, and closes that order\'s offer', () => {
+    expect(getRealtimeNotice('vendor', { type: 'vendor.order.taken', payload: { bookingId: 'booking-9', reference: 'UT-9', message: 'Taken elsewhere' } })).toMatchObject({
+      message: 'Taken elsewhere',
+      closesKey: 'offer:booking-9',
+    })
   })
 
   it('does not send notices to other roles or for unrelated or incomplete events', () => {

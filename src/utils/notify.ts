@@ -1,6 +1,6 @@
 import { ApiError } from '../api/errors'
 import { feedbackContent as c } from '../content/feedback'
-import { useToastStore, type ToastTone } from '../stores/toastStore'
+import { useToastStore, type ToastAction, type ToastTone } from '../stores/toastStore'
 
 function show(tone: ToastTone, message: string) {
   useToastStore.getState().push(tone, message)
@@ -9,6 +9,14 @@ function show(tone: ToastTone, message: string) {
 export const notifySuccess = (message: string = c.success.saved) => show('success', message)
 export const notifyInfo = (message: string) => show('info', message)
 export const notifyError = (message: string = c.error.generic) => show('error', message)
+
+// A sticky toast that stays until the user acts on it or [dismissNotice] is called with the same key.
+export function notifySticky(key: string, message: string, actions: ToastAction[]) {
+  useToastStore.getState().push('info', message, { key, sticky: true, actions })
+}
+export function dismissNotice(key: string) {
+  useToastStore.getState().dismissByKey(key)
+}
 
 // Errors already toasted by apiFetch are marked so the query and mutation caches do not toast them again.
 const reportedErrors = new WeakSet<object>()

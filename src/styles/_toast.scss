@@ -4,7 +4,7 @@
 
 .toast-region {
   position: fixed;
-  bottom: 16px;
+  top: 16px;
   right: 16px;
   z-index: 3000;
   display: flex;
@@ -53,6 +53,32 @@
 }
 
 .toast-dismiss:hover { background: colors.$aqua-light; color: colors.$ink; }
+
+.toast-actions {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.toast-action {
+  padding: 6px 14px;
+  border: 1px solid colors.$aqua;
+  border-radius: variables.$radius;
+  background: colors.$aqua;
+  color: colors.$white;
+  font: 600 13px/1.4 typography.$font-body;
+  cursor: pointer;
+}
+
+.toast-action-quiet {
+  border-color: colors.$line;
+  background: transparent;
+  color: colors.$ink;
+}
+
+.toast-action:hover { filter: brightness(0.95); }
 
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(6px); }

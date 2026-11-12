@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useState } from 'react'
+import { Suspense, useCallback, useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { lazyWithRetry } from '../utils/lazyWithRetry'
 import { BarChart3, Bell, CalendarCheck, ChevronDown, CircleDollarSign, ClipboardList, FileText, Gauge, House, LayoutDashboard, LogOut, MapPin, Menu, MessageSquare, PanelLeftClose, PanelLeftOpen, Receipt, Repeat, Settings2, Tag, Truck, UserRound, UserPlus, Users, Wallet, X } from 'lucide-react'
@@ -13,7 +13,7 @@ import { BOOKING_DRAFT_KEY, REPEAT_BOOKING_KEY } from '../constants/bookingDraft
 import { workspaceContent as w } from '../content/workspace'
 import { realtimeContent } from '../content/realtime'
 import { useRealtimeNotificationStore } from '../stores/realtimeNotificationStore'
-
+import { useVendorOrderRequestStore } from '../stores/vendorOrderRequestStore'
 const WorkspaceContent = lazyWithRetry(() => import('./WorkspaceContent').then(({ WorkspaceContent: content }) => ({ default: content })))
 
 type NavItem = { label: string; icon: typeof House; key: string }
@@ -49,7 +49,7 @@ export default function WorkspaceScreen() {
   const signOut = useAuthStore((state) => state.signOut)
   const queryClient = useQueryClient()
   const data = roleData[activeRole]
-  const [activeItem, setActiveItem] = useState('overview')
+  const [activeItem, setActiveItem] = useState(() => (activeRole === 'vendor' && useVendorOrderRequestStore.getState().request ? 'orders' : 'overview'))
   const unreadRealtime = useRealtimeNotificationStore((state) => state.unread)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -60,6 +60,16 @@ export default function WorkspaceScreen() {
   const selectItem = useCallback((key: string) => { setActiveItem(key); if (key === 'notifications') useRealtimeNotificationStore.getState().clear(); const group = navigationGroups.find((item) => item.keys.includes(key)); if (group) setExpandedAdminGroups(new Set([group.label])); setNotices([]); setSidebarOpen(false) }, [navigationGroups])
   const addNotice = useCallback((message: string) => { const id = Date.now() + Math.random(); setNotices((current) => [...current.slice(-4), { id, message }]); window.setTimeout(() => setNotices((current) => current.filter((notice) => notice.id !== id)), 5000) }, [])
   const showWorkspaceOverview = useCallback(() => selectItem('overview'), [selectItem])
+  useEffect(() => {
+    const unsubscribe = useVendorOrderRequestStore.subscribe((state) => {
+      if (state.request && activeRole === 'vendor') selectItem('orders')
+    })
+    // A pending order request belongs to this workspace session only.
+    return () => {
+      unsubscribe()
+      useVendorOrderRequestStore.getState().clearRequest()
+    }
+  }, [activeRole, selectItem])
   const navigateContent = useCallback((screen: 'booking' | 'bookings' | 'offers' | 'home') => {
     if (screen === 'booking') return navigate('booking')
     selectItem(screen === 'home' ? 'overview' : screen)

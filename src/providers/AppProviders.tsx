@@ -7,9 +7,12 @@ import { ToastHost } from '../components/ToastHost'
 import { SOCKET_RECONNECTED, subscribeToRealtime } from '../services/realtime'
 import { useAuthStore } from '../stores/authStore'
 import { useRealtimeNotificationStore } from '../stores/realtimeNotificationStore'
-import { describeError, notifyError, notifyInfo, notifySuccess, wasReported } from '../utils/notify'
+import { describeError, dismissNotice, notifyError, notifyInfo, notifySticky, notifySuccess, wasReported } from '../utils/notify'
 import { playNewOrderAlert } from '../utils/newOrderAlert'
 import { getRealtimeNotice, unreadNotificationIdsSince } from '../utils/realtimeNotifications'
+import { useVendorOrderRequestStore } from '../stores/vendorOrderRequestStore'
+import { realtimeContent } from '../content/realtime'
+import type { ToastAction } from '../stores/toastStore'
 import type { WorkspaceRole } from '../stores/navigationStore'
 
 // Network and timeout failures are retried inside apiFetch for GETs, so the query layer only retries server errors.
@@ -55,11 +58,21 @@ function useGlobalRealtimeNotices() {
       const notice = getRealtimeNotice(role, message)
       if (!notice) return
       useRealtimeNotificationStore.getState().recordFact(notice.key)
-      if (notice.tone === 'success') notifySuccess(notice.message)
+      if (notice.closesKey) dismissNotice(notice.closesKey)
+      if (notice.offer) notifySticky(notice.key, notice.message, offerActions(notice.offer.bookingId))
+      else if (notice.tone === 'success') notifySuccess(notice.message)
       else notifyInfo(notice.message)
       if (notice.newOrder) playNewOrderAlert()
     })
   }, [accessToken, hasHydrated, role])
+}
+
+// Accept and Reject on a new-order toast run the same actions as the operations panel, which handles the dialog and the reason prompt.
+function offerActions(bookingId: string): ToastAction[] {
+  return [
+    { label: realtimeContent.vendor.acceptOffer, onSelect: () => useVendorOrderRequestStore.getState().requestOrder(bookingId, 'assign') },
+    { label: realtimeContent.vendor.rejectOffer, variant: 'quiet', onSelect: () => useVendorOrderRequestStore.getState().requestOrder(bookingId, 'reject') },
+  ]
 }
 
 // Events sent while the socket was down are never delivered, so the unread count is rebuilt from the server's list.

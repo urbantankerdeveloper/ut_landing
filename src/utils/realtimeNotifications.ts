@@ -8,6 +8,10 @@ export type RealtimeNotice = {
   message: string
   tone: 'success' | 'info'
   newOrder: boolean
+  // Set for a new order the vendor can act on from the toast.
+  offer?: { bookingId: string; reference: string }
+  // Set when this event resolves an open offer, so its sticky toast can be closed.
+  closesKey?: string
 }
 
 const customerStatusMessages: Partial<Record<string, string>> = {
@@ -39,14 +43,14 @@ function customerNotice(type: string, bookingId: string, payload: Record<string,
 
 function vendorNotice(type: string, bookingId: string, reference: string, payload: Record<string, unknown>): RealtimeNotice | null {
   if (type === 'vendor.order.created') {
-    return { key: `offer:${bookingId}`, message: realtimeContent.vendor.newOrder(reference), tone: 'info', newOrder: true }
+    return { key: `offer:${bookingId}`, message: realtimeContent.vendor.newOrder(reference), tone: 'info', newOrder: true, offer: { bookingId, reference } }
   }
   if (type === 'vendor.order.taken') {
     const message = typeof payload.message === 'string' && payload.message ? payload.message : realtimeContent.vendor.taken(reference)
-    return { key: `taken:${bookingId}`, message, tone: 'info', newOrder: false }
+    return { key: `taken:${bookingId}`, message, tone: 'info', newOrder: false, closesKey: `offer:${bookingId}` }
   }
   if (type === 'vendor.order.declined') {
-    return { key: `declined:${bookingId}`, message: realtimeContent.vendor.declined(reference), tone: 'info', newOrder: false }
+    return { key: `declined:${bookingId}`, message: realtimeContent.vendor.declined(reference), tone: 'info', newOrder: false, closesKey: `offer:${bookingId}` }
   }
   return null
 }

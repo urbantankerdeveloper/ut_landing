@@ -11,8 +11,10 @@ export const realtimeContent = {
     newNotification: 'You have a new notification.',
   },
   vendor: {
-    newOrder: (reference: string) => `New order ${reference} is available. Open Operations to accept.`,
+    newOrder: (reference: string) => `New order ${reference} is available.`,
     taken: (reference: string) => `Order ${reference} was accepted by another vendor.`,
     declined: (reference: string) => `Order ${reference} was declined.`,
+    acceptOffer: 'Accept',
+    rejectOffer: 'Reject',
   },
 } as const
