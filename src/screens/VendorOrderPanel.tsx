@@ -25,6 +25,7 @@ export default function VendorOrderPanel({ onNotice }: Props) {
   const [radius, setRadius] = useState('25')
   const [selected, setSelected] = useState<VendorOrder | null>(null)
   const [dialog, setDialog] = useState<'assignment' | 'delivery' | null>(null)
+  const [deliveryError, setDeliveryError] = useState<string | null>(null)
   const [offline, setOffline] = useState(!navigator.onLine)
   const activeTrackingOrderId = orders.find((order) => order.status === 'En route')?.id ?? null
   useVendorLocation(activeTrackingOrderId)
@@ -44,7 +45,37 @@ export default function VendorOrderPanel({ onNotice }: Props) {
   function reject(order: VendorOrder) { const reason = window.prompt(c.orders.messages.rejectReasonPrompt(order.reference ?? order.id))?.trim(); if (!reason) return; mutateOrder(order, { status: 'Rejected' }, { orderId: order.id, action: 'reject', status: 'Rejected', reason }, c.orders.messages.rejected(order.id)) }
   function advance(order: VendorOrder) { const status = nextStatus[order.status]; if (status) mutateOrder(order, { status }, { orderId: order.id, action: 'status', status }, c.orders.messages.marked(order.id, status)) }
   function assign(event: FormEvent<HTMLFormElement>) { event.preventDefault(); if (!selected) return; const values = new FormData(event.currentTarget); const vehicle = String(values.get('vehicle')); const driver = String(values.get('driver')); const vehicleId = vehicleRecords.find((item) => item.label === vehicle)?.id; const driverId = driverRecords.find((item) => item.label === driver)?.id; if (!vehicleId || !driverId || !vehicle || !driver) return; const previous = selected; updateOrder(selected.id, { status: 'Accepted', vehicle, driver }); orderMutation.mutate({ orderId: selected.id, action: 'accept', status: 'Accepted', vehicleId, driverId }, { onSuccess: () => { setDialog(null); onNotice(c.orders.messages.acceptedAssigned(selected.id)) }, onError: () => { updateOrder(selected.id, previous); onNotice(c.orders.messages.acceptFailed(selected.id)) } }) }
-  async function completeDelivery(event: FormEvent<HTMLFormElement>) { event.preventDefault(); if (!selected) return; const values = new FormData(event.currentTarget); const otp = String(values.get('otp') || ''); const file = values.get('proof'); if (!otp || !(file instanceof File) || !file.size) return; try { const signed = await proofUpload.upload(file, 'booking', selected.id); await deliveryVerification.mutateAsync({ id: selected.id, otp, proofPath: signed.path }); updateOrder(selected.id, { status: 'Delivered' }); setDialog(null); onNotice(c.orders.messages.deliveryVerified(selected.id)) } catch { onNotice(c.orders.messages.deliveryFailed) } }
+  async function completeDelivery(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!selected) return
+    const values = new FormData(event.currentTarget)
+    const otp = String(values.get('otp') || '').trim()
+    const file = values.get('proof')
+    const hasPhoto = file instanceof File && file.size > 0
+    if (!otp && !hasPhoto) {
+      setDeliveryError(c.orders.delivery.inputRequired)
+      return
+    }
+
+    setDeliveryError(null)
+    try {
+      const proofPath = hasPhoto
+        ? (await proofUpload.upload(file, 'booking', selected.id)).path
+        : undefined
+      await deliveryVerification.mutateAsync({
+        id: selected.id,
+        otp: otp || undefined,
+        proofPath,
+      })
+      updateOrder(selected.id, { status: 'Delivered' })
+      setDialog(null)
+      onNotice(c.orders.messages.deliveryVerified(selected.id))
+    } catch (error) {
+      setDeliveryError(
+        error instanceof Error ? error.message : c.orders.messages.deliveryFailed,
+      )
+    }
+  }
   function toggleOffline() { setOffline((value) => !value); onNotice(!offline ? c.orders.offlineEnabled : c.orders.connectionRestored) }
   if (!demoDataEnabled && (ordersQuery.isLoading || vehiclesQuery.isLoading || driversQuery.isLoading)) return <section className="workspace-view-panel vendor-order-panel" role="status"><p className="eyebrow">{c.orders.eyebrow}</p><h2>{c.orders.loading}</h2></section>
   if (!demoDataEnabled && (ordersQuery.isError || vehiclesQuery.isError || driversQuery.isError)) return <section className="workspace-view-panel vendor-order-panel" role="alert"><p className="eyebrow">{c.orders.eyebrow}</p><h2>{c.orders.unavailable.title}</h2><p>{c.orders.unavailable.body}</p><button className="button button-primary" onClick={() => { void ordersQuery.refetch(); void vehiclesQuery.refetch(); void driversQuery.refetch() }}>{c.common.retry}</button></section>
@@ -66,11 +97,11 @@ export default function VendorOrderPanel({ onNotice }: Props) {
         {order.status === 'Assigned' && <button className="button button-primary" onClick={() => accept(order)}>{c.orders.acceptAndNotify}</button>}
         {order.status === 'Accepted' && <button className="button button-primary" onClick={() => advance(order)}>{c.orders.startDelivery}</button>}
         {order.status === 'En route' && <button className="button button-primary" onClick={() => advance(order)}>{c.orders.markArrived}</button>}
-        {order.status === 'Arrived' && <button className="button button-primary" onClick={() => { setSelected(order); setDialog('delivery') }}>{c.orders.verifyDelivery}</button>}
+        {order.status === 'Arrived' && <button className="button button-primary" onClick={() => { setSelected(order); setDeliveryError(null); setDialog('delivery') }}>{c.orders.verifyDelivery}</button>}
       </div>
     </article>)}{!filtered.length && <div className="admin-empty-state">{c.orders.emptyRadius}</div>}</div>
     {ordersQuery.hasNextPage && <button className="button button-quiet vendor-orders-load-more" disabled={ordersQuery.isFetchingNextPage} onClick={() => void ordersQuery.fetchNextPage()}>{ordersQuery.isFetchingNextPage ? c.orders.loadingOlder : c.orders.loadOlder}</button>}
     {dialog === 'assignment' && selected && <Modal title={c.orders.assignment.title(selected.reference ?? selected.id)} onClose={() => setDialog(null)}><form className="modal-form" onSubmit={assign}><p className="modal-required-note">{c.orders.assignment.note}</p><label>{c.orders.assignment.vehicle}<select name="vehicle" required defaultValue={selected.vehicle || ''}><option value="" disabled>{c.orders.assignment.selectVehicle}</option>{vehicles.map((vehicle) => <option key={vehicle}>{vehicle}</option>)}</select></label><label>{c.orders.assignment.driver}<select name="driver" required defaultValue={selected.driver || ''}><option value="" disabled>{c.orders.assignment.selectDriver}</option>{drivers.map((driver) => <option key={driver}>{driver}</option>)}</select></label><button className="button button-primary button-large" type="submit">{c.orders.assignment.submit} <Check size={15} /></button></form></Modal>}
-    {dialog === 'delivery' && selected && <Modal title={c.orders.delivery.title(selected.id)} onClose={() => setDialog(null)}><form className="modal-form" onSubmit={completeDelivery}><p className="modal-required-note">{c.orders.delivery.note}</p><label>{c.orders.delivery.otp}<input name="otp" required inputMode="numeric" pattern="[0-9]{4,6}" maxLength={6} placeholder={c.orders.delivery.otpPlaceholder} /></label><label>{c.orders.delivery.proof}<input name="proof" required type="file" accept="image/*" /></label><button className="button button-primary button-large" type="submit"><ShieldCheck size={15} /> {c.orders.delivery.submit}</button></form></Modal>}
+    {dialog === 'delivery' && selected && <Modal title={c.orders.delivery.title(selected.id)} onClose={() => { setDialog(null); setDeliveryError(null) }}><form className="modal-form" onSubmit={completeDelivery}><p className="modal-required-note">{c.orders.delivery.note}</p><label>{c.orders.delivery.otp}<input name="otp" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} placeholder={c.orders.delivery.otpPlaceholder} /></label><label>{c.orders.delivery.proof}<input name="proof" type="file" accept="image/*" /></label>{deliveryError && <p role="alert">{deliveryError}</p>}<button className="button button-primary button-large" type="submit" disabled={deliveryVerification.isPending}><ShieldCheck size={15} /> {c.orders.delivery.submit}</button></form></Modal>}
   </section>
 }

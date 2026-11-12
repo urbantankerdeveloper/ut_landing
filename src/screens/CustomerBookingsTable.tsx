@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { ArrowRight } from 'lucide-react'
 import { customerDemoDataEnabled } from '../constants/demo'
 import { REPEAT_BOOKING_KEY } from '../constants/bookingDraft'
-import { useCustomerBookings, useCustomerCancel } from '../hooks/useCustomerData'
+import { useCustomerBookings, useCustomerCancel, useCustomerDeliveryOtp } from '../hooks/useCustomerData'
 import { useRazorpayPayment } from '../hooks/useFrontendFeatures'
 import { customerApi, type CustomerBooking } from '../api/customer'
 import { useAuthStore } from '../stores/authStore'
@@ -41,6 +41,7 @@ function paymentLabel(value?: CustomerBooking['paymentMethod']) {
 export function CustomerBookingsTable({ onNavigate }: Props) {
   const query = useCustomerBookings()
   const cancellation = useCustomerCancel()
+  const deliveryOtp = useCustomerDeliveryOtp()
   const [filter, setFilter] = useState('all')
   const [sort, setSort] = useState<'recent' | 'status' | 'amount'>('recent')
   const [page, setPage] = useState(1)
@@ -56,6 +57,8 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
   const user = useAuthStore((state) => state.user)
   const [payState, setPayState] = useState<PayState>({ kind: 'idle' })
   const [cancelError, setCancelError] = useState<string | null>(null)
+  const [deliveryOtpResult, setDeliveryOtpResult] = useState<{ bookingId: string; otp: string; expiresAt: string; smsSent: boolean } | null>(null)
+  const [deliveryOtpError, setDeliveryOtpError] = useState<string | null>(null)
   // Derived from the rows so the modal reflects refetched data (e.g. a switched payment method) without reopening.
   const selectedBooking = selectedBookingId ? rows.find((row) => row.id === selectedBookingId) ?? null : null
 
@@ -63,6 +66,20 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
     setSelectedBookingId(null)
     setPayState({ kind: 'idle' })
     setCancelError(null)
+    setDeliveryOtpResult(null)
+    setDeliveryOtpError(null)
+    deliveryOtp.reset()
+  }
+
+  function requestSelectedDeliveryOtp() {
+    if (!selectedBooking || selectedBooking.status.toLowerCase() !== 'arrived' || deliveryOtp.isPending) return
+    const bookingId = selectedBooking.id
+    setDeliveryOtpResult(null)
+    setDeliveryOtpError(null)
+    deliveryOtp.mutate(bookingId, {
+      onSuccess: (result) => setDeliveryOtpResult({ bookingId, ...result }),
+      onError: () => setDeliveryOtpError(c.bookingsTable.deliveryOtp.failed),
+    })
   }
 
   function cancelSelectedBooking() {
@@ -144,7 +161,7 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
         <table className="customer-booking-table">
           <thead><tr><th scope="col">{c.bookingsTable.headers.booking}</th><th scope="col">{c.bookingsTable.headers.service}</th><th scope="col">{c.bookingsTable.headers.location}</th><th scope="col">{c.bookingsTable.headers.status}</th><th scope="col">{c.bookingsTable.headers.amount}</th></tr></thead>
           <tbody>{visibleRows.map((booking) => <tr key={booking.id}>
-            <td><button className="customer-booking-id" type="button" onClick={() => { setPayState({ kind: 'idle' }); setCancelError(null); setSelectedBookingId(booking.id) }}>{booking.id}</button></td>
+            <td><button className="customer-booking-id" type="button" onClick={() => { setPayState({ kind: 'idle' }); setCancelError(null); setDeliveryOtpResult(null); setDeliveryOtpError(null); deliveryOtp.reset(); setSelectedBookingId(booking.id) }}>{booking.id}</button></td>
             <td>{booking.service}</td>
             <td>{booking.location}</td>
             <td><span className={`status-tag ${booking.status.toLowerCase() === 'delivered' ? '' : 'pending'}`}>{booking.status}</span></td>
@@ -168,6 +185,13 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
           <div><span>{c.bookingsTable.detail.deliveryLocation}</span><strong>{selectedBooking.location || c.common.notProvided}</strong></div>
           <div><span>{c.bookingsTable.detail.mobileNumber}</span><strong>{selectedBooking.phone || c.common.notProvided}</strong></div>
         </div>
+        {!customerDemoDataEnabled && selectedBooking.status.toLowerCase() === 'arrived' && <section className="customer-booking-delivery-otp" aria-live="polite">
+          <h3>{c.bookingsTable.deliveryOtp.title}</h3>
+          {deliveryOtpResult?.bookingId === selectedBooking.id
+            ? <><strong className="customer-booking-delivery-otp-code">{deliveryOtpResult.otp}</strong><p>{deliveryOtpResult.smsSent ? c.bookingsTable.deliveryOtp.expires(new Date(deliveryOtpResult.expiresAt).toLocaleTimeString()) : c.bookingsTable.deliveryOtp.smsNotSent(new Date(deliveryOtpResult.expiresAt).toLocaleTimeString())}</p></>
+            : <button className="button button-primary" type="button" disabled={deliveryOtp.isPending} onClick={requestSelectedDeliveryOtp}>{deliveryOtp.isPending ? c.bookingsTable.deliveryOtp.requesting : c.bookingsTable.deliveryOtp.request}</button>}
+          {deliveryOtpError && <p role="alert">{deliveryOtpError}</p>}
+        </section>}
         {!customerDemoDataEnabled && (payState.kind !== 'idle' || (payOnlineStatuses.includes(selectedBooking.status) && selectedBooking.paymentMethod === 'cod')) && <section className="customer-booking-pay-online">
           {payState.kind === 'idle' && <>
             <p>{c.bookingsTable.payOnline.hint}</p>

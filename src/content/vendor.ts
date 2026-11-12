@@ -72,10 +72,11 @@ export const vendorContent = {
     },
     delivery: {
       title: (id: string) => `Verify ${id}`,
-      note: 'Confirm the customer OTP and attach delivery proof.',
+      note: 'Enter the customer OTP. If its SMS was not sent, upload a delivery photo instead. A photo is optional when using a valid OTP.',
       otp: 'Delivery OTP',
       otpPlaceholder: 'Enter OTP',
-      proof: 'Delivery proof',
+      proof: 'Delivery proof (optional; required if SMS was not sent)',
+      inputRequired: 'Enter the customer OTP or upload a delivery photo if its SMS was not sent.',
       submit: 'Verify and complete',
     },
     demo: {

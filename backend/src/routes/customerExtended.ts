@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import rateLimit from 'express-rate-limit'
 import { databaseFailure, failure } from '../lib/httpErrors.js'
+import { logger } from '../lib/logger.js'
 import crypto from 'node:crypto'
 import { z } from 'zod'
 import { requireAuth } from '../middleware/auth.js'
@@ -19,7 +20,81 @@ const router = Router(); router.use(requireAuth)
 const deliveryOtpLimit = rateLimit({ windowMs: 10 * 60 * 1000, limit: 3, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:customerExtended:deliveryOtp:', 'open'), passOnStoreError: true, keyGenerator: (request) => `${request.authUser!.id}:${request.params.orderId}`, message: { error: 'Too many delivery codes requested for this order. Try again later.' } })
 const statusSchema = z.object({ status: z.enum(['cancelled']) })
 router.get('/orders/:orderId/tracking', async (request, response) => { const { data: booking, error: bookingError } = await supabase.from('bookings').select('id,status,customer_id,vehicle_id,driver_id,latitude,longitude').eq('id', request.params.orderId).eq('customer_id', request.authUser!.id).maybeSingle(); if (bookingError) return databaseFailure(response, 'customerExtended.database_error', bookingError, 500); if (!booking) return response.status(404).json({ error: 'Booking not found' }); const { data: location, error } = await supabase.from('vendor_location_updates').select('latitude,longitude,accuracy_metres,recorded_at').eq('booking_id', request.params.orderId).order('recorded_at', { ascending: false }).limit(1).maybeSingle(); if (error) return databaseFailure(response, 'customerExtended.database_error', error, 500); const [vehicleResult, driverResult] = await Promise.all([booking.vehicle_id ? supabase.from('vehicles').select('registration_number').eq('id', booking.vehicle_id).maybeSingle() : Promise.resolve({ data: null, error: null }), booking.driver_id ? supabase.from('drivers').select('name').eq('id', booking.driver_id).maybeSingle() : Promise.resolve({ data: null, error: null })]); if (vehicleResult.error || driverResult.error) return failure(response, 500, 'Tracking details could not be loaded.', 'customer.tracking_lookup_failed', vehicleResult.error ?? driverResult.error); response.json({ orderId: booking.id, status: booking.status, latitude: location?.latitude ?? undefined, longitude: location?.longitude ?? undefined, accuracy: location?.accuracy_metres ?? undefined, recorded_at: location?.recorded_at, customerLatitude: booking.latitude ?? undefined, customerLongitude: booking.longitude ?? undefined, vehicle: vehicleResult.data?.registration_number, driver: driverResult.data?.name, trackingAvailable: Boolean(location) }) })
-router.post('/orders/:orderId/delivery-otp', deliveryOtpLimit, async (request, response) => { const { data: booking, error: bookingError } = await supabase.from('bookings').select('id,reference,status,scheduled_for').eq('id', request.params.orderId).eq('customer_id', request.authUser!.id).single(); if (bookingError || !booking) return response.status(404).json({ error: 'Booking not found' }); if (booking.status !== 'arrived') return response.status(409).json({ error: 'Delivery OTP is available when the vendor has arrived' }); const otp = crypto.randomInt(100000, 1000000).toString(); const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString(); const { data: profile } = await supabase.from('profiles').select('full_name,phone_e164').eq('id', request.authUser!.id).single(); const { error } = await supabase.from('bookings').update({ delivery_otp_hash: hashOtp(otp), delivery_otp_expires_at: expiresAt, delivery_otp_attempts: 0 }).eq('id', booking.id).eq('customer_id', request.authUser!.id); if (error) return response.status(500).json({ error: 'Delivery OTP could not be created' }); if (profile?.phone_e164) { const delivery = await sendTemplateSms('delivery_otp', profile.phone_e164, { reference: booking.reference, otp }); if (!delivery.queued) return response.status(503).json({ error: 'Delivery OTP could not be sent. Please try again.' }) } response.status(201).json({ expiresAt }) })
+router.post('/orders/:orderId/delivery-otp', deliveryOtpLimit, async (request, response) => {
+  const { data: booking, error: bookingError } = await supabase
+    .from('bookings')
+    .select('id,reference,status')
+    .eq('id', request.params.orderId)
+    .eq('customer_id', request.authUser!.id)
+    .single()
+  if (bookingError || !booking) return response.status(404).json({ error: 'Booking not found' })
+  if (booking.status !== 'arrived') return response.status(409).json({ error: 'Delivery OTP is available when the vendor has arrived' })
+  const bookingReference = booking.reference
+  if (!bookingReference) return response.status(500).json({ error: 'Booking reference is unavailable' })
+
+  const otp = crypto.randomInt(100000, 1000000).toString()
+  const otpHash = hashOtp(otp)
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString()
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('phone_e164')
+    .eq('id', request.authUser!.id)
+    .single()
+  const customerPhone = profile?.phone_e164
+  const { error: createError } = await supabase
+    .from('bookings')
+    .update({
+      delivery_otp_hash: otpHash,
+      delivery_otp_expires_at: expiresAt,
+      delivery_otp_attempts: 0,
+      delivery_otp_sms_sent: null,
+    })
+    .eq('id', booking.id)
+    .eq('customer_id', request.authUser!.id)
+  if (createError) return response.status(500).json({ error: 'Delivery OTP could not be created' })
+
+  let smsSent = false
+  let smsFailureReason = 'No customer phone number is configured.'
+  if (profileError) {
+    smsFailureReason = 'Customer phone number could not be loaded.'
+  } else if (customerPhone) {
+    const delivery = await sendTemplateSms('delivery_otp', customerPhone, {
+      reference: bookingReference,
+      otp,
+    })
+    smsSent = delivery.queued
+    if (!smsSent) {
+      smsFailureReason =
+        'reason' in delivery && typeof delivery.reason === 'string'
+          ? delivery.reason
+          : 'SMS was not queued.'
+    }
+  }
+
+  if (!smsSent) {
+    logger.warn('customer.delivery_otp_sms_failed', {
+      bookingId: booking.id,
+      reason: smsFailureReason,
+    })
+  }
+
+  const { data: smsStatusUpdate, error: smsStatusError } = await supabase
+    .from('bookings')
+    .update({ delivery_otp_sms_sent: smsSent })
+    .eq('id', booking.id)
+    .eq('customer_id', request.authUser!.id)
+    .eq('delivery_otp_hash', otpHash)
+    .select('id')
+    .maybeSingle()
+  if (smsStatusError) {
+    return databaseFailure(response, 'customer.delivery_otp_status_update_failed', smsStatusError, 500)
+  }
+  if (!smsStatusUpdate) {
+    return response.status(409).json({ error: 'A newer delivery OTP was issued. Request it again.' })
+  }
+
+  response.status(201).json({ otp, expiresAt, smsSent })
+})
 router.patch('/orders/:orderId/reschedule', async (request, response) => { const parsed = z.object({ scheduledFor: z.string().datetime() }).safeParse(request.body); if (!parsed.success || new Date(parsed.data.scheduledFor).getTime() <= Date.now()) return response.status(400).json({ error: 'Scheduled time must be a valid future datetime' }); const { data, error } = await supabase.from('bookings').update({ scheduled_for: parsed.data.scheduledFor, updated_at: new Date().toISOString() }).eq('id', request.params.orderId).eq('customer_id', request.authUser!.id).in('status', ['pending_vendor', 'vendor_assigned', 'accepted']).select().maybeSingle(); if (error) return databaseFailure(response, 'customerExtended.database_error', error, 400); if (!data) return response.status(409).json({ error: 'Booking cannot be rescheduled in its current state' }); response.json(data) })
 router.patch('/orders/:orderId/status', async (request, response) => {
   const parsed = statusSchema.safeParse(request.body)

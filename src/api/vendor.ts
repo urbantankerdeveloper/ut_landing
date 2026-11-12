@@ -44,7 +44,7 @@ export const vendorApi = {
   requestPayout: (payload: { amount: number; periodStart?: string; periodEnd?: string }) => apiFetch<unknown>('/vendor/payouts/request', { method: 'POST', body: JSON.stringify(payload) }),
   notifications: () => apiFetch<VendorNotification[]>('/vendor/notifications'),
   markNotificationRead: (id: string) => apiFetch<unknown>(`/vendor/notifications/${id}/read`, { method: 'PATCH' }),
-  verifyDelivery: async (id: string, payload: { otp: string; proofPath?: string }) => { const result = await apiFetch<VendorOrder>(`/vendor/orders/${id}/delivery/verify`, { method: 'POST', body: JSON.stringify(payload) }); await apiFetch<void>(`/vendor/orders/${id}/delivery/realtime`, { method: 'POST' }); return result },
+  verifyDelivery: async (id: string, payload: { otp?: string; proofPath?: string }) => { const result = await apiFetch<VendorOrder>(`/vendor/orders/${id}/delivery/verify`, { method: 'POST', body: JSON.stringify(payload) }); await apiFetch<void>(`/vendor/orders/${id}/delivery/realtime`, { method: 'POST' }); return result },
   offlineMutations: () => apiFetch<VendorOfflineMutation[]>('/vendor/offline-mutations'),
   registerOfflineMutation: (payload: { mutationType: string; entityType: string; entityId?: string; payload: Record<string, unknown>; clientVersion: number }) => apiFetch<{ id: string }>('/vendor/offline-mutations', { method: 'POST', body: JSON.stringify(payload) }),
   retryOfflineMutation: (id: string) => apiFetch<VendorOfflineMutation>(`/vendor/offline-mutations/${id}/retry`, { method: 'POST' }),

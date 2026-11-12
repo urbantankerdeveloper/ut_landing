@@ -6,7 +6,7 @@ function jsonResponse(body: unknown, status: number) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 }
 
-describe('customerApi payment calls', () => {
+describe('customerApi requests', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     vi.stubGlobal('window', globalThis)
@@ -41,6 +41,20 @@ describe('customerApi payment calls', () => {
 
     await expect(customerApi.switchBookingToOnline('booking_1')).rejects.toThrow('Online payment is no longer available for this booking.')
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/customer/orders/booking_1/payment-method/online')
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'POST' })
+  })
+
+  it('returns the delivery OTP for the requested booking', async () => {
+    const expiresAt = '2026-11-12T06:00:00.000Z'
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ otp: '483921', expiresAt, smsSent: false }, 201))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(customerApi.requestDeliveryOtp('booking_1')).resolves.toEqual({
+      otp: '483921',
+      expiresAt,
+      smsSent: false,
+    })
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/customer/orders/booking_1/delivery-otp')
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'POST' })
   })
 })

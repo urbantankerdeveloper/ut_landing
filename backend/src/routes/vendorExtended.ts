@@ -11,6 +11,7 @@ import { analyticsEventNames, recordAnalyticsEvent } from '../lib/analytics.js'
 import { failure } from '../lib/httpErrors.js'
 import { logger } from '../lib/logger.js'
 import { otpMatches } from '../services/otp.js'
+import { deliveryVerificationMethod } from '../services/deliveryVerification.js'
 import { listWindow, sendList, type ListWindow } from '../lib/listParams.js'
 const exactCount = (range: ListWindow) => (range.mode === 'paged' ? { count: 'exact' as const } : undefined)
 const router = Router(); router.use(requireAuth, requireRole('vendor'))
@@ -134,7 +135,106 @@ router.patch('/vehicles/:id', async (request, response) => { const vendor = awai
 router.post('/vehicles', async (request, response) => { const vendor = await vendorId(request.authUser!.id); const parsed = z.object({ registrationNumber: z.string().min(3).max(40), capacityLitres: z.number().int().positive(), isActive: z.boolean().default(true) }).safeParse(request.body); if (!vendor || !parsed.success) return response.status(400).json({ error: 'Invalid vehicle' }); const { data, error } = await supabase.from('vehicles').insert({ vendor_id: vendor, registration_number: parsed.data.registrationNumber, capacity_litres: parsed.data.capacityLitres, is_active: parsed.data.isActive }).select().single(); if (error) return databaseFailure(response, 'vendorExtended.database_error', error, 400); response.status(201).json(data) })
 router.patch('/drivers/:id', async (request, response) => { const vendor = await vendorId(request.authUser!.id); const parsed = z.object({ name: z.string().min(2).optional(), mobileE164: z.string().regex(/^\d{10}$/).optional(), licenceNumber: z.string().min(3).optional(), isActive: z.boolean().optional() }).safeParse(request.body); if (!vendor || !parsed.success) return response.status(400).json({ error: 'Invalid driver update' }); const { data, error } = await supabase.from('drivers').update(Object.fromEntries(Object.entries({ name: parsed.data.name, mobile_e164: parsed.data.mobileE164, licence_number: parsed.data.licenceNumber, is_active: parsed.data.isActive }).filter(([, value]) => value !== undefined))).eq('id', request.params.id).eq('vendor_id', vendor).select().single(); if (error) return databaseFailure(response, 'vendorExtended.database_error', error, 400); response.json(data) })
 router.post('/drivers', async (request, response) => { const vendor = await vendorId(request.authUser!.id); const parsed = z.object({ name: z.string().min(2).max(80), mobileE164: z.string().regex(/^\d{10}$/), licenceNumber: z.string().min(3).max(60), isActive: z.boolean().default(false) }).safeParse(request.body); if (!vendor || !parsed.success) return response.status(400).json({ error: 'Invalid driver' }); const { data, error } = await supabase.from('drivers').insert({ vendor_id: vendor, name: parsed.data.name, mobile_e164: parsed.data.mobileE164, licence_number: parsed.data.licenceNumber, is_active: parsed.data.isActive }).select().single(); if (error) return databaseFailure(response, 'vendorExtended.database_error', error, 400); response.status(201).json(data) })
-router.post('/orders/:id/delivery/verify', async (request, response) => { const vendor = await vendorId(request.authUser!.id); const parsed = z.object({ otp: z.string().regex(/^\d{6}$/), proofPath: z.string().trim().min(1).max(250).optional() }).safeParse(request.body); if (!vendor || !parsed.success) return response.status(400).json({ error: 'Invalid delivery verification' }); if (parsed.data.proofPath && !ownedStoragePath(parsed.data.proofPath, request.authUser!.id)) return response.status(400).json({ error: 'Delivery proof must be uploaded from your account.' }); const { data: booking, error: bookingError } = await supabase.from('bookings').select('id,status,customer_id,reference,delivery_otp_hash,delivery_otp_expires_at,delivery_otp_attempts').eq('id', request.params.id).eq('vendor_id', vendor).single(); if (bookingError || !booking) return response.status(404).json({ error: 'Vendor booking not found' }); if (booking.status !== 'arrived') return response.status(409).json({ error: 'Booking is not ready for delivery verification' }); if (!booking.delivery_otp_hash || !booking.delivery_otp_expires_at || new Date(booking.delivery_otp_expires_at).getTime() < Date.now()) return response.status(400).json({ error: 'Delivery OTP is missing or expired' }); const attempts = Number(booking.delivery_otp_attempts ?? 0); if (attempts >= maxDeliveryOtpAttempts) return response.status(429).json({ error: 'Too many incorrect attempts. Ask the customer for a new delivery code.' }); const { data: claimed, error: claimError } = await supabase.from('bookings').update({ delivery_otp_attempts: attempts + 1 }).eq('id', booking.id).eq('delivery_otp_attempts', attempts).select('id').maybeSingle(); if (claimError) return databaseFailure(response, 'vendor.delivery_attempt_failed', claimError, 500); if (!claimed) return response.status(409).json({ error: 'Please submit the delivery code again.' }); if (!otpMatches(booking.delivery_otp_hash, parsed.data.otp)) return response.status(400).json({ error: 'Invalid delivery OTP' }); if (parsed.data.proofPath) { const { error: proofError } = await supabase.from('documents').insert({ owner_type: 'booking', owner_id: booking.id, document_type: 'delivery_proof', object_key: parsed.data.proofPath, verification: 'submitted' }); if (proofError) return response.status(400).json({ error: 'Delivery proof could not be registered' }) } const { data, error } = await transitionBooking({ bookingId: booking.id, actorId: request.authUser!.id, status: 'delivered', vendorId: vendor }); if (error || !data) return failure(response, 409, 'Delivery could not be completed.', 'vendor.delivery_transition_failed', error); const { error: clearError } = await supabase.from('bookings').update({ delivery_otp_hash: null, delivery_otp_expires_at: null }).eq('id', booking.id).eq('status', 'delivered'); if (clearError) return response.status(500).json({ error: 'Delivery completed but OTP cleanup failed' }); if (booking.customer_id) await notifyCustomer({ customerId: booking.customer_id, eventType: 'booking_delivered', title: 'Delivery completed', detail: 'Your Urban Tanker delivery is complete.', bookingId: booking.id }); if (booking.customer_id) void notifyCustomerSmsById(booking.customer_id, 'delivery_confirmation', { reference: booking.reference ?? booking.id }); response.json(data) })
+router.post('/orders/:id/delivery/verify', async (request, response) => {
+  const vendor = await vendorId(request.authUser!.id)
+  const parsed = z.object({
+    otp: z.string().regex(/^\d{6}$/).optional(),
+    proofPath: z.string().trim().min(1).max(250).optional(),
+  }).safeParse(request.body)
+  if (!vendor || !parsed.success) return response.status(400).json({ error: 'Invalid delivery verification' })
+  if (parsed.data.proofPath && !ownedStoragePath(parsed.data.proofPath, request.authUser!.id)) {
+    return response.status(400).json({ error: 'Delivery proof must be uploaded from your account.' })
+  }
+
+  const { data: booking, error: bookingError } = await supabase
+    .from('bookings')
+    .select('id,status,customer_id,reference,delivery_otp_hash,delivery_otp_expires_at,delivery_otp_attempts,delivery_otp_sms_sent')
+    .eq('id', request.params.id)
+    .eq('vendor_id', vendor)
+    .single()
+  if (bookingError || !booking) return response.status(404).json({ error: 'Vendor booking not found' })
+  if (booking.status !== 'arrived') return response.status(409).json({ error: 'Booking is not ready for delivery verification' })
+
+  const verificationMethod = deliveryVerificationMethod({
+    otp: parsed.data.otp,
+    smsSent: booking.delivery_otp_sms_sent,
+    proofPath: parsed.data.proofPath,
+  })
+  if (!verificationMethod) {
+    return response.status(400).json({
+      error: 'Enter the customer OTP. A delivery photo can replace it only when the OTP SMS was not sent.',
+    })
+  }
+
+  if (verificationMethod === 'otp') {
+    if (!parsed.data.otp) return response.status(400).json({ error: 'Enter the customer OTP.' })
+    if (!booking.delivery_otp_hash || !booking.delivery_otp_expires_at || new Date(booking.delivery_otp_expires_at).getTime() < Date.now()) {
+      return response.status(400).json({ error: 'Delivery OTP is missing or expired' })
+    }
+
+    const attempts = Number(booking.delivery_otp_attempts ?? 0)
+    if (attempts >= maxDeliveryOtpAttempts) {
+      return response.status(429).json({ error: 'Too many incorrect attempts. Ask the customer for a new delivery code.' })
+    }
+    const { data: claimed, error: claimError } = await supabase
+      .from('bookings')
+      .update({ delivery_otp_attempts: attempts + 1 })
+      .eq('id', booking.id)
+      .eq('delivery_otp_attempts', attempts)
+      .select('id')
+      .maybeSingle()
+    if (claimError) return databaseFailure(response, 'vendor.delivery_attempt_failed', claimError, 500)
+    if (!claimed) return response.status(409).json({ error: 'Please submit the delivery code again.' })
+    if (!otpMatches(booking.delivery_otp_hash, parsed.data.otp)) {
+      return response.status(400).json({ error: 'Invalid delivery OTP' })
+    }
+  }
+
+  if (parsed.data.proofPath) {
+    const { error: proofError } = await supabase.from('documents').insert({
+      owner_type: 'booking',
+      owner_id: booking.id,
+      document_type: 'delivery_proof',
+      object_key: parsed.data.proofPath,
+      verification: 'submitted',
+    })
+    if (proofError) return response.status(400).json({ error: 'Delivery proof could not be registered' })
+  }
+
+  const { data, error } = await transitionBooking({
+    bookingId: booking.id,
+    actorId: request.authUser!.id,
+    status: 'delivered',
+    vendorId: vendor,
+  })
+  if (error || !data) {
+    return failure(response, 409, 'Delivery could not be completed.', 'vendor.delivery_transition_failed', error)
+  }
+  const { error: clearError } = await supabase
+    .from('bookings')
+    .update({
+      delivery_otp_hash: null,
+      delivery_otp_expires_at: null,
+      delivery_otp_sms_sent: null,
+    })
+    .eq('id', booking.id)
+    .eq('status', 'delivered')
+  if (clearError) return response.status(500).json({ error: 'Delivery completed but OTP cleanup failed' })
+
+  if (booking.customer_id) {
+    await notifyCustomer({
+      customerId: booking.customer_id,
+      eventType: 'booking_delivered',
+      title: 'Delivery completed',
+      detail: 'Your Urban Tanker delivery is complete.',
+      bookingId: booking.id,
+    })
+    void notifyCustomerSmsById(booking.customer_id, 'delivery_confirmation', {
+      reference: booking.reference ?? booking.id,
+    })
+  }
+  response.json(data)
+})
 router.post('/attendance', async (request, response) => { const vendor = await vendorId(request.authUser!.id); const parsed = z.object({ driverId: z.string().uuid(), status: z.enum(['present','absent','on_leave']), date: z.string() }).safeParse(request.body); if (!vendor || !parsed.success) return response.status(400).json({ error: 'Invalid attendance' }); const { data: driver, error: driverError } = await supabase.from('drivers').select('id').eq('id', parsed.data.driverId).eq('vendor_id', vendor).maybeSingle(); if (driverError) return databaseFailure(response, 'vendor.attendance_driver_failed', driverError, 500); if (!driver) return response.status(404).json({ error: 'Driver not found' }); const { data, error } = await supabase.from('driver_attendance').upsert({ vendor_id: vendor, driver_id: parsed.data.driverId, status: parsed.data.status, attendance_date: parsed.data.date }, { onConflict: 'driver_id,attendance_date' }).select().single(); if (error) return databaseFailure(response, 'vendor.attendance_failed', error, 400); response.status(201).json(data) })
 router.get('/attendance', async (request, response) => { const vendor = await vendorId(request.authUser!.id); if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' }); const parsed = z.object({ driverId: z.string().uuid().optional(), date: z.string().optional() }).safeParse(request.query); if (!parsed.success) return response.status(400).json({ error: 'Invalid attendance filter' }); let query = supabase.from('driver_attendance').select('*').eq('vendor_id', vendor).order('attendance_date', { ascending: false }).limit(200); if (parsed.data.driverId) query = query.eq('driver_id', parsed.data.driverId); if (parsed.data.date) query = query.eq('attendance_date', parsed.data.date); const { data, error } = await query; if (error) return databaseFailure(response, 'vendorExtended.database_error', error, 500); response.json(data ?? []) })
 router.get('/complaints', async (request, response) => { const vendor = await vendorId(request.authUser!.id); if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' }); const listRange = listWindow(request.query); const { data, error, count } = await supabase.from('complaints').select('*', exactCount(listRange)).eq('vendor_id', vendor).order('created_at', { ascending: false }).range(listRange.from, listRange.to); if (error) return databaseFailure(response, 'vendorExtended.database_error', error, 500); sendList(response, listRange, data ?? [], count) })
