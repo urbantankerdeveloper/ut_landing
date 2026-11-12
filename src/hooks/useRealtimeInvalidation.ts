@@ -8,7 +8,6 @@ const eventQueryPrefixes: Record<string, string[][]> = {
   'booking.created': [['customer', 'bookings'], ['admin', 'orders']],
   'booking.updated': [['customer', 'bookings'], ['customer', 'tracking'], ['vendor', 'orders'], ['admin', 'orders']],
   'booking.delivered': [['customer', 'bookings'], ['customer', 'tracking'], ['vendor', 'orders'], ['admin', 'orders']],
-  'booking.rejected': [['customer', 'bookings'], ['customer', 'tracking'], ['vendor', 'orders'], ['admin', 'orders']],
   'booking.vendor_accepted': [['customer', 'bookings'], ['customer', 'tracking'], ['vendor', 'orders'], ['admin', 'orders']],
   'booking.location.updated': [['customer', 'tracking'], ['vendor', 'orders']],
   'vendor.order.created': [['vendor', 'orders'], ['vendor', 'notifications'], ['admin', 'orders']],
