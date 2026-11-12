@@ -16,6 +16,10 @@ export function isBookingTransitionAllowed(current: BookingStatus, next: Booking
   return allowedTransitions[current].includes(next)
 }
 
+export function canCustomerCancelBooking(status: string) {
+  return status === 'pending_vendor' || status === 'vendor_assigned'
+}
+
 export async function transitionBooking(input: { bookingId: string; actorId: string; status: BookingStatus; cancellationReason?: string; vendorId?: string; vehicleId?: string; driverId?: string }) {
   return supabase.rpc('transition_booking', {
     p_booking_id: input.bookingId,

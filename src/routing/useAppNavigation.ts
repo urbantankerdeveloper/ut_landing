@@ -4,12 +4,13 @@ import { BOOKING_DRAFT_KEY, REPEAT_BOOKING_KEY } from '../constants/bookingDraft
 import { useNavigationStore, type ScreenId, type WorkspaceRole } from '../stores/navigationStore'
 import { roleFromPath, screenFromPath, screenPath, workspaceScreen } from './paths'
 
-// Booking and partner drafts ask before the user leaves them. The router blocker also covers browser back and forward.
+// Incomplete booking and partner drafts ask before the user leaves them. The router blocker also covers browser back and forward.
 export function needsLeaveConfirmation(fromPathname: string, toPathname: string) {
   const currentScreen = screenFromPath(fromPathname)
   const nextScreen = screenFromPath(toPathname)
   if (currentScreen === nextScreen) return false
-  return currentScreen === 'booking' || (currentScreen === 'partner' && useNavigationStore.getState().partnerFormDirty)
+  const { bookingCompleted, partnerFormDirty } = useNavigationStore.getState()
+  return (currentScreen === 'booking' && !bookingCompleted) || (currentScreen === 'partner' && partnerFormDirty)
 }
 
 // Runs once a navigation is allowed: clears drafts that belong to the screen being left and closes the mobile menu.

@@ -12,6 +12,7 @@ import { PaymentReceiptCard } from '../components/PaymentReceiptCard'
 import { useAuthStore } from '../stores/authStore'
 import { customerApi, type BookingPaymentMethod, type BookingServiceDetails, type CustomerBooking, type SavedAddress } from '../api/customer'
 import { customerDemoDataEnabled } from '../constants/demo'
+import { useNavigationStore } from '../stores/navigationStore'
 import { trackEvent } from '../services/analytics'
 import type { LatLngLiteral } from 'leaflet'
 import { isChennaiDeliveryAddress, lookupDeliveryPoint } from '../services/geocoding'
@@ -67,6 +68,18 @@ type BookingDraft = {
   guestChallengeId?: string | null
   bookingId: string | null
   quotedTotal: number | null
+}
+type CompletedBooking = {
+  id: string | null
+  services: BookingServiceDetails[]
+  location: string
+  deliveryDate: string
+  preferredTime: string
+  customerName: string
+  phone: string
+  notes: string
+  paymentMethod?: BookingPaymentMethod
+  total: number
 }
 
 function emptyServiceDraft(): ServiceDraft {
@@ -243,6 +256,23 @@ function formatOfferDiscount(offer: CouponRecord) {
     : c.offers.flatOff(value.toLocaleString('en-IN'))
 }
 
+function completedServiceFields(service: BookingServiceDetails): [string, string][] {
+  const fields: [string, string | undefined][] = [
+    [c.success.serviceFields.serviceType, service.serviceType],
+    [c.success.serviceFields.waterType, service.waterType],
+    [c.success.serviceFields.capacity, service.capacity],
+    [c.success.serviceFields.tankerCount, service.tankerCount],
+    [c.success.serviceFields.quantity, service.quantity],
+    [c.success.serviceFields.depth, service.depth],
+    [c.success.serviceFields.grade, service.grade],
+    [c.success.serviceFields.pump, service.pump],
+    [c.success.serviceFields.pickupLocation, service.pickupLocation],
+    [c.success.serviceFields.materialType, service.materialType],
+    [c.success.serviceFields.details, service.details],
+  ]
+  return fields.filter((field): field is [string, string] => Boolean(field[1]?.trim()))
+}
+
 function currentDateInputValue() {
   const date = new Date()
   date.setMinutes(date.getMinutes() - date.getTimezoneOffset())
@@ -276,6 +306,7 @@ const DRAFT_PERSIST_DELAY_MS = 300
 export default function BookingScreen() {
   const [draft] = useState(loadBookingDraft)
   const { navigate } = useAppNavigation()
+  const setBookingCompleted = useNavigationStore((state) => state.setBookingCompleted)
   const createBooking = useCreateCustomerBooking()
   const servicesQuery = useCustomerServices()
   const razorpay = useRazorpayPayment()
@@ -296,7 +327,7 @@ export default function BookingScreen() {
   const offersQuery = useCustomerOffers()
   const serviceCatalog = useMemo(() => servicesQuery.data ?? [], [servicesQuery.data])
   const options = useMemo(() => serviceCatalog.map((service) => ({ code: service.code, label: service.name, price: service.base_price_paise / 100, optionSurchargesPaise: service.config?.optionSurchargesPaise })), [serviceCatalog])
-  const { control, register, handleSubmit, setValue, getValues, watch, formState: { errors } } = useForm<BookingFormValues>({
+  const { control, register, handleSubmit, setValue, getValues, watch, reset, formState: { errors } } = useForm<BookingFormValues>({
     resolver: zodResolver(bookingFormSchema),
     mode: 'onChange',
     defaultValues: {
@@ -349,6 +380,7 @@ export default function BookingScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [bookingId, setBookingId] = useState<string | null>(draft.bookingId ?? null)
   const [quotedTotal, setQuotedTotal] = useState<number | null>(draft.quotedTotal ?? null)
+  const [successBooking, setSuccessBooking] = useState<CompletedBooking | null>(null)
   const [idempotencyKey] = useState(() => draft.idempotencyKey ?? crypto.randomUUID())
   const selectedServices = useMemo(() => serviceEntries.map((entry) => entry.serviceId), [serviceEntries])
   const activeServiceEntries = useMemo(() => serviceEntries.filter((entry) => options.some((option) => option.code === entry.serviceId)), [serviceEntries, options])
@@ -379,6 +411,14 @@ export default function BookingScreen() {
     latitude: sharedCoordinates?.lat,
     longitude: sharedCoordinates?.lng,
   }))
+
+  useEffect(() => {
+    setBookingCompleted(false)
+  }, [setBookingCompleted])
+
+  useEffect(() => {
+    if (step === 'success') window.scrollTo({ top: 0, behavior: 'instant' })
+  }, [step])
 
   const subtotal = serviceItems.reduce((sum, item) => {
     const serviceOption = options.find((option) => option.code === item.serviceId)
@@ -666,6 +706,55 @@ export default function BookingScreen() {
     trackEvent('booking.created', { service: servicesForQuote.join(','), capacity: Number(capacity) || 0, paymentMethod, bookingId: createdBookingId, locationDetected: Boolean(serviceItems[0]?.latitude) })
   }
 
+  function finishBooking(createdBookingId: string | null, finalTotal: number, finalPaymentMethod = paymentMethod) {
+    setSuccessBooking({
+      id: createdBookingId,
+      services: serviceItems.map((item) => ({ ...item })),
+      location: sharedDeliveryAddress,
+      deliveryDate: sharedDate,
+      preferredTime,
+      customerName: guestName,
+      phone,
+      notes: details.notes,
+      paymentMethod: finalPaymentMethod,
+      total: finalTotal,
+    })
+    setBookingCompleted(true)
+    reset({ selectedServices: [], capacity: '', phone: '', notes: '', paymentMethod: undefined, couponCode: '', guestName: user?.name ?? '' })
+    setServiceEntries([])
+    setServiceDetails({})
+    setServiceToAdd('')
+    setConfirmRemoveAll(false)
+    setSharedDate(currentDateInputValue())
+    setPreferredTime('07:00')
+    setSharedLocation('')
+    setRegion('South Chennai')
+    setAddressLabel('')
+    setAddressCity('Chennai')
+    setAddressPincode('')
+    setSaveAddressForFuture(false)
+    setSavedAddressId('')
+    setSharedCoordinates(null)
+    setCouponDiscount(0)
+    setCouponMessage(null)
+    setReviewConsent(false)
+    setServiceFieldErrors({})
+    setLocationStatus({})
+    setLocationToasts({})
+    setLocationEligibility({})
+    setPhoneChallenges({})
+    setOtpChallenges({})
+    setOtpValues({})
+    setOtpMessages({})
+    setOtpPendingPhone(null)
+    setBookingId(null)
+    setQuotedTotal(null)
+    setError(null)
+    setPaymentFailure(null)
+    sessionStorage.removeItem(BOOKING_DRAFT_KEY)
+    setStep('success')
+  }
+
   async function confirmBooking() {
     setIsSubmitting(true)
     setError(null)
@@ -725,8 +814,7 @@ export default function BookingScreen() {
           throw paymentError
         }
       }
-      sessionStorage.removeItem(BOOKING_DRAFT_KEY)
-      setStep('success')
+      finishBooking(currentBookingId, payableTotal)
     } catch (paymentError) {
       if (paymentError instanceof CheckoutError) setPaymentFailure(paymentError)
       else setError(paymentError instanceof Error ? paymentError.message : c.errors.bookingFailed)
@@ -740,11 +828,9 @@ export default function BookingScreen() {
     setError(null)
     try {
       const verified = await razorpay.verifyPending(paymentFailure.pending)
-      setBookingId(verified.orderId)
       trackBookingCreated(verified.orderId)
       setPaymentFailure(null)
-      sessionStorage.removeItem(BOOKING_DRAFT_KEY)
-      setStep('success')
+      finishBooking(verified.orderId, quotedTotal ?? total)
     } catch (verifyError) {
       if (verifyError instanceof CheckoutError) setPaymentFailure(verifyError)
       else setError(verifyError instanceof Error ? verifyError.message : c.errors.bookingFailed)
@@ -759,8 +845,7 @@ export default function BookingScreen() {
       await customerApi.switchBookingToCashOnDelivery(bookingId)
       setValue('paymentMethod', 'cod')
       setPaymentFailure(null)
-      sessionStorage.removeItem(BOOKING_DRAFT_KEY)
-      setStep('success')
+      finishBooking(bookingId, quotedTotal ?? total, 'cod')
     } catch (switchError) {
       setError(switchError instanceof Error ? switchError.message : c.errors.bookingFailed)
     } finally { setIsSubmitting(false) }
@@ -778,7 +863,51 @@ export default function BookingScreen() {
     return { id: activeServiceEntries[index]?.id ?? `${item.serviceId}-${index}`, label: duplicateCount ? c.serviceSummary.duplicateLabel(serviceName, duplicateCount + 1) : serviceName, detail: details, amount: estimatedServiceAmount(item, serviceOption, testAmountRupees), estimatePending }
   })
 
-  if (step === 'success') return <section className="booking-screen"><BookingHero onBack={() => navigate('home')} /><div className="booking-new-shell"><div className="surface booking-success"><span className="success-mark">✓</span><p className="eyebrow">{c.success.eyebrow}</p><h2>{c.success.heading}</h2><p>{c.success.referenceLead} <strong>{bookingId ?? c.success.referenceFallback}</strong> {c.success.referenceTrail}</p>{bookingId && !customerDemoDataEnabled && paymentMethod === 'gateway' && <PaymentReceiptCard bookingId={bookingId} />}<div className="action-row"><button className="button button-primary" type="button" onClick={() => navigate('home')}>{c.success.returnHome} <ArrowRight size={15} /></button></div></div></div></section>
+  if (step === 'success') return <section className="booking-screen">
+    <div className="booking-new-shell booking-success-shell">
+      <div className="surface booking-success" aria-live="polite">
+        <div className="booking-success-heading">
+          <span className="booking-success-mark" aria-hidden="true"><Check size={23} /></span>
+          <div>
+            <p className="eyebrow">{c.success.eyebrow}</p>
+            <h1>{successBooking && successBooking.services.length > 1 ? c.success.combinedHeading : c.success.heading}</h1>
+            <p className="booking-success-reference">
+              <span>{c.success.referenceLead}</span>
+              <strong>{successBooking?.id ?? c.success.referenceFallback}</strong>
+              <span>{c.success.referenceTrail}</span>
+            </p>
+          </div>
+        </div>
+        {successBooking?.id && !customerDemoDataEnabled && successBooking.paymentMethod === 'gateway' && <PaymentReceiptCard bookingId={successBooking.id} />}
+        <div className="booking-success-details">
+          <section>
+            <h3>{c.success.detailsHeading}</h3>
+            <dl className="detail-grid">
+              <div><dt>{c.success.customerName}</dt><dd>{successBooking?.customerName || c.success.notProvided}</dd></div>
+              <div><dt>{c.success.mobileNumber}</dt><dd>{successBooking?.phone || c.success.notProvided}</dd></div>
+              <div><dt>{c.success.deliveryLocation}</dt><dd>{successBooking?.location || c.success.notProvided}</dd></div>
+              <div><dt>{c.success.deliveryDate}</dt><dd>{successBooking?.deliveryDate || c.success.notProvided}</dd></div>
+              <div><dt>{c.success.preferredTime}</dt><dd>{successBooking?.preferredTime || c.success.notProvided}</dd></div>
+              <div><dt>{c.success.paymentMethod}</dt><dd>{c.payment.methods.find((method) => method.id === successBooking?.paymentMethod)?.title ?? c.success.notProvided}</dd></div>
+              <div><dt>{c.success.total}</dt><dd>{c.payment.inr((successBooking?.total ?? 0).toLocaleString('en-IN'))}</dd></div>
+              <div><dt>{c.success.accessNotes}</dt><dd>{successBooking?.notes || c.review.none}</dd></div>
+            </dl>
+          </section>
+          <section className="booking-success-services">
+            <h3>{c.success.servicesHeading}</h3>
+            {successBooking?.services.map((service, index) => {
+              const serviceName = options.find((option) => option.code === service.serviceId)?.label ?? service.serviceId
+              return <article className="booking-success-service" key={`${service.serviceId}-${index}`}>
+                <h4>{serviceName}</h4>
+                <dl>{completedServiceFields(service).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+              </article>
+            })}
+          </section>
+        </div>
+        <div className="action-row"><button className="button button-primary" type="button" onClick={() => navigate('home')}>{c.success.returnHome} <ArrowRight size={15} /></button></div>
+      </div>
+    </div>
+  </section>
 
   if (step === 'review' || step === 'payment') return <section className="booking-screen">
     <BookingHero onBack={() => navigate('home')} />
@@ -872,7 +1001,7 @@ export default function BookingScreen() {
             <div className="booking-coupon-carousel"><div className="coupon-carousel-heading"><span>{c.slot.availableCoupons}</span></div><div className="booking-coupon-list">{(offersQuery.data ?? []).map((offer) => <button type="button" className={`booking-coupon-card ${couponCode === offer.code ? 'is-selected' : ''}`} key={offer.code} onClick={() => void applyCoupon(offer.code)}><strong>{offer.code}</strong><span>{formatOfferDiscount(offer)}</span><small>{offer.title}{offer.valid_until ? c.slot.validThrough(new Date(offer.valid_until).toLocaleDateString()) : c.slot.noExpiry}</small></button>)}</div></div>
           </BookingSection>
           {error && <p className="login-error" role="alert">{error}</p>}
-          <button className="button button-primary booking-review-button" type="submit" disabled={!canReviewRequest}>{c.submit.reviewButton} <ArrowRight size={16} /></button>
+          <button className="button button-primary booking-review-button" type="submit" disabled={!canReviewRequest}>{activeServiceEntries.length > 1 ? c.submit.reviewCombinedButton : c.submit.reviewButton} <ArrowRight size={16} /></button>
           {!canReviewRequest && <p className="booking-review-hint" role="status">{c.submit.reviewHint}</p>}
         </div>
         <BookingSummary items={summaryItems} total={total} />

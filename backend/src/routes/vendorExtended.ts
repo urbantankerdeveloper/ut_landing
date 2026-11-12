@@ -111,13 +111,15 @@ async function handleVendorOrderTransition(request: Request, response: Response)
   const customerId = (data as { customer_id?: string }).customer_id
   if (requestedStatus === 'accepted') {
     void recordAnalyticsEvent(analyticsEventNames.vendorAccepted, { bookingId: current.id })
-    await markOtherVendorOffersTaken(current.id, vendor, current.reference)
-    await shareAssignment(data as Record<string, unknown>)
   }
   if (requestedStatus === 'cancelled') { const { data: vendorRecord } = await supabase.from('vendors').select('business_name').eq('id', vendor).maybeSingle(); void recordAnalyticsEvent(analyticsEventNames.rejected, { bookingId: current.id, vendorId: vendor, vendorName: vendorRecord?.business_name ?? 'Unknown vendor', reason: parsed.data.reason ?? 'Vendor rejected booking' }) }
   if (requestedStatus === 'delivered') void recordAnalyticsEvent(analyticsEventNames.delivered, { bookingId: current.id })
-  emitRealtime('booking.updated', { bookingId: current.id, status: requestedStatus })
+  emitRealtime('booking.updated', { bookingId: current.id, status: requestedStatus }, customerId)
   if (customerId) emitRealtimeToUser(customerId, 'notification.created', { bookingId: current.id, status: requestedStatus })
+  if (requestedStatus === 'accepted') {
+    await markOtherVendorOffersTaken(current.id, vendor, current.reference)
+    await shareAssignment(data as Record<string, unknown>)
+  }
   return response.json(data)
 }
 async function shareAssignment(data: Record<string, unknown>) { try { await notifyCustomerOfAssignment(data as Parameters<typeof notifyCustomerOfAssignment>[0]) } catch (error) { logger.warn('booking.assignment_notification_failed', { bookingId: data.id, error: error instanceof Error ? error.message : 'Unknown error' }) } }

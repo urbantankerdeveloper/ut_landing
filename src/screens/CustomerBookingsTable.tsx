@@ -1,9 +1,8 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
-import { ArrowRight, MoreVertical } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { ArrowRight } from 'lucide-react'
 import { customerDemoDataEnabled } from '../constants/demo'
 import { REPEAT_BOOKING_KEY } from '../constants/bookingDraft'
-import { useCustomerBookings } from '../hooks/useCustomerData'
+import { useCustomerBookings, useCustomerCancel } from '../hooks/useCustomerData'
 import { useRazorpayPayment } from '../hooks/useFrontendFeatures'
 import { customerApi, type CustomerBooking } from '../api/customer'
 import { useAuthStore } from '../stores/authStore'
@@ -14,6 +13,7 @@ import { customerContent as c } from '../content/customer'
 type Props = { onNavigate: (screen: 'booking' | 'bookings' | 'offers' | 'home') => void }
 // Statuses before the driver collects cash. Matches the backend codSwitchStatuses.
 const payOnlineStatuses = ['pending_vendor', 'vendor_assigned', 'accepted']
+const customerCancellableStatuses = ['pending_vendor', 'vendor_assigned']
 type PayState = { kind: 'idle' } | { kind: 'working' } | { kind: 'paid' } | { kind: 'verify'; pending: CheckoutSuccess } | { kind: 'error'; message: string }
 const demoRows: CustomerBooking[] = customerDemoDataEnabled ? [
   { id: 'UT-2408', service: c.bookingsTable.demo.waterTanker, services: [{ serviceId: 'water_tanker', capacity: c.bookingsTable.demo.tankerCapacity, details: c.bookingsTable.demo.potableWater, deliveryDate: '2026-10-20' }], location: c.bookingsTable.demo.ecr, status: c.bookingsTable.demo.inProgress, amount: 1850, scheduledAt: '2026-10-20' },
@@ -40,14 +40,11 @@ function paymentLabel(value?: CustomerBooking['paymentMethod']) {
 
 export function CustomerBookingsTable({ onNavigate }: Props) {
   const query = useCustomerBookings()
+  const cancellation = useCustomerCancel()
   const [filter, setFilter] = useState('all')
   const [sort, setSort] = useState<'recent' | 'status' | 'amount'>('recent')
   const [page, setPage] = useState(1)
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null)
-  const [openActionsBookingId, setOpenActionsBookingId] = useState<string | null>(null)
-  const [actionMenuPosition, setActionMenuPosition] = useState<{ top: number; left: number } | null>(null)
-  const actionTriggerRef = useRef<HTMLButtonElement>(null)
-  const actionMenuRef = useRef<HTMLDivElement>(null)
   const rows = useMemo(() => customerDemoDataEnabled ? demoRows : query.data ?? [], [query.data])
   const filteredRows = useMemo(() => rows.filter((booking) => filter === 'all' || booking.status.toLowerCase() === filter), [filter, rows])
   const sortedRows = useMemo(() => [...filteredRows].sort((first, second) => sort === 'status' ? first.status.localeCompare(second.status) : sort === 'amount' ? second.amount - first.amount : second.id.localeCompare(first.id)), [filteredRows, sort])
@@ -58,12 +55,24 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
   const razorpay = useRazorpayPayment()
   const user = useAuthStore((state) => state.user)
   const [payState, setPayState] = useState<PayState>({ kind: 'idle' })
+  const [cancelError, setCancelError] = useState<string | null>(null)
   // Derived from the rows so the modal reflects refetched data (e.g. a switched payment method) without reopening.
   const selectedBooking = selectedBookingId ? rows.find((row) => row.id === selectedBookingId) ?? null : null
 
   function closeBookingModal() {
     setSelectedBookingId(null)
     setPayState({ kind: 'idle' })
+    setCancelError(null)
+  }
+
+  function cancelSelectedBooking() {
+    if (!selectedBooking || !customerCancellableStatuses.includes(selectedBooking.status.toLowerCase()) || cancellation.isPending) return
+    if (!window.confirm(c.bookingsTable.cancelConfirm)) return
+    setCancelError(null)
+    cancellation.mutate(selectedBooking.id, {
+      onSuccess: () => setCancelError(null),
+      onError: () => setCancelError(c.bookingsTable.cancelFailed),
+    })
   }
 
   async function payOnlineNow(booking: CustomerBooking) {
@@ -113,48 +122,7 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
     }
   }
 
-  useLayoutEffect(() => {
-    if (!openActionsBookingId) return
-    function positionMenu() {
-      const trigger = actionTriggerRef.current
-      if (!trigger) return
-      const rect = trigger.getBoundingClientRect()
-      const menuWidth = 160
-      const menuHeight = 88
-      setActionMenuPosition({
-        top: rect.bottom + menuHeight + 8 > window.innerHeight ? Math.max(8, rect.top - menuHeight - 4) : rect.bottom + 4,
-        left: Math.max(8, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 8)),
-      })
-    }
-    positionMenu()
-    window.addEventListener('resize', positionMenu)
-    window.addEventListener('scroll', positionMenu, true)
-    return () => {
-      window.removeEventListener('resize', positionMenu)
-      window.removeEventListener('scroll', positionMenu, true)
-    }
-  }, [openActionsBookingId])
-
-  useEffect(() => {
-    if (!openActionsBookingId) return
-    function closeOnOutsideClick(event: PointerEvent) {
-      if (!(event.target instanceof Node)) return
-      if (actionTriggerRef.current?.contains(event.target) || actionMenuRef.current?.contains(event.target)) return
-      setOpenActionsBookingId(null)
-    }
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') setOpenActionsBookingId(null)
-    }
-    document.addEventListener('pointerdown', closeOnOutsideClick)
-    document.addEventListener('keydown', closeOnEscape)
-    return () => {
-      document.removeEventListener('pointerdown', closeOnOutsideClick)
-      document.removeEventListener('keydown', closeOnEscape)
-    }
-  }, [openActionsBookingId])
-
   function repeatBooking(booking: CustomerBooking) {
-    setOpenActionsBookingId(null)
     sessionStorage.setItem(REPEAT_BOOKING_KEY, JSON.stringify(booking))
     onNavigate('booking')
   }
@@ -174,30 +142,13 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
       </div>
       <div className="customer-booking-table-wrap">
         <table className="customer-booking-table">
-          <thead><tr><th scope="col">{c.bookingsTable.headers.booking}</th><th scope="col">{c.bookingsTable.headers.service}</th><th scope="col">{c.bookingsTable.headers.location}</th><th scope="col">{c.bookingsTable.headers.status}</th><th scope="col">{c.bookingsTable.headers.amount}</th><th scope="col">{c.bookingsTable.headers.action}</th></tr></thead>
+          <thead><tr><th scope="col">{c.bookingsTable.headers.booking}</th><th scope="col">{c.bookingsTable.headers.service}</th><th scope="col">{c.bookingsTable.headers.location}</th><th scope="col">{c.bookingsTable.headers.status}</th><th scope="col">{c.bookingsTable.headers.amount}</th></tr></thead>
           <tbody>{visibleRows.map((booking) => <tr key={booking.id}>
-            <td><b>{booking.id}</b></td>
+            <td><button className="customer-booking-id" type="button" onClick={() => { setPayState({ kind: 'idle' }); setCancelError(null); setSelectedBookingId(booking.id) }}>{booking.id}</button></td>
             <td>{booking.service}</td>
             <td>{booking.location}</td>
-            <td><span className={`status-tag ${booking.status === 'delivered' ? '' : 'pending'}`}>{booking.status}</span></td>
+            <td><span className={`status-tag ${booking.status.toLowerCase() === 'delivered' ? '' : 'pending'}`}>{booking.status}</span></td>
             <td>{c.common.rupee(booking.amount.toLocaleString('en-IN'))}</td>
-            <td className="customer-booking-actions">
-              <button
-                className="booking-actions-trigger"
-                type="button"
-                aria-label={c.bookingsTable.actionsLabel(booking.id)}
-                aria-haspopup="menu"
-                aria-expanded={openActionsBookingId === booking.id}
-                aria-controls={`booking-actions-${booking.id}`}
-                onClick={(event) => {
-                  const isOpen = openActionsBookingId === booking.id
-                  actionTriggerRef.current = isOpen ? null : event.currentTarget
-                  setOpenActionsBookingId(isOpen ? null : booking.id)
-                }}
-              >
-                <MoreVertical size={18} aria-hidden="true" />
-              </button>
-            </td>
           </tr>)}</tbody>
         </table>
         {!sortedRows.length && <div className="admin-empty-state"><p>{c.bookingsTable.noMatches}</p></div>}
@@ -207,29 +158,6 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
         <div>{query.hasNextPage && <button className="button button-quiet" disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>{query.isFetchingNextPage ? c.bookingsTable.loadingMore : c.bookingsTable.loadOlder}</button>}<button className="button button-quiet" disabled={currentPage <= 1} onClick={() => setPage((value) => value - 1)}>{c.bookingsTable.previous}</button><button className="button button-quiet" disabled={currentPage >= pageCount} onClick={() => setPage((value) => value + 1)}>{c.bookingsTable.next}</button></div>
       </div>
     </section>
-    {openActionsBookingId && actionMenuPosition && createPortal(
-      <div
-        className="booking-actions-menu"
-        id={`booking-actions-${openActionsBookingId}`}
-        role="menu"
-        ref={actionMenuRef}
-        style={{ top: actionMenuPosition.top, left: actionMenuPosition.left }}
-      >
-        <button type="button" role="menuitem" onClick={() => {
-          const booking = rows.find((row) => row.id === openActionsBookingId)
-          if (booking) repeatBooking(booking)
-        }}>{c.bookingsTable.bookAgain}</button>
-        <button type="button" role="menuitem" onClick={() => {
-          const booking = rows.find((row) => row.id === openActionsBookingId)
-          setOpenActionsBookingId(null)
-          if (booking) {
-            setPayState({ kind: 'idle' })
-            setSelectedBookingId(booking.id)
-          }
-        }}>{c.bookingsTable.view}</button>
-      </div>,
-      document.body,
-    )}
     {selectedBooking && <Modal title={c.bookingsTable.modalTitle(selectedBooking.id)} onClose={closeBookingModal}>
       <div className="customer-booking-details">
         <div className="customer-booking-detail-grid">
@@ -257,6 +185,11 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
           ? <ul>{selectedBooking.services.map((service) => <li key={service.serviceId}><strong>{serviceLabel(service.serviceId)}</strong>{service.capacity && <span>{c.bookingsTable.capacitySeparator}{service.capacity}</span>}{service.deliveryDate && <p>{c.bookingsTable.preferredDate(formatDate(service.deliveryDate))}</p>}<p>{service.details || c.bookingsTable.noAdditionalDetails}</p></li>)}</ul>
           : <p>{c.bookingsTable.noServiceDetails}</p>}</section>
         <section><h3>{c.bookingsTable.accessNotes}</h3><p>{selectedBooking.notes || c.bookingsTable.noAccessNotes}</p></section>
+          {cancelError && <p className="booking-cancel-error" role="alert">{cancelError}</p>}
+          {(selectedBooking.status.toLowerCase() === 'delivered' || (!customerDemoDataEnabled && customerCancellableStatuses.includes(selectedBooking.status.toLowerCase()))) && <div className="action-row">
+            {!customerDemoDataEnabled && customerCancellableStatuses.includes(selectedBooking.status.toLowerCase()) && <button className="button button-danger" type="button" disabled={cancellation.isPending} onClick={cancelSelectedBooking}>{cancellation.isPending ? c.bookingsTable.cancelling : c.bookingsTable.cancelBooking}</button>}
+            {selectedBooking.status.toLowerCase() === 'delivered' && <button className="button button-primary" type="button" onClick={() => repeatBooking(selectedBooking)}>{c.bookingsTable.bookAgain} <ArrowRight size={14} /></button>}
+          </div>}
       </div>
     </Modal>}
   </>

@@ -19,13 +19,14 @@ export function AppShell() {
 	const { pathname } = useLocation()
 	const isPublicTracking = /^\/track\/[A-Za-z0-9_-]+$/.test(pathname)
 	const partnerFormDirty = useNavigationStore((state) => state.partnerFormDirty)
+	const bookingCompleted = useNavigationStore((state) => state.bookingCompleted)
 	const user = useAuthStore((state) => state.user)
 	const hasHydrated = useAuthStore((state) => state.hasHydrated)
 	const blocker = useBlocker(({ currentLocation, nextLocation }) => currentLocation.pathname !== nextLocation.pathname && needsLeaveConfirmation(currentLocation.pathname, nextLocation.pathname))
 	useEffect(() => {
 		if (user && (activeScreen === 'home' || activeScreen === 'login' || activeScreen === 'account')) openWorkspace(user.role, { replace: true })
 	}, [activeScreen, openWorkspace, user])
-	const isBookingScreen = activeScreen === 'booking'
+	const isBookingScreen = activeScreen === 'booking' && !bookingCompleted
 	const isPartnerDraft = activeScreen === 'partner' && partnerFormDirty
 	useEffect(() => {
 		if (!isBookingScreen && !isPartnerDraft) return

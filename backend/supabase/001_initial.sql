@@ -179,6 +179,12 @@ begin
     raise exception 'BOOKING_NOT_FOUND';
   end if;
 
+  if p_next_status = 'cancelled'
+     and p_actor_id = current_booking.customer_id
+     and current_booking.status not in ('pending_vendor', 'vendor_assigned') then
+    raise exception 'CUSTOMER_CANCELLATION_WINDOW_CLOSED';
+  end if;
+
   if p_vendor_id is not null and current_booking.vendor_id is not null and current_booking.vendor_id <> p_vendor_id then
     raise exception 'BOOKING_VENDOR_MISMATCH';
   end if;

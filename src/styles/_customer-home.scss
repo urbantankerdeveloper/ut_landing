@@ -173,75 +173,53 @@
     border-bottom: 0;
 }
 
-.customer-booking-table td:last-child {
-    white-space: nowrap;
-}
-
-.customer-booking-table td.customer-booking-actions {
-    position: relative;
-    width: 56px;
-    text-align: center;
-}
-
-.booking-actions-trigger {
-    display: inline-grid;
-    width: 34px;
-    height: 34px;
+.customer-booking-id {
     padding: 0;
-    place-items: center;
-    color: colors.$ink;
-    background: #fff;
-    border: 1px solid #d2e1dc;
-    border-radius: 50%;
-    cursor: pointer;
-}
-
-.booking-actions-trigger:hover,
-.booking-actions-trigger[aria-expanded="true"] {
     color: colors.$aqua;
-    background: #f5f9f7;
-    border-color: colors.$aqua;
-}
-
-.booking-actions-trigger:focus-visible,
-.booking-actions-menu button:focus-visible {
-    outline: 2px solid colors.$aqua;
-    outline-offset: 2px;
-}
-
-.booking-actions-menu {
-    position: fixed;
-    z-index: 1000;
-    display: grid;
-    width: 160px;
-    max-height: min(240px, calc(100vh - 16px));
-    padding: 5px;
-    background: #fff;
-    border: 1px solid #dfe9e5;
-    border-radius: 9px;
-    box-shadow: 0 10px 28px rgb(17 39 33 / 14%);
-    overflow-y: auto;
-}
-
-.booking-actions-menu button {
-    padding: 9px 10px;
-    color: colors.$ink;
     background: transparent;
     border: 0;
-    border-radius: 6px;
     cursor: pointer;
     font: inherit;
-    font-size: 12px;
+    font-weight: 700;
     text-align: left;
 }
 
-.booking-actions-menu button:hover {
-    background: #f5f9f7;
+.customer-booking-id:hover { text-decoration: underline; }
+.customer-booking-id:focus-visible {
+    outline: 2px solid colors.$aqua;
+    outline-offset: 2px;
 }
 
 .customer-booking-details {
     display: grid;
     gap: 18px;
+}
+
+.customer-booking-pay-online {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 16px;
+    padding: 16px;
+    background: #f5f9f7;
+    border-radius: 9px;
+}
+
+.customer-booking-pay-online p {
+    margin: 0;
+    color: colors.$muted;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.customer-booking-pay-online .button {
+    justify-self: end;
+}
+
+.booking-cancel-error {
+    margin: 0;
+    color: #99483d;
+    font-size: 12px;
 }
 
 .customer-booking-detail-grid {
@@ -350,6 +328,14 @@
 
     .customer-booking-detail-grid {
         grid-template-columns: 1fr;
+    }
+
+    .customer-booking-pay-online {
+        grid-template-columns: 1fr;
+    }
+
+    .customer-booking-pay-online .button {
+        justify-self: start;
     }
 
     .booking-table-pagination>div {

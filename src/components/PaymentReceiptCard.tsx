@@ -30,11 +30,14 @@ export function PaymentReceiptCard({ bookingId }: { bookingId: string }) {
   if (!receipt) return null
   const method = methodLabel(receipt)
   return (
-    <dl className="detail-grid payment-receipt" aria-label={copy.title}>
-      <div><dt>{copy.status}</dt><dd>{statusLabel(receipt.status)}</dd></div>
-      <div><dt>{copy.amount}</dt><dd>{`INR ${(receipt.amountPaise / 100).toLocaleString('en-IN')}`}</dd></div>
-      {method && <div><dt>{copy.method}</dt><dd>{method}</dd></div>}
-      {receipt.capturedAt && <div><dt>{copy.paidAt}</dt><dd>{new Date(receipt.capturedAt).toLocaleString('en-IN')}</dd></div>}
-    </dl>
+    <section className="payment-receipt-card" aria-label={copy.title}>
+      <h3>{copy.title}</h3>
+      <dl className="payment-receipt">
+        <div><dt>{copy.status}</dt><dd className={`payment-status payment-status-${receipt.status}`}>{statusLabel(receipt.status)}</dd></div>
+        <div><dt>{copy.amount}</dt><dd>{`INR ${(receipt.amountPaise / 100).toLocaleString('en-IN')}`}</dd></div>
+        {method && <div><dt>{copy.method}</dt><dd>{method}</dd></div>}
+        {receipt.capturedAt && <div><dt>{copy.paidAt}</dt><dd>{new Date(receipt.capturedAt).toLocaleString('en-IN')}</dd></div>}
+      </dl>
+    </section>
   )
 }

@@ -11,8 +11,8 @@ export function setRealtimeServer(server: Server) {
 // Frequent location pings are pushed live but are not written to the admin notification feed.
 const transientRealtimeEvents = new Set(['booking.location.updated'])
 
-export function emitRealtime(event: string, payload: unknown = {}) {
-  if (event === 'booking.updated') emitBookingUpdated(payload)
+export function emitRealtime(event: string, payload: unknown = {}, customerId?: string) {
+  if (event === 'booking.updated') emitBookingUpdated(payload, customerId)
   else realtimeServer?.emit(event, payload)
   persistUnlessTransient(event, payload)
 }
@@ -31,14 +31,16 @@ export function emitRealtimeToBooking(bookingId: string, event: string, payload:
 export function emitRealtimeToAdmins(event: string, payload: unknown = {}) {
   realtimeServer?.to('admins').emit(event, payload)
 }
-// Booking updates reach the people following that booking and the admins, not every connected socket.
-function emitBookingUpdated(payload: unknown) {
+// Booking updates reach booking subscribers, admins, and an explicitly targeted customer if provided.
+function emitBookingUpdated(payload: unknown, customerId?: string) {
   const bookingId = payload && typeof payload === 'object' ? (payload as { bookingId?: unknown }).bookingId : undefined
   if (typeof bookingId !== 'string') {
     logger.error('realtime.booking_updated_dropped', { reason: 'bookingId missing' })
     return
   }
-  realtimeServer?.to([`booking:${bookingId}`, 'admins']).emit('booking.updated', payload)
+  const rooms = [`booking:${bookingId}`, 'admins']
+  if (customerId) rooms.push(`customer:${customerId}`)
+  realtimeServer?.to(rooms).emit('booking.updated', payload)
 }
 function persistUnlessTransient(event: string, payload: unknown) {
   if (!transientRealtimeEvents.has(event)) void persistAdminEvent(event, payload)

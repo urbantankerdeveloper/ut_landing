@@ -79,7 +79,7 @@ describe('apiFetch retries and slow requests', () => {
     vi.restoreAllMocks()
     vi.stubGlobal('window', globalThis)
     useAuthStore.setState({ user: null, accessToken: null })
-    useServerStatusStore.setState({ slowRequests: 0 })
+    useServerStatusStore.setState({ slowRequests: 0, noticeVisible: false, hasShownNotice: false })
   })
 
   afterEach(() => {

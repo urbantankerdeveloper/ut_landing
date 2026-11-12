@@ -1,14 +1,16 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { customerApi, type CreateBookingPayload, type CreateSupportRequestPayload } from '../api/customer'
 import { customerDemoDataEnabled } from '../constants/demo'
+import { customerContent } from '../content/customer'
 import { useRealtimeInvalidation } from './useRealtimeInvalidation'
 import { useRealtimeConnected } from '../stores/realtimeStore'
 import { loadRazorpayWidget } from '../utils/razorpayCheckout'
+import { notifyInfo } from '../utils/notify'
 
 const customerQueryOptions = { enabled: !customerDemoDataEnabled, staleTime: 60_000 }
 export const customerQueryKeys = { bookings: ['customer', 'bookings'], addresses: ['customer', 'addresses'], subscriptions: ['customer', 'subscriptions'], invoices: ['customer', 'invoices'], support: ['customer', 'support'], profile: ['customer', 'profile'], wallet: ['customer', 'wallet'], contracts: ['customer', 'contracts'], offers: ['customer', 'offers'], membershipPlans: ['customer', 'membership-plans'], membership: ['customer', 'membership'], notifications: ['customer', 'notifications'], paymentReceipt: (bookingId: string) => ['customer', 'payments', bookingId] as const, tracking: (orderId: string) => ['customer', 'tracking', orderId] } as const
 
-export function useCustomerBookings() { const query = useInfiniteQuery({ queryKey: customerQueryKeys.bookings, initialPageParam: 0, queryFn: ({ pageParam }) => customerApi.bookings(pageParam), getNextPageParam: (lastPage) => lastPage.nextOffset ?? undefined, ...customerQueryOptions }); useRealtimeInvalidation(customerQueryKeys.bookings); return { ...query, data: query.data?.pages.flatMap((page) => page.rows) } }
+export function useCustomerBookings() { const query = useInfiniteQuery({ queryKey: customerQueryKeys.bookings, initialPageParam: 0, queryFn: ({ pageParam }) => customerApi.bookings(pageParam), getNextPageParam: (lastPage) => lastPage.nextOffset ?? undefined, ...customerQueryOptions }); useRealtimeInvalidation(customerQueryKeys.bookings, (message) => { const payload = message.payload; if (!customerDemoDataEnabled && message.type === 'booking.updated' && typeof payload === 'object' && payload !== null && 'status' in payload && payload.status === 'accepted') notifyInfo(customerContent.bookings.acceptedRealtimeUpdate) }); return { ...query, data: query.data?.pages.flatMap((page) => page.rows) } }
 export function useCustomerPhoneVerification(enabled: boolean) { return useQuery({ queryKey: ['customer', 'phone-verification'], queryFn: customerApi.phoneVerification, enabled: enabled && !customerDemoDataEnabled, staleTime: 60_000 }) }
 export function useCustomerUsage() { return useQuery({ queryKey: ['customer', 'usage'], queryFn: customerApi.usage, ...customerQueryOptions }) }
 export function useCustomerServices() { return useQuery({ queryKey: ['customer', 'services'], queryFn: customerApi.services, ...customerQueryOptions }) }
