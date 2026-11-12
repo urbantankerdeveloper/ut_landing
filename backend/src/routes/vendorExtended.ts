@@ -3,7 +3,7 @@ import { Router, type Request, type Response } from 'express'
 import { z } from 'zod'
 import { requireAuth, requireRole } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
-import { emitRealtime, emitRealtimeToBooking, emitRealtimeToUser, emitRealtimeToVendor } from '../services/realtime.js'
+import { emitBookingLifecycleEvent, emitRealtime, emitRealtimeToBooking, emitRealtimeToUser, emitRealtimeToVendor } from '../services/realtime.js'
 import { notifyCustomer } from '../services/customerNotifications.js'
 import { notifyCustomerOfAssignment, notifyCustomerSmsById } from '../services/bookingNotifications.js'
 import { transitionBooking, type BookingStatus } from '../services/bookingLifecycle.js'
@@ -116,6 +116,8 @@ async function handleVendorOrderTransition(request: Request, response: Response)
   if (requestedStatus === 'cancelled') { const { data: vendorRecord } = await supabase.from('vendors').select('business_name').eq('id', vendor).maybeSingle(); void recordAnalyticsEvent(analyticsEventNames.rejected, { bookingId: current.id, vendorId: vendor, vendorName: vendorRecord?.business_name ?? 'Unknown vendor', reason: parsed.data.reason ?? 'Vendor rejected booking' }) }
   if (requestedStatus === 'delivered') void recordAnalyticsEvent(analyticsEventNames.delivered, { bookingId: current.id })
   emitRealtime('booking.updated', { bookingId: current.id, status: requestedStatus }, customerId)
+  if (requestedStatus === 'accepted') emitBookingLifecycleEvent('booking.vendor_accepted', { bookingId: current.id, vendorId: vendor, reference: current.reference }, customerId)
+  if (requestedStatus === 'delivered') emitBookingLifecycleEvent('booking.delivered', { bookingId: current.id, reference: current.reference, deliveredAt: new Date().toISOString() }, customerId)
   if (customerId) emitRealtimeToUser(customerId, 'notification.created', { bookingId: current.id, status: requestedStatus })
   if (requestedStatus === 'accepted') {
     await markOtherVendorOffersTaken(current.id, vendor, current.reference)
@@ -210,6 +212,8 @@ router.post('/orders/:id/delivery/verify', async (request, response) => {
   if (error || !data) {
     return failure(response, 409, 'Delivery could not be completed.', 'vendor.delivery_transition_failed', error)
   }
+  emitRealtime('booking.updated', { bookingId: booking.id, status: 'delivered' }, booking.customer_id ?? undefined)
+  emitBookingLifecycleEvent('booking.delivered', { bookingId: booking.id, reference: booking.reference, deliveredAt: new Date().toISOString() }, booking.customer_id ?? undefined)
   const { error: clearError } = await supabase
     .from('bookings')
     .update({

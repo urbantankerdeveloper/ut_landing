@@ -84,17 +84,38 @@ if (serveFrontend) app.use(express.static(frontendDist, { index: 'index.html', s
 if (serveFrontend) app.use((request, response, next) => { if (request.method !== 'GET' || request.path.startsWith('/api') || request.path.startsWith('/health') || request.path.startsWith('/socket.io')) return next(); response.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate'); response.sendFile(resolve(frontendDist, 'index.html')) })
 const io = new Server(httpServer, { cors: corsOptions, adapter: socketAdapterFor(redis) })
 io.use(async (socket, next) => {
+  const rejectSocket = (reason: string, message: string, detail?: string) => {
+    logger.warn('realtime.auth_failed', { reason, origin: socket.handshake.headers.origin ?? null, detail })
+    next(new Error(message))
+  }
   try {
     const token = socket.handshake.auth?.token
-    if (typeof token !== 'string' || !token) return next(new Error('Authentication required'))
+    if (typeof token !== 'string' || !token) return rejectSocket('missing_token', 'Authentication required')
     const { data, error } = await supabase.auth.getUser(token)
-    if (error || !data.user) return next(new Error('Invalid session'))
+    if (error || !data.user) return rejectSocket('invalid_session', 'Invalid session', error?.message)
     socket.data.userId = data.user.id
     next()
-  } catch {
-    next(new Error('Realtime authentication failed'))
+  } catch (error) {
+    rejectSocket('auth_error', 'Realtime authentication failed', error instanceof Error ? error.message : String(error))
   }
 })
+// Resolves the role and vendor for a socket. Returns null when the lookup fails, and the caller disconnects.
+async function loadSocketContext(userId: string) {
+  try {
+    const [{ data: profile, error: profileError }, { data: vendor, error: vendorError }] = await Promise.all([
+      supabase.from('profiles').select('role').eq('id', userId).maybeSingle(),
+      supabase.from('vendors').select('id').eq('owner_profile_id', userId).maybeSingle(),
+    ])
+    if (profileError || vendorError) {
+      logger.error('realtime.user_context_failed', { userId, profileError: profileError?.message, vendorError: vendorError?.message })
+      return null
+    }
+    return { role: profile?.role ?? null, vendor: vendor ?? null }
+  } catch (error) {
+    logger.error('realtime.user_context_failed', { userId, error: error instanceof Error ? error.message : String(error) })
+    return null
+  }
+}
 async function handleConnection(socket: Socket) {
   let joinWindowStartedAt = Date.now()
   let joinCount = 0
@@ -107,20 +128,11 @@ async function handleConnection(socket: Socket) {
     }
   })
   socket.join(`customer:${socket.data.userId}`)
-  const [{ data: profile, error: profileError }, { data: vendor, error: vendorError }] = await Promise.all([
-    supabase.from('profiles').select('role').eq('id', socket.data.userId).maybeSingle(),
-    supabase.from('vendors').select('id').eq('owner_profile_id', socket.data.userId).maybeSingle(),
-  ])
-  if (profileError || vendorError) {
-    logger.error('realtime.user_context_failed', { userId: socket.data.userId, profileError: profileError?.message, vendorError: vendorError?.message })
-    socket.disconnect(true)
-    return
-  }
-  if (profile?.role === 'admin') socket.join('admins')
-  if (vendor) socket.join(`vendor:${vendor.id}`)
-  socket.emit('connected', { service: 'urban-tanker-realtime', vendorId: vendor?.id ?? null, role: profile?.role ?? null })
-  onSocketEvent('vendor:join', (vendorId: unknown) => {
-    if (typeof vendorId !== 'string' || !vendor || vendor.id !== vendorId) return
+  // Handlers are registered before the context lookup finishes, so a join sent right after connect is not dropped; each waits for the lookup.
+  const contextReady = loadSocketContext(socket.data.userId)
+  onSocketEvent('vendor:join', async (vendorId: unknown) => {
+    const context = await contextReady
+    if (typeof vendorId !== 'string' || !context?.vendor || context.vendor.id !== vendorId) return
     socket.join(`vendor:${vendorId}`)
   })
   onSocketEvent('booking:leave', (bookingId: unknown) => {
@@ -134,17 +146,27 @@ async function handleConnection(socket: Socket) {
     if (joinCount >= 30 || (joinedBookingRooms.size >= 20 && !joinedBookingRooms.has(bookingId))) return
     joinCount += 1
     try {
+      const context = await contextReady
+      if (!context) return
       const { data: booking, error } = await supabase.from('bookings').select('customer_id,vendor_id').eq('id', bookingId).maybeSingle()
       if (error) throw error
       if (!booking) return
       const isCustomer = booking.customer_id === socket.data.userId
-      const isAdmin = profile?.role === 'admin'
-      const isVendor = Boolean(vendor?.id && booking.vendor_id === vendor.id)
+      const isAdmin = context.role === 'admin'
+      const isVendor = Boolean(context.vendor?.id && booking.vendor_id === context.vendor.id)
       if (isCustomer || isAdmin || isVendor) { joinedBookingRooms.add(bookingId); socket.join(`booking:${bookingId}`) }
     } catch (error) {
       logger.warn('realtime.booking_room_join_failed', { userId: socket.data.userId, error: error instanceof Error ? error.message : String(error) })
     }
   })
+  const context = await contextReady
+  if (!context) {
+    socket.disconnect(true)
+    return
+  }
+  if (context.role === 'admin') socket.join('admins')
+  if (context.vendor) socket.join(`vendor:${context.vendor.id}`)
+  socket.emit('connected', { service: 'urban-tanker-realtime', vendorId: context.vendor?.id ?? null, role: context.role })
 }
 io.on('connection', (socket) => {
   handleConnection(socket).catch((error) => {

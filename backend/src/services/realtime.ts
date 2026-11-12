@@ -8,8 +8,10 @@ export function setRealtimeServer(server: Server) {
   realtimeServer = server
 }
 
-// Frequent location pings are pushed live but are not written to the admin notification feed.
-const transientRealtimeEvents = new Set(['booking.location.updated'])
+// Location pings are pushed live but not written to the admin feed. The lifecycle events repeat what booking.updated and notification.created already record.
+const transientRealtimeEvents = new Set(['booking.location.updated', 'booking.vendor_accepted', 'booking.delivered'])
+
+export type BookingLifecyclePayload = { bookingId: string; vendorId?: string; reference?: string; deliveredAt?: string }
 
 export function emitRealtime(event: string, payload: unknown = {}, customerId?: string) {
   if (event === 'booking.updated') emitBookingUpdated(payload, customerId)
@@ -38,9 +40,16 @@ function emitBookingUpdated(payload: unknown, customerId?: string) {
     logger.error('realtime.booking_updated_dropped', { reason: 'bookingId missing' })
     return
   }
+  realtimeServer?.to(bookingRooms(bookingId, customerId)).emit('booking.updated', payload)
+}
+// Lifecycle events use the same rooms as booking.updated, so a socket in several of them receives one copy.
+export function emitBookingLifecycleEvent(event: 'booking.vendor_accepted' | 'booking.delivered', payload: BookingLifecyclePayload, customerId?: string) {
+  realtimeServer?.to(bookingRooms(payload.bookingId, customerId)).emit(event, payload)
+}
+function bookingRooms(bookingId: string, customerId?: string) {
   const rooms = [`booking:${bookingId}`, 'admins']
   if (customerId) rooms.push(`customer:${customerId}`)
-  realtimeServer?.to(rooms).emit('booking.updated', payload)
+  return rooms
 }
 function persistUnlessTransient(event: string, payload: unknown) {
   if (!transientRealtimeEvents.has(event)) void persistAdminEvent(event, payload)
