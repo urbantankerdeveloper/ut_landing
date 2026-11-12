@@ -4,6 +4,8 @@ import { useRealtimeStore } from '../stores/realtimeStore'
 
 export type RealtimeMessage = { type: string; payload: unknown }
 type RealtimeListener = (message: RealtimeMessage) => void
+// Emitted locally (never by the server) after the socket reconnects. payload.since is when the connection dropped.
+export const SOCKET_RECONNECTED = 'socket.reconnected'
 const realtimeListeners = new Set<RealtimeListener>()
 const sharedBookingConsumers = new Map<string, number>()
 let sharedInvalidationClient: VendorRealtimeClient | null = null
@@ -48,6 +50,7 @@ export class VendorRealtimeClient {
   private readonly onMessage: (message: RealtimeMessage) => void
   private readonly bookingIds = new Set<string>()
   private readonly handleOnline = () => this.connect()
+  private disconnectedAt: number | null = null
   constructor(url: string, onMessage: (message: RealtimeMessage) => void) { this.url = url; this.onMessage = onMessage }
   connect() {
     if (this.socket) return
@@ -68,8 +71,15 @@ export class VendorRealtimeClient {
     socket.on('connect', () => {
       useRealtimeStore.getState().setConnected(true)
       this.bookingIds.forEach((bookingId) => socket.emit('booking:join', bookingId))
+      if (this.disconnectedAt !== null) {
+        this.onMessage({ type: SOCKET_RECONNECTED, payload: { since: this.disconnectedAt } })
+        this.disconnectedAt = null
+      }
     })
-    socket.on('disconnect', () => useRealtimeStore.getState().setConnected(false))
+    socket.on('disconnect', () => {
+      this.disconnectedAt = Date.now()
+      useRealtimeStore.getState().setConnected(false)
+    })
     socket.on('connect_error', () => {
       if (!useAuthStore.getState().accessToken) this.disconnect()
     })

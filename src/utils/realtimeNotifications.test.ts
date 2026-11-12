@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { realtimeContent } from '../content/realtime'
-import { getRealtimeNotice } from './realtimeNotifications'
+import { getRealtimeNotice, unreadNotificationIdsSince } from './realtimeNotifications'
 
 describe('getRealtimeNotice', () => {
   const acceptedBooking = {
@@ -41,5 +41,22 @@ describe('getRealtimeNotice', () => {
     expect(getRealtimeNotice('customer', { type: 'notification.created', payload: { bookingId: 'booking-123' } })).toBeNull()
     expect(getRealtimeNotice('customer', { type: 'booking.updated', payload: { status: 'accepted' } })).toBeNull()
     expect(getRealtimeNotice('customer', { type: 'booking.updated', payload: { bookingId: 'booking-123', status: 'unknown_status' } })).toBeNull()
+  })
+})
+
+describe('unreadNotificationIdsSince', () => {
+  const since = Date.parse('2030-01-01T10:00:00Z')
+
+  it('keeps only unread rows created after the connection dropped', () => {
+    const rows = [
+      { id: 'missed', created_at: '2030-01-01T10:05:00Z', read_at: null },
+      { id: 'already-read', created_at: '2030-01-01T10:05:00Z', read_at: '2030-01-01T10:06:00Z' },
+      { id: 'before-drop', created_at: '2030-01-01T09:59:00Z', read_at: null },
+    ]
+    expect(unreadNotificationIdsSince(rows, since)).toEqual(['missed'])
+  })
+
+  it('ignores rows with an unparseable timestamp', () => {
+    expect(unreadNotificationIdsSince([{ id: 'bad', created_at: 'not-a-date', read_at: null }], since)).toEqual([])
   })
 })

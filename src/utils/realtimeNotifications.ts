@@ -51,6 +51,11 @@ function vendorNotice(type: string, bookingId: string, reference: string, payloa
   return null
 }
 
+// Returns the ids of notifications that are still unread and were created after [since] (epoch ms).
+export function unreadNotificationIdsSince(rows: { id: string; created_at: string; read_at?: string | null }[], since: number): string[] {
+  return rows.filter((row) => !row.read_at && Date.parse(row.created_at) > since).map((row) => row.id)
+}
+
 // Returns the notice [role] should see for an event, or null when the event is not relevant to that role.
 export function getRealtimeNotice(role: WorkspaceRole | null, message: RealtimeMessage): RealtimeNotice | null {
   const payload = readPayload(message.payload)

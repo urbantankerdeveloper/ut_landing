@@ -32,4 +32,11 @@ describe('useRealtimeNotificationStore', () => {
     useRealtimeNotificationStore.getState().clear()
     expect(useRealtimeNotificationStore.getState().unread).toBe(0)
   })
+
+  it('counts missed notifications once per id across repeated reconciliations', () => {
+    const { recordMissed } = useRealtimeNotificationStore.getState()
+    recordMissed(['n1', 'n2'])
+    recordMissed(['n2', 'n3'])
+    expect(useRealtimeNotificationStore.getState().unread).toBe(3)
+  })
 })
