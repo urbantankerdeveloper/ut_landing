@@ -26,7 +26,6 @@ export const customerContent = {
     eyebrow: 'MY BOOKINGS',
     title: 'Every request, in one clear record.',
     bookAgain: 'Book again',
-    acceptedRealtimeUpdate: 'Your vendor accepted the booking. Booking details are updating automatically.',
     bookingOptionsOpened: (id: string) => `Booking ${id} options opened.`,
     cancelConfirm: 'Cancel this booking?',
     cancelled: 'Booking cancelled.',

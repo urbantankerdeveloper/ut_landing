@@ -4,8 +4,10 @@ import { ApiError } from '../api/client'
 import { ToastHost } from '../components/ToastHost'
 import { subscribeToRealtime } from '../services/realtime'
 import { useAuthStore } from '../stores/authStore'
-import { describeError, notifyError, notifyInfo, wasReported } from '../utils/notify'
-import { getRealtimeToastMessage } from '../utils/realtimeNotifications'
+import { useRealtimeNotificationStore } from '../stores/realtimeNotificationStore'
+import { describeError, notifyError, notifyInfo, notifySuccess, wasReported } from '../utils/notify'
+import { playNewOrderAlert } from '../utils/newOrderAlert'
+import { getRealtimeNotice } from '../utils/realtimeNotifications'
 
 // Network and timeout failures are retried inside apiFetch for GETs, so the query layer only retries server errors.
 const retryTransientFailures = (failureCount: number, error: Error) => failureCount < 2 && error instanceof ApiError && error.status >= 500
@@ -35,22 +37,26 @@ function useGlobalErrorToasts() {
   }, [])
 }
 
-function useGlobalRealtimeToasts() {
+function useGlobalRealtimeNotices() {
   const accessToken = useAuthStore((state) => state.accessToken)
   const role = useAuthStore((state) => state.user?.role ?? null)
   const hasHydrated = useAuthStore((state) => state.hasHydrated)
   useEffect(() => {
-    if (!hasHydrated || !accessToken || role !== 'customer') return
+    if (!hasHydrated || !accessToken || (role !== 'customer' && role !== 'vendor')) return
     return subscribeToRealtime(realtimeUrl, (message) => {
-      const toastMessage = getRealtimeToastMessage(role, message)
-      if (toastMessage) notifyInfo(toastMessage)
+      const notice = getRealtimeNotice(role, message)
+      if (!notice) return
+      useRealtimeNotificationStore.getState().recordFact(notice.key)
+      if (notice.tone === 'success') notifySuccess(notice.message)
+      else notifyInfo(notice.message)
+      if (notice.newOrder) playNewOrderAlert()
     })
   }, [accessToken, hasHydrated, role])
 }
 
 function ToastLayer() {
   useGlobalErrorToasts()
-  useGlobalRealtimeToasts()
+  useGlobalRealtimeNotices()
   return <ToastHost />
 }
 

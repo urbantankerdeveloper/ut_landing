@@ -47,9 +47,16 @@ export class VendorRealtimeClient {
   private readonly url: string
   private readonly onMessage: (message: RealtimeMessage) => void
   private readonly bookingIds = new Set<string>()
+  private readonly handleOnline = () => this.connect()
   constructor(url: string, onMessage: (message: RealtimeMessage) => void) { this.url = url; this.onMessage = onMessage }
   connect() {
-    if (this.socket || !navigator.onLine) return
+    if (this.socket) return
+    // Starting offline must not leave the client dead: wait for the browser to come back online.
+    if (!navigator.onLine) {
+      window.addEventListener('online', this.handleOnline, { once: true })
+      return
+    }
+    window.removeEventListener('online', this.handleOnline)
     const socket = io(this.url, {
       auth: (callback) => callback({ token: useAuthStore.getState().accessToken }),
       reconnection: true,
@@ -70,5 +77,10 @@ export class VendorRealtimeClient {
   joinBooking(bookingId: string) { this.bookingIds.add(bookingId); this.socket?.emit('booking:join', bookingId) }
   leaveBooking(bookingId: string) { this.bookingIds.delete(bookingId); this.socket?.emit('booking:leave', bookingId) }
   joinVendor(vendorId: string) { this.socket?.emit('vendor:join', vendorId) }
-  disconnect() { this.socket?.disconnect(); this.socket = null; useRealtimeStore.getState().setConnected(false) }
+  disconnect() {
+    window.removeEventListener('online', this.handleOnline)
+    this.socket?.disconnect()
+    this.socket = null
+    useRealtimeStore.getState().setConnected(false)
+  }
 }

@@ -1,27 +1,45 @@
 import { describe, expect, it } from 'vitest'
-import { customerContent } from '../content/customer'
-import { getRealtimeToastMessage } from './realtimeNotifications'
+import { realtimeContent } from '../content/realtime'
+import { getRealtimeNotice } from './realtimeNotifications'
 
-describe('getRealtimeToastMessage', () => {
+describe('getRealtimeNotice', () => {
   const acceptedBooking = {
     type: 'booking.updated',
     payload: { bookingId: 'booking-123', status: 'accepted' },
   }
 
-  it('notifies a customer when a vendor accepts a booking', () => {
-    expect(getRealtimeToastMessage('customer', acceptedBooking)).toBe(
-      customerContent.bookings.acceptedRealtimeUpdate,
-    )
+  it('tells a customer when a vendor accepts, using the same key for the generic and specific events', () => {
+    const generic = getRealtimeNotice('customer', acceptedBooking)
+    const specific = getRealtimeNotice('customer', { type: 'booking.vendor_accepted', payload: { bookingId: 'booking-123', vendorId: 'v1', reference: 'R1' } })
+    expect(generic?.message).toBe(realtimeContent.customer.accepted)
+    expect(specific).toEqual(generic)
   })
 
-  it('does not show customer acceptance messages to other roles', () => {
-    expect(getRealtimeToastMessage('vendor', acceptedBooking)).toBeNull()
-    expect(getRealtimeToastMessage('admin', acceptedBooking)).toBeNull()
+  it('marks delivery as a success notice', () => {
+    expect(getRealtimeNotice('customer', { type: 'booking.delivered', payload: { bookingId: 'booking-123' } })).toMatchObject({
+      message: realtimeContent.customer.delivered,
+      tone: 'success',
+    })
   })
 
-  it('ignores other events and incomplete booking updates', () => {
-    expect(getRealtimeToastMessage('customer', { ...acceptedBooking, type: 'notification.created' })).toBeNull()
-    expect(getRealtimeToastMessage('customer', { type: 'booking.updated', payload: { status: 'accepted' } })).toBeNull()
-    expect(getRealtimeToastMessage('customer', { type: 'booking.updated', payload: { bookingId: 'booking-123', status: 'en_route' } })).toBeNull()
+  it('flags a new vendor order as a new-order alert with its reference', () => {
+    expect(getRealtimeNotice('vendor', { type: 'vendor.order.created', payload: { bookingId: 'booking-9', reference: 'UT-9' } })).toEqual({
+      key: 'offer:booking-9',
+      message: realtimeContent.vendor.newOrder('UT-9'),
+      tone: 'info',
+      newOrder: true,
+    })
+  })
+
+  it('prefers the server message when another vendor takes an order', () => {
+    expect(getRealtimeNotice('vendor', { type: 'vendor.order.taken', payload: { bookingId: 'booking-9', reference: 'UT-9', message: 'Taken elsewhere' } })?.message).toBe('Taken elsewhere')
+  })
+
+  it('does not send notices to other roles or for unrelated or incomplete events', () => {
+    expect(getRealtimeNotice('admin', acceptedBooking)).toBeNull()
+    expect(getRealtimeNotice('vendor', acceptedBooking)).toBeNull()
+    expect(getRealtimeNotice('customer', { type: 'notification.created', payload: { bookingId: 'booking-123' } })).toBeNull()
+    expect(getRealtimeNotice('customer', { type: 'booking.updated', payload: { status: 'accepted' } })).toBeNull()
+    expect(getRealtimeNotice('customer', { type: 'booking.updated', payload: { bookingId: 'booking-123', status: 'unknown_status' } })).toBeNull()
   })
 })

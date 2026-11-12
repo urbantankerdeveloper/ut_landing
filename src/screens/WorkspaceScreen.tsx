@@ -11,6 +11,8 @@ import { authApi } from '../api/auth'
 import { clearOfflineQueue } from '../services/offlineMutationQueue'
 import { BOOKING_DRAFT_KEY, REPEAT_BOOKING_KEY } from '../constants/bookingDraft'
 import { workspaceContent as w } from '../content/workspace'
+import { realtimeContent } from '../content/realtime'
+import { useRealtimeNotificationStore } from '../stores/realtimeNotificationStore'
 
 const WorkspaceContent = lazyWithRetry(() => import('./WorkspaceContent').then(({ WorkspaceContent: content }) => ({ default: content })))
 
@@ -48,13 +50,14 @@ export default function WorkspaceScreen() {
   const queryClient = useQueryClient()
   const data = roleData[activeRole]
   const [activeItem, setActiveItem] = useState('overview')
+  const unreadRealtime = useRealtimeNotificationStore((state) => state.unread)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [expandedAdminGroups, setExpandedAdminGroups] = useState<Set<string>>(() => new Set())
   const [notices, setNotices] = useState<Array<{ id: number; message: string }>>([])
   const displayName = user?.name ?? (activeRole === 'admin' ? w.shell.displayName.admin : activeRole === 'dispatcher' ? w.shell.displayName.dispatcher : activeRole === 'vendor' ? w.shell.displayName.vendor : w.shell.displayName.customer)
   const navigationGroups = activeRole === 'admin' ? adminNavGroups : activeRole === 'vendor' ? vendorNavGroups : dispatcherNavGroups
-  const selectItem = useCallback((key: string) => { setActiveItem(key); const group = navigationGroups.find((item) => item.keys.includes(key)); if (group) setExpandedAdminGroups(new Set([group.label])); setNotices([]); setSidebarOpen(false) }, [navigationGroups])
+  const selectItem = useCallback((key: string) => { setActiveItem(key); if (key === 'notifications') useRealtimeNotificationStore.getState().clear(); const group = navigationGroups.find((item) => item.keys.includes(key)); if (group) setExpandedAdminGroups(new Set([group.label])); setNotices([]); setSidebarOpen(false) }, [navigationGroups])
   const addNotice = useCallback((message: string) => { const id = Date.now() + Math.random(); setNotices((current) => [...current.slice(-4), { id, message }]); window.setTimeout(() => setNotices((current) => current.filter((notice) => notice.id !== id)), 5000) }, [])
   const showWorkspaceOverview = useCallback(() => selectItem('overview'), [selectItem])
   const navigateContent = useCallback((screen: 'booking' | 'bookings' | 'offers' | 'home') => {
@@ -70,7 +73,7 @@ export default function WorkspaceScreen() {
     signOut()
     navigate('home')
   }
-  const renderNavItem = ({ label, icon: Icon, key }: NavItem) => <button className={activeItem === key ? 'is-active' : ''} aria-current={activeItem === key ? 'page' : undefined} key={key} onClick={() => selectItem(key)} title={sidebarCollapsed ? label : undefined}><Icon size={16} /><span>{label}</span></button>
+  const renderNavItem = ({ label, icon: Icon, key }: NavItem) => <button className={activeItem === key ? 'is-active' : ''} aria-current={activeItem === key ? 'page' : undefined} key={key} onClick={() => selectItem(key)} title={sidebarCollapsed ? label : undefined}><Icon size={16} /><span>{label}</span>{key === 'notifications' && unreadRealtime > 0 && <span className="nav-unread-badge" aria-label={realtimeContent.unreadLabel(unreadRealtime)}>{unreadRealtime}</span>}</button>
   const renderNavGroups = (groups: NavGroup[]) => <>
     {data.nav.filter((item) => item.key === 'overview').map(renderNavItem)}
     {groups.map((group) => {
