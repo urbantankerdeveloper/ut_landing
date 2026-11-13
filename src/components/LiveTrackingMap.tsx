@@ -1,39 +1,56 @@
-import { useEffect, useMemo, useState } from 'react'
-import { CircleMarker, MapContainer, Polyline, TileLayer, useMap } from 'react-leaflet'
-import type { LatLngExpression, LatLngLiteral } from 'leaflet'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { LiveFleetMap } from './LiveFleetMap'
 import { subscribeToRealtime } from '../services/realtime'
 import type { TrackingSnapshot } from '../api/customer'
-import 'leaflet/dist/leaflet.css'
+import type { MapPoint } from '../utils/mapCoordinates'
 import { locationContent } from '../content/location'
 
 type Props = { bookingId: string; snapshot: TrackingSnapshot }
-type LocationPoint = { latitude: number; longitude: number }
-
-function Recenter({ point }: { point: LatLngLiteral }) {
-  const map = useMap()
-  useEffect(() => { map.flyTo(point, Math.max(map.getZoom(), 15), { duration: 0.7 }) }, [map, point])
-  return null
-}
 
 export function LiveTrackingMap({ bookingId, snapshot }: Props) {
-  const initial = snapshot.latitude !== undefined && snapshot.longitude !== undefined ? { latitude: snapshot.latitude, longitude: snapshot.longitude } : null
-  const [fleetPoint, setFleetPoint] = useState<LocationPoint | null>(initial)
-  const [trail, setTrail] = useState<LocationPoint[]>(initial ? [initial] : [])
-  const customerPoint = snapshot.customerLatitude !== undefined && snapshot.customerLongitude !== undefined ? { latitude: snapshot.customerLatitude, longitude: snapshot.customerLongitude } : null
+  const snapshotUpdatedAt = snapshot.recorded_at ?? snapshot.recordedAt ?? null
+  const snapshotKey = `${snapshotUpdatedAt ?? ''}:${snapshot.latitude ?? ''}:${snapshot.longitude ?? ''}`
+  const snapshotKeyRef = useRef(snapshotKey)
+  const [socketFix, setSocketFix] = useState<{ point: MapPoint; snapshotKey: string; timestamp: string } | null>(null)
+  const [socketTrail, setSocketTrail] = useState<MapPoint[]>([])
+  const snapshotPointValue = snapshotPoint(snapshot.latitude, snapshot.longitude)
+  const currentSocketFix = socketFix?.snapshotKey === snapshotKey ? socketFix : null
+  const fleetPoint = currentSocketFix?.point ?? snapshotPointValue
+  const lastUpdated = currentSocketFix?.timestamp ?? snapshotUpdatedAt
+  const trail = useMemo(() => fleetPoint ? appendPoint(socketTrail, fleetPoint) : socketTrail, [socketTrail, fleetPoint])
+  const customerPoint = snapshotPoint(snapshot.customerLatitude, snapshot.customerLongitude)
+
+  useEffect(() => { snapshotKeyRef.current = snapshotKey }, [snapshotKey])
+
   useEffect(() => {
     const realtimeUrl = import.meta.env.VITE_REALTIME_URL ?? (import.meta.env.PROD ? window.location.origin : 'http://localhost:8080')
     return subscribeToRealtime(realtimeUrl, (message) => {
       if (message.type !== 'booking.location.updated' || !message.payload || typeof message.payload !== 'object') return
-      const payload = message.payload as { bookingId?: string; latitude?: number; longitude?: number }
-      if (payload.bookingId !== bookingId || typeof payload.latitude !== 'number' || typeof payload.longitude !== 'number') return
-      const point = { latitude: payload.latitude, longitude: payload.longitude }
-      setFleetPoint(point)
-      setTrail((current) => [...current.slice(-19), point])
+      const payload = message.payload as { bookingId?: string; latitude?: number; longitude?: number; recordedAt?: string; recorded_at?: string }
+      if (payload.bookingId !== bookingId) return
+      const point = snapshotPoint(payload.latitude, payload.longitude)
+      if (!point) return
+      setSocketTrail((current) => appendPoint(current, point))
+      const eventTimestamp = payload.recordedAt ?? payload.recorded_at
+      const timestamp = typeof eventTimestamp === 'string' && Number.isFinite(Date.parse(eventTimestamp)) ? eventTimestamp : new Date().toISOString()
+      setSocketFix({ point, snapshotKey: snapshotKeyRef.current, timestamp })
     }, bookingId)
   }, [bookingId])
-  const fleet = useMemo(() => ({ lat: fleetPoint?.latitude ?? 0, lng: fleetPoint?.longitude ?? 0 }), [fleetPoint])
-  const line = useMemo<LatLngExpression[]>(() => trail.map((point) => [point.latitude, point.longitude]), [trail])
-  if (!fleetPoint) return <div className="tracking-map-empty">{locationContent.map.waiting}</div>
-  const customer = customerPoint ? { lat: customerPoint.latitude, lng: customerPoint.longitude } : null
-  return <div className="booking-location-map tracking-live-map"><MapContainer center={fleet} zoom={15} scrollWheelZoom className="leaflet-map"><TileLayer attribution={locationContent.map.attribution} url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" /><Recenter point={fleet} /><CircleMarker center={fleet} radius={10} pathOptions={{ color: '#d35400', fillColor: '#f28b30', fillOpacity: 0.9 }} /><Polyline positions={line} pathOptions={{ color: '#f28b30', weight: 4, opacity: 0.7 }} />{customer && <CircleMarker center={customer} radius={8} pathOptions={{ color: '#0d7770', fillColor: '#13a69a', fillOpacity: 0.85 }} />}</MapContainer><div className="tracking-map-legend"><span><i className="fleet-dot" /> {locationContent.map.fleet}</span>{customer && <span><i className="customer-dot" /> {locationContent.map.deliveryPoint}</span>}</div></div>
+
+  if (!fleetPoint && !customerPoint) return <div className="tracking-map-empty">{locationContent.map.waiting}</div>
+  return <div className="booking-location-map tracking-live-map tracking-live-map--compact">
+    <LiveFleetMap vehicle={fleetPoint} destination={customerPoint} trail={trail} lastUpdated={lastUpdated} />
+    <div className="tracking-map-legend"><span><i className="fleet-dot" /> {locationContent.map.fleet}</span>{customerPoint && <span><i className="customer-dot" /> {locationContent.map.deliveryPoint}</span>}</div>
+  </div>
+}
+
+function snapshotPoint(latitude: number | undefined, longitude: number | undefined): MapPoint | null {
+  return typeof latitude === 'number' && Number.isFinite(latitude) && typeof longitude === 'number' && Number.isFinite(longitude)
+    ? { lat: latitude, lng: longitude }
+    : null
+}
+
+function appendPoint(current: MapPoint[], point: MapPoint) {
+  const previous = current[current.length - 1]
+  return previous?.lat === point.lat && previous.lng === point.lng ? current : [...current.slice(-19), point]
 }

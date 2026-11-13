@@ -5,13 +5,14 @@ import { customerApi, type PublicTracking } from '../api/customer'
 import { LiveTrackingMap } from '../components/PublicTrackingMap'
 import { trackingContent as c } from '../content/tracking'
 import { appTrackingLink, isMobileUserAgent } from '../utils/trackingLink'
+import { PUBLIC_TRACKING_POLL_INTERVAL_MS } from '../utils/trackingCadence'
 
 const statusLabels: Record<string, string> = c.status.labels
 const statuses = ['pending_vendor', 'vendor_assigned', 'accepted', 'en_route', 'arrived', 'delivered']
 
 export default function PublicTrackingScreen({ token }: { token: string }) {
   const [inBrowser, setInBrowser] = useState(() => !isMobileUserAgent(navigator.userAgent))
-  const query = useQuery({ queryKey: ['public-tracking', token], queryFn: () => customerApi.publicTracking(token), refetchInterval: 30_000, enabled: inBrowser })
+  const query = useQuery({ queryKey: ['public-tracking', token], queryFn: () => customerApi.publicTracking(token), refetchInterval: PUBLIC_TRACKING_POLL_INTERVAL_MS, enabled: inBrowser })
   if (!inBrowser) return <TrackingChooser token={token} onBrowser={() => setInBrowser(true)} />
   if (query.isLoading) return <TrackingShell><p role="status">{c.loading}</p></TrackingShell>
   if (query.isError || !query.data) return <TrackingShell><h1>{c.unavailable.title}</h1><p>{c.unavailable.body}</p></TrackingShell>
@@ -35,7 +36,7 @@ function TrackingDetails({ tracking, onRefresh, refreshing }: { tracking: Public
     <section className="reference-copy-card public-tracking-card">
       <div className="view-panel-heading"><div><p className="eyebrow">{c.details.deliveryStatusEyebrow}</p><h2>{statusLabels[tracking.status] ?? tracking.status}</h2></div><button className="button button-quiet" onClick={onRefresh} disabled={refreshing}><RefreshCw size={14} /> {c.details.refresh}</button></div>
       <div className="tracking-timeline">{statuses.map((status, index) => <span className={index <= currentIndex ? 'is-complete' : ''} key={status}>{statusLabels[status]}</span>)}</div>
-      {tracking.lastLocation ? <LiveTrackingMap latitude={tracking.lastLocation.latitude} longitude={tracking.lastLocation.longitude} /> : <div className="tracking-map-empty"><MapPin size={22} /><b>{c.details.waitingTitle}</b><p>{c.details.waitingBody}</p></div>}
+      {tracking.lastLocation ? <LiveTrackingMap latitude={tracking.lastLocation.latitude} longitude={tracking.lastLocation.longitude} lastUpdated={tracking.lastLocation.recordedAt} /> : <div className="tracking-map-empty"><MapPin size={22} /><b>{c.details.waitingTitle}</b><p>{c.details.waitingBody}</p></div>}
       <div className="tracking-details"><span><b>{c.details.vehicleLabel}</b>{tracking.vehicle ?? c.details.vehicleFallback}</span><span><b>{c.details.driverLabel}</b>{tracking.driver ?? c.details.driverFallback}</span><span><b>{c.details.expectedLabel}</b>{tracking.expectedDelivery ? new Date(tracking.expectedDelivery).toLocaleString() : c.details.expectedFallback}</span></div>
     </section>
     <section className="reference-copy-card public-tracking-card"><p className="eyebrow">{c.timeline.eyebrow}</p><h2>{c.timeline.heading}</h2><div className="public-tracking-events">{tracking.events.map((event) => <article key={`${event.status}-${event.createdAt}`}><Truck size={16} /><div><b>{statusLabels[event.status] ?? event.status}</b><p>{event.note ?? c.timeline.eventFallbackNote}</p></div><time>{new Date(event.createdAt).toLocaleString()}</time></article>)}</div></section>

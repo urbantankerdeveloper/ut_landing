@@ -4,6 +4,7 @@ import { customerDemoDataEnabled } from '../constants/demo'
 import { useRealtimeInvalidation } from './useRealtimeInvalidation'
 import { useRealtimeConnected } from '../stores/realtimeStore'
 import { loadRazorpayWidget } from '../utils/razorpayCheckout'
+import { authenticatedTrackingRefetchInterval } from '../utils/trackingCadence'
 
 const customerQueryOptions = { enabled: !customerDemoDataEnabled, staleTime: 60_000 }
 export const customerQueryKeys = { bookings: ['customer', 'bookings'], addresses: ['customer', 'addresses'], subscriptions: ['customer', 'subscriptions'], invoices: ['customer', 'invoices'], support: ['customer', 'support'], profile: ['customer', 'profile'], wallet: ['customer', 'wallet'], contracts: ['customer', 'contracts'], offers: ['customer', 'offers'], membershipPlans: ['customer', 'membership-plans'], membership: ['customer', 'membership'], notifications: ['customer', 'notifications'], paymentReceipt: (bookingId: string) => ['customer', 'payments', bookingId] as const, tracking: (orderId: string) => ['customer', 'tracking', orderId] } as const
@@ -21,7 +22,7 @@ export function useCustomerInvoices() { const query = useQuery({ queryKey: custo
 export function useCustomerTracking(orderId: string | null) {
   const realtimeConnected = useRealtimeConnected()
   useRealtimeInvalidation(['customer', 'tracking'])
-  return useQuery({ queryKey: orderId ? customerQueryKeys.tracking(orderId) : ['customer', 'tracking', 'empty'], queryFn: () => customerApi.tracking(orderId as string), enabled: Boolean(orderId) && !customerDemoDataEnabled, staleTime: 10_000, refetchOnWindowFocus: true, refetchInterval: realtimeConnected ? false : 60_000, refetchIntervalInBackground: false })
+  return useQuery({ queryKey: orderId ? customerQueryKeys.tracking(orderId) : ['customer', 'tracking', 'empty'], queryFn: () => customerApi.tracking(orderId as string), enabled: Boolean(orderId) && !customerDemoDataEnabled, staleTime: 10_000, refetchOnWindowFocus: true, refetchInterval: authenticatedTrackingRefetchInterval(realtimeConnected), refetchIntervalInBackground: false })
 }
 export function useCustomerDeliveryOtp() { return useMutation({ mutationFn: (orderId: string) => customerApi.requestDeliveryOtp(orderId) }) }
 export function useCustomerSupportRequests() { return useQuery({ queryKey: customerQueryKeys.support, queryFn: customerApi.support, ...customerQueryOptions }) }
