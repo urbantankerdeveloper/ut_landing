@@ -46,8 +46,6 @@ jobs:
         run: npm audit --omit=dev --audit-level=high --prefix backend
 
       - name: Build frontend (Hostinger) and backend (Render)
-        env:
-          SUPABASE_REF: ${{ vars.SUPABASE_REF }}
         run: npm run build:all
 
   secret-scan:

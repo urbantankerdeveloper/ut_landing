@@ -4,8 +4,7 @@
 # Backend:  Render deploys the backend from its deploy hook (the API is not built here).
 #
 # One-time setup in GitHub (Settings):
-#   Variables (Actions):   SUPABASE_REF             Supabase project ref, e.g. qlotsoputalbqkbkezlt
-#                          HOSTINGER_FTP_PROTOCOL   optional: ftps (default) or ftp, as shown in hPanel
+#   Variables (Actions):   HOSTINGER_FTP_PROTOCOL   optional: ftps (default) or ftp, as shown in hPanel
 #   Secrets (Actions):     VITE_GOOGLE_MAPS_API_KEY Web Maps JavaScript API key (without it the site falls back to OpenStreetMap)
 #                          HOSTINGER_FTP_SERVER     FTP host from hPanel → Files → FTP Accounts
 #                          HOSTINGER_FTP_USERNAME   FTP username
@@ -75,7 +74,6 @@ jobs:
       - name: Build frontend
         if: inputs.deploy_frontend
         env:
-          SUPABASE_REF: ${{ vars.SUPABASE_REF }}
           VITE_GOOGLE_MAPS_API_KEY: ${{ secrets.VITE_GOOGLE_MAPS_API_KEY }}
         run: npm run build
 
