@@ -75,14 +75,20 @@ export default function PartnerApplicationScreen() {
       const applicationId = crypto.randomUUID()
       const documents: PartnerDocument[] = []
       for (const file of files) {
-        const signed = await fileUpload.upload(file, 'partner-applications', applicationId)
-        documents.push({ path: signed.path, type: file.type || 'application/octet-stream' })
+        if (otpEnabled) {
+          if (!phoneChallengeId) throw new Error(p.messages.otpVerifyFailed)
+          documents.push(await partnerApi.uploadDocument(file, applicationId, phoneChallengeId, phone))
+        } else {
+          const signed = await fileUpload.upload(file, 'partner-applications', applicationId)
+          documents.push({ path: signed.path, type: file.type || 'application/octet-stream' })
+        }
       }
       const result = await partnerApi.apply({
         businessName: String(data.get('name') ?? ''),
         partnerType: String(data.get('partnerType') ?? ''),
         phone: otpEnabled ? phone : String(data.get('phone') ?? ''),
         phoneChallengeId: otpEnabled ? phoneChallengeId ?? undefined : undefined,
+        uploadBatchId: otpEnabled && documents.length > 0 ? applicationId : undefined,
         whatsapp: String(data.get('whatsapp') ?? ''),
         email: String(data.get('email') ?? ''),
         zone: String(data.get('zone') ?? ''),

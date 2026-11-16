@@ -87,7 +87,7 @@ tests and any required end-to-end checks.
 | `admin_availability_toggle_enabled` | `true` | `true` | Expose independent online/active controls for vendors, vehicles, and drivers; existing web vendor online control remains available when off. |
 | `admin_dashboard_v2_enabled` | `true` | `true` | Show the consolidated dashboard while retaining the existing dashboard path. |
 | `area_availability_enabled` | `true` | `true` | Show availability grouped by service area. |
-| `partner_application_otp_enabled` | `true` | `true` | Require phone OTP verification before collecting/submitting the partner application. |
+| `partner_application_otp_enabled` | `true` | `true` | Require phone OTP before collecting/submitting partner applications and allow verified applicants to upload documents without login. |
 | `address_geocoding_enabled` | `false` | `true` after location validation | Resolve selected/current coordinates to a usable address label. |
 | `invoice_generation_enabled` | `false` | `false` until trigger and invoice contents are agreed and verified | Generate and reconcile invoice records. |
 | `wallet_enabled` | `false` | `false` | Keep wallet code/routes available but hide wallet UI and reject wallet operations. |
@@ -142,3 +142,14 @@ merges case-only variants; production values should be standardized before
 relying on area totals for dispatch decisions. Counts include only approved
 resources explicitly marked online/active. The schema has no driver online
 field, so the dashboard labels drivers as active rather than online.
+
+`partner_application_otp_enabled` uses the existing guest challenge mechanism
+through `POST /auth/partner/request-otp` and `POST /auth/partner/verify-otp`;
+the backend requires a fresh, matching challenge in `POST /partner/applications`
+and `POST /partner/documents/signed-url`.
+The React `PartnerApplicationScreen` checks the flag before exposing the
+application fields and uses the public upload route only after phone
+verification. Admin downloads are served by the admin-only
+`GET /admin/partner-applications/:id/documents` endpoint and the Flutter
+Partners tab. Turning the flag off restores the prior application form and
+disables the partner-specific anonymous upload route.
