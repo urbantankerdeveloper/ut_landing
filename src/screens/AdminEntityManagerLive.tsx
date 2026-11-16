@@ -48,5 +48,205 @@ export function AdminEntityManagerLive({ entity, onNotice }: Props) {
   function setFleetActive(row: (typeof rows)[number]) { if (!isVerification(row.status)) { onNotice(live.notices.statusFailed); return } const options = { onSuccess: () => { void query.refetch(); onNotice(live.notices.statusUpdated) }, onError: () => onNotice(live.notices.statusFailed) }; if (entity === 'drivers') updateDriver.mutate({ id: row.id, verification: row.status, isActive: !row.active }, options); if (entity === 'fleet') updateVehicle.mutate({ id: row.id, verification: row.status, isActive: !row.active }, options) }
   function setVendorOnline(row: (typeof rows)[number]) { setPendingVendorId(row.id); updateVendor.mutate({ id: row.id, payload: { isOnline: !row.active } }, { onSuccess: () => { setPendingVendorId(null); void query.refetch(); onNotice(row.active ? live.notices.vendorInactive : live.notices.vendorActive) }, onError: () => { setPendingVendorId(null); onNotice(row.status === 'approved' ? live.notices.vendorAvailabilityFailed : live.notices.approveFirst) } }) }
   function edit(row: (typeof rows)[number]) { const name = window.prompt(live.editPrompt, row.name); if (!name || name === row.name) return; const update = entity === 'vendors' ? adminApi.updateVendor(row.id, { businessName: name }) : entity === 'customers' ? adminApi.updateCustomer(row.id, { name }) : entity === 'drivers' ? adminApi.updateDriver(row.id, { name }) : adminApi.updateVehicle(row.id, { registrationNumber: name }); void update.then(() => { void query.refetch(); onNotice(live.notices.recordUpdated) }).catch(() => onNotice(live.notices.recordUpdateFailed)) }
-  return <section className="admin-view-panel admin-entity-manager"><div className="view-panel-heading"><div><p className="eyebrow">{entity === 'fleet' ? live.tankerFleet : entity.toUpperCase()}</p><h2>{live.heading(entity === 'fleet' ? 'fleet' : entity)}</h2></div><button className="button button-primary" onClick={() => setFormOpen(true)}><Plus size={15} /> {live.addRecord}</button></div><label className="admin-entity-search"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={live.search(entity)} aria-label={live.search(entity)} /></label><div className="admin-entity-list">{rows.map((row) => <article key={row.id}><span className="admin-record-icon"><Icon size={18} /></span><div className="admin-entity-copy"><b>{row.name}</b><p>{row.detail}</p></div><span className={`status-tag ${row.status === 'approved' || row.status === 'active' ? '' : 'pending'}`}>{row.status}{row.active === false && entity !== 'vendors' ? live.inactiveSuffix : ''}</span>{entity === 'vendors' && (row.setupRequired ? <><span className="status-tag pending">{live.notActive}</span><button className="entity-status-button" onClick={() => setSetupVendor({ id: row.id, name: row.name })}>{live.completeProfile}</button></> : <><span className={`status-tag ${row.active ? '' : 'pending'}`}>{row.active ? live.online : live.offline}</span><button className="entity-status-button" disabled={pendingVendorId === row.id || (!row.active && row.status !== 'approved')} onClick={() => setVendorOnline(row)}>{row.active ? live.setInactive : live.setActive}</button></>)}{(entity === 'drivers' || entity === 'fleet') && availabilityTogglesEnabled && <button className="entity-status-button" aria-label={`${row.active ? live.setInactive : live.setActive}: ${row.name}`} disabled={updateDriver.isPending || updateVehicle.isPending || (!row.active && row.status !== 'approved')} onClick={() => setFleetActive(row)}>{row.active ? live.setInactive : live.setActive}</button>}{entity !== 'customers' && !row.setupRequired && <button className="entity-status-button" onClick={() => setStatus(row)}><ShieldCheck size={14} /> {row.status === 'approved' ? live.suspend : live.approve}</button>}{!row.setupRequired && <>{entity === 'customers' && <AdminCustomerSelfie customerId={row.id} customerName={row.name} onNotice={onNotice} />}<button className="icon-action" aria-label={live.editRecord(row.name)} onClick={() => edit(row)}><Pencil size={15} /></button><button className="icon-action danger" aria-label={live.deleteRecord(row.name)} disabled={pendingDeleteId === row.id} onClick={() => { if (window.confirm(live.deleteConfirm(row.name))) { setPendingDeleteId(row.id); remove.mutate(row.id) } }}><Trash2 size={15} /></button></>}</article>)}{!rows.length && <div className="admin-empty-state">{live.emptyState}</div>}</div>{formOpen && <Modal title={live.addTitle(entity === 'fleet' ? live.vehicle : entity)} onClose={() => setFormOpen(false)}><form className="modal-form" onSubmit={(event) => { event.preventDefault(); const values = new FormData(event.currentTarget); const payload: Record<string, unknown> = entity === 'vendors' ? { email: String(values.get('email')), password: String(values.get('password')), name: String(values.get('name')), phone: String(values.get('phone')), businessName: String(values.get('businessName')), serviceZone: String(values.get('serviceZone')) } : entity === 'customers' ? { email: String(values.get('email')), password: String(values.get('password')), name: String(values.get('name')), phone: String(values.get('phone')) } : entity === 'drivers' ? { vendorId: String(values.get('vendorId')), name: String(values.get('name')), mobileE164: String(values.get('phone')), licenceNumber: String(values.get('licence')) } : { vendorId: String(values.get('vendorId')), registrationNumber: String(values.get('registration')), capacityLitres: Number(values.get('capacity')) }; create.mutate(payload) }}><label>{live.fields.nameOrRegistration}<input name={entity === 'fleet' ? 'registration' : 'name'} required /></label>{entity !== 'fleet' && <label>{live.fields.email}<input name="email" type="email" required /></label>}{entity !== 'fleet' && <label>{live.fields.phone}<input name="phone" required /></label>{entity === 'vendors' && <><label>{live.fields.password}<input name="password" type="password" minLength={8} required /></label><label>{live.fields.businessName}<input name="businessName" required /></label><label>{live.fields.serviceZone}<select name="serviceZone" required defaultValue=""><option value="" disabled>{c.common.selectServiceZone}</option>{live.serviceZones.map((zone) => <option key={zone.id} value={zone.label}>{zone.label}</option>)}</select></label></>}{entity === 'customers' && <label>{live.fields.password}<input name="password" type="password" minLength={8} required /></label>}{entity === 'drivers' && <><label>{live.fields.vendorId}<input name="vendorId" required /></label><label>{live.fields.licence}<input name="licence" required /></label></>}{entity === 'fleet' && <><label>{live.fields.vendorId}<input name="vendorId" required /></label><label>{live.fields.capacity}<input name="capacity" type="number" min="1" required /></label></>}<button className="button button-primary button-large" disabled={create.isPending} type="submit">{create.isPending ? c.common.creating : c.common.createRecord}</button></form></Modal>}{setupVendor && <Modal title={live.completeVendorProfile} onClose={() => setSetupVendor(null)}><p className="admin-dialog-eyebrow">{live.setupEyebrow(setupVendor.name)}</p><p>{live.setupBody}</p><form className="modal-form" onSubmit={(event) => { event.preventDefault(); const values = new FormData(event.currentTarget); provisionVendor.mutate({ id: setupVendor.id, payload: { businessName: String(values.get('businessName')), phone: String(values.get('phone')), serviceZone: String(values.get('serviceZone')) } }) }}><label>{live.fields.businessName}<input name="businessName" required minLength={2} /></label><label>{live.phoneDigits}<input name="phone" type="tel" inputMode="numeric" pattern="[0-9]{10}" required /></label><label>{live.fields.serviceZone}<select name="serviceZone" required defaultValue=""><option value="" disabled>{c.common.selectServiceZone}</option>{live.serviceZones.map((zone) => <option key={zone.id} value={zone.label}>{zone.label}</option>)}</select></label><button className="button button-primary button-large" disabled={provisionVendor.isPending} type="submit">{provisionVendor.isPending ? live.saving : live.addToVendorReview}</button></form></Modal>}</section>
+  return (
+    <section className="admin-view-panel admin-entity-manager">
+      <div className="view-panel-heading">
+        <div>
+          <p className="eyebrow">{entity === 'fleet' ? live.tankerFleet : entity.toUpperCase()}</p>
+          <h2>{live.heading(entity === 'fleet' ? 'fleet' : entity)}</h2>
+        </div>
+        <button className="button button-primary" onClick={() => setFormOpen(true)}>
+          <Plus size={15} /> {live.addRecord}
+        </button>
+      </div>
+      <label className="admin-entity-search">
+        <Search size={15} />
+        <input
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder={live.search(entity)}
+          aria-label={live.search(entity)}
+        />
+      </label>
+      <div className="admin-entity-list">
+        {rows.map((row) => (
+          <article key={row.id}>
+            <span className="admin-record-icon"><Icon size={18} /></span>
+            <div className="admin-entity-copy">
+              <b>{row.name}</b>
+              <p>{row.detail}</p>
+            </div>
+            <span className={`status-tag ${row.status === 'approved' || row.status === 'active' ? '' : 'pending'}`}>
+              {row.status}{row.active === false && entity !== 'vendors' ? live.inactiveSuffix : ''}
+            </span>
+            {entity === 'vendors' && (row.setupRequired ? (
+              <>
+                <span className="status-tag pending">{live.notActive}</span>
+                <button className="entity-status-button" onClick={() => setSetupVendor({ id: row.id, name: row.name })}>
+                  {live.completeProfile}
+                </button>
+              </>
+            ) : (
+              <>
+                <span className={`status-tag ${row.active ? '' : 'pending'}`}>{row.active ? live.online : live.offline}</span>
+                <button
+                  className="entity-status-button"
+                  disabled={pendingVendorId === row.id || (!row.active && row.status !== 'approved')}
+                  onClick={() => setVendorOnline(row)}
+                >
+                  {row.active ? live.setInactive : live.setActive}
+                </button>
+              </>
+            ))}
+            {availabilityTogglesEnabled && (entity === 'drivers' || entity === 'fleet') ? (
+              <button
+                className="entity-status-button"
+                aria-label={`${row.active ? live.setInactive : live.setActive}: ${row.name}`}
+                disabled={updateDriver.isPending || updateVehicle.isPending || (!row.active && row.status !== 'approved')}
+                onClick={() => setFleetActive(row)}
+              >
+                {row.active ? live.setInactive : live.setActive}
+              </button>
+            ) : null}
+            {entity !== 'customers' && !row.setupRequired && (
+              <button className="entity-status-button" onClick={() => setStatus(row)}>
+                <ShieldCheck size={14} /> {row.status === 'approved' ? live.suspend : live.approve}
+              </button>
+            )}
+            {!row.setupRequired && (
+              <>
+                {entity === 'customers' && (
+                  <AdminCustomerSelfie customerId={row.id} customerName={row.name} onNotice={onNotice} />
+                )}
+                <button className="icon-action" aria-label={live.editRecord(row.name)} onClick={() => edit(row)}>
+                  <Pencil size={15} />
+                </button>
+                <button
+                  className="icon-action danger"
+                  aria-label={live.deleteRecord(row.name)}
+                  disabled={pendingDeleteId === row.id}
+                  onClick={() => {
+                    if (window.confirm(live.deleteConfirm(row.name))) {
+                      setPendingDeleteId(row.id)
+                      remove.mutate(row.id)
+                    }
+                  }}
+                >
+                  <Trash2 size={15} />
+                </button>
+              </>
+            )}
+          </article>
+        ))}
+        {!rows.length && <div className="admin-empty-state">{live.emptyState}</div>}
+      </div>
+      {formOpen && (
+        <Modal title={live.addTitle(entity === 'fleet' ? live.vehicle : entity)} onClose={() => setFormOpen(false)}>
+          <form
+            className="modal-form"
+            onSubmit={(event) => {
+              event.preventDefault()
+              const values = new FormData(event.currentTarget)
+              const payload: Record<string, unknown> = entity === 'vendors'
+                ? {
+                    email: String(values.get('email')),
+                    password: String(values.get('password')),
+                    name: String(values.get('name')),
+                    phone: String(values.get('phone')),
+                    businessName: String(values.get('businessName')),
+                    serviceZone: String(values.get('serviceZone')),
+                  }
+                : entity === 'customers'
+                  ? {
+                      email: String(values.get('email')),
+                      password: String(values.get('password')),
+                      name: String(values.get('name')),
+                      phone: String(values.get('phone')),
+                    }
+                  : entity === 'drivers'
+                    ? {
+                        vendorId: String(values.get('vendorId')),
+                        name: String(values.get('name')),
+                        mobileE164: String(values.get('phone')),
+                        licenceNumber: String(values.get('licence')),
+                      }
+                    : {
+                        vendorId: String(values.get('vendorId')),
+                        registrationNumber: String(values.get('registration')),
+                        capacityLitres: Number(values.get('capacity')),
+                      }
+              create.mutate(payload)
+            }}
+          >
+            <label>{live.fields.nameOrRegistration}<input name={entity === 'fleet' ? 'registration' : 'name'} required /></label>
+            {entity !== 'fleet' && <label>{live.fields.email}<input name="email" type="email" required /></label>}
+            {entity !== 'fleet' && <label>{live.fields.phone}<input name="phone" required /></label>}
+            {entity === 'vendors' && (
+              <>
+                <label>{live.fields.password}<input name="password" type="password" minLength={8} required /></label>
+                <label>{live.fields.businessName}<input name="businessName" required /></label>
+                <label>
+                  {live.fields.serviceZone}
+                  <select name="serviceZone" required defaultValue="">
+                    <option value="" disabled>{c.common.selectServiceZone}</option>
+                    {live.serviceZones.map((zone) => <option key={zone.id} value={zone.label}>{zone.label}</option>)}
+                  </select>
+                </label>
+              </>
+            )}
+            {entity === 'customers' && <label>{live.fields.password}<input name="password" type="password" minLength={8} required /></label>}
+            {entity === 'drivers' && (
+              <>
+                <label>{live.fields.vendorId}<input name="vendorId" required /></label>
+                <label>{live.fields.licence}<input name="licence" required /></label>
+              </>
+            )}
+            {entity === 'fleet' && (
+              <>
+                <label>{live.fields.vendorId}<input name="vendorId" required /></label>
+                <label>{live.fields.capacity}<input name="capacity" type="number" min="1" required /></label>
+              </>
+            )}
+            <button className="button button-primary button-large" disabled={create.isPending} type="submit">
+              {create.isPending ? c.common.creating : c.common.createRecord}
+            </button>
+          </form>
+        </Modal>
+      )}
+      {setupVendor && (
+        <Modal title={live.completeVendorProfile} onClose={() => setSetupVendor(null)}>
+          <p className="admin-dialog-eyebrow">{live.setupEyebrow(setupVendor.name)}</p>
+          <p>{live.setupBody}</p>
+          <form
+            className="modal-form"
+            onSubmit={(event) => {
+              event.preventDefault()
+              const values = new FormData(event.currentTarget)
+              provisionVendor.mutate({
+                id: setupVendor.id,
+                payload: {
+                  businessName: String(values.get('businessName')),
+                  phone: String(values.get('phone')),
+                  serviceZone: String(values.get('serviceZone')),
+                },
+              })
+            }}
+          >
+            <label>{live.fields.businessName}<input name="businessName" required minLength={2} /></label>
+            <label>{live.phoneDigits}<input name="phone" type="tel" inputMode="numeric" pattern="[0-9]{10}" required /></label>
+            <label>
+              {live.fields.serviceZone}
+              <select name="serviceZone" required defaultValue="">
+                <option value="" disabled>{c.common.selectServiceZone}</option>
+                {live.serviceZones.map((zone) => <option key={zone.id} value={zone.label}>{zone.label}</option>)}
+              </select>
+            </label>
+            <button className="button button-primary button-large" disabled={provisionVendor.isPending} type="submit">
+              {provisionVendor.isPending ? live.saving : live.addToVendorReview}
+            </button>
+          </form>
+        </Modal>
+      )}
+    </section>
+  )
 }

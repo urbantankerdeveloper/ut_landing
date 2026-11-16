@@ -118,4 +118,6 @@ environment default. The web switch is in
 `src/screens/AdminBookingOperationsScreen.tsx`; Flutter's switch is in
 `urban_tanker_app/lib/screens/admin/operations/orders_section.dart`. Both use
 the existing admin-only settings API. New bookings only skip vendor broadcast
-when the resolved setting is `true`.
+when the resolved setting is `true`. Once an admin assigns an order,
+`backend/src/routes/adminExtended.ts` sends `booking.updated` to both the
+customer and assigned vendor rooms so their order lists refresh immediately.

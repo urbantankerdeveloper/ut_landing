@@ -196,6 +196,36 @@ describe('vendor order lifecycle events', () => {
 })
 
 describe('admin order status events', () => {
+  it('notifies the assigned vendor so their order list refreshes immediately', async () => {
+    mocks.transitionBooking.mockResolvedValueOnce({
+      data: {
+        id: BOOKING_ID,
+        reference: 'UT-1',
+        customer_id: 'cust-9',
+        vendor_id: 'vendor-1',
+        status: 'vendor_assigned',
+      },
+      error: null,
+    })
+
+    const response = await request(buildApp())
+      .patch(`/api/admin/orders/${BOOKING_ID}/assignment`)
+      .set('x-test-role', 'admin')
+      .send({ vendorId: 'c0000000-0000-4000-8000-000000000001' })
+
+    expect(response.status).toBe(200)
+    expect(mocks.emitRealtimeToVendor).toHaveBeenCalledWith(
+      'vendor-1',
+      'booking.updated',
+      { bookingId: BOOKING_ID, status: 'vendor_assigned' },
+    )
+    expect(mocks.emitRealtime).toHaveBeenCalledWith(
+      'booking.updated',
+      { bookingId: BOOKING_ID, status: 'vendor_assigned' },
+      'cust-9',
+    )
+  })
+
   it('emits booking.delivered to the customer when an admin marks the order delivered', async () => {
     mocks.transitionBooking.mockResolvedValueOnce({ data: { id: BOOKING_ID, reference: 'UT-1', customer_id: 'cust-9', vendor_id: 'vendor-1', status: 'delivered' }, error: null })
     const response = await request(buildApp()).patch(`/api/admin/orders/${BOOKING_ID}/status`).set('x-test-role', 'admin').send({ status: 'delivered' })
