@@ -70,6 +70,25 @@ until those sections pass focused validation.
   board read `orderTrackingBoardEnabled` in their corresponding booking,
   admin-orders, and vendor-operations screens.
 
+## Section 8 runtime checks
+
+- `address_geocoding_enabled` defaults to `true` and is returned through the
+  public `GET /api/config/flags` endpoint. Set it to `false` through
+  `FEATURE_FLAGS_JSON` to restore the previous approximate web lookup and
+  coordinate-only Flutter selection.
+- Web checks the flag in `src/screens/BookingScreen.tsx`,
+  `src/components/LocationPickerModal.tsx`, and
+  `src/components/DeliveryLocationChip.tsx`. When enabled, these use the
+  existing Google Maps JavaScript API key and return the full formatted
+  address; when disabled, booking lookup continues using Nominatim.
+- Flutter checks the flag in `lib/app/app_controller.dart` and
+  `lib/screens/home/booking/booking_fields.dart`. When enabled, map and current
+  location selections resolve through the Google Geocoding API using the
+  existing `GOOGLE_MAPS_API_KEY` build value. A lookup failure is surfaced and
+  the address can still be entered manually.
+- Both Google API keys must have Geocoding API access enabled and their
+  restrictions must permit the corresponding web/mobile requests.
+
 ## Planned flags
 
 “Target default” is applied only once the related section passes its focused
@@ -88,7 +107,7 @@ tests and any required end-to-end checks.
 | `admin_dashboard_v2_enabled` | `true` | `true` | Show the consolidated dashboard while retaining the existing dashboard path. |
 | `area_availability_enabled` | `true` | `true` | Show availability grouped by service area. |
 | `partner_application_otp_enabled` | `true` | `true` | Require phone OTP before collecting/submitting partner applications and allow verified applicants to upload documents without login. |
-| `address_geocoding_enabled` | `false` | `true` after location validation | Resolve selected/current coordinates to a usable address label. |
+| `address_geocoding_enabled` | `true` | `true` | Resolve selected/current coordinates to a full formatted address. |
 | `invoice_generation_enabled` | `false` | `false` until trigger and invoice contents are agreed and verified | Generate and reconcile invoice records. |
 | `wallet_enabled` | `false` | `false` | Keep wallet code/routes available but hide wallet UI and reject wallet operations. |
 

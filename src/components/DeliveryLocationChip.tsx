@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { LocateFixed } from 'lucide-react'
-import { reverseGeocodeApproximate } from '../services/geocoding'
+import { useFeatureFlags } from '../hooks/useFeatureFlags'
+import { reverseGeocodeDeliveryAddress } from '../services/geocoding'
 import { homeContent as c } from '../content/home'
 
 export function DeliveryLocationChip() {
+  const featureFlags = useFeatureFlags()
   const supportsGeolocation = typeof navigator !== 'undefined' && Boolean(navigator.geolocation)
   const [locationLabel, setLocationLabel] = useState<string>(c.location.defaultLabel)
   const [locationState, setLocationState] = useState<'idle' | 'loading' | 'ready' | 'unavailable'>('idle')
@@ -14,8 +16,11 @@ export function DeliveryLocationChip() {
     setLocationLabel(c.location.locating)
     navigator.geolocation.getCurrentPosition(async ({ coords }) => {
       try {
-        const area = await reverseGeocodeApproximate({ lat: coords.latitude, lng: coords.longitude })
-        setLocationLabel(area)
+        const address = await reverseGeocodeDeliveryAddress(
+          { lat: coords.latitude, lng: coords.longitude },
+          featureFlags.data?.address_geocoding_enabled === true,
+        )
+        setLocationLabel(address)
         setLocationState('ready')
       } catch (error) {
         setLocationLabel(c.location.unableToDetermine)

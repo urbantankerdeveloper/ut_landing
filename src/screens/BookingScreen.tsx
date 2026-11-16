@@ -600,8 +600,8 @@ export default function BookingScreen() {
     setServiceFieldErrors((current) => { const next = { ...current }; if (next[service]) { delete next[service].location; if (!Object.keys(next[service]).length) delete next[service] }; return next })
     return true
   }
-  function updateMapLocation(_service: string, point: LatLngLiteral, approximateName?: string) {
-    if (approximateName) updateSharedLocation(approximateName.includes('Chennai') ? approximateName : `${approximateName}, Chennai`)
+  function updateMapLocation(_service: string, point: LatLngLiteral, address?: string) {
+    if (address) updateSharedLocation(address.includes('Chennai') ? address : `${address}, Chennai`)
     setSharedCoordinates(point)
     setServiceDetails((current) => ({ ...current, ...Object.fromEntries(serviceEntries.map((entry) => [entry.id, { ...emptyServiceDraft(), ...current[entry.id], latitude: point.lat, longitude: point.lng }])) }))
     setLocationEligibility((current) => ({ ...current, ...Object.fromEntries(serviceEntries.map((entry) => [entry.id, true])) }))
@@ -611,18 +611,23 @@ export default function BookingScreen() {
   async function updateDetectedLocation(service: string, point: LatLngLiteral) {
     setLocationStatus((current) => ({ ...current, [service]: c.location.findingNearbyArea }))
     try {
-      const result = await lookupDeliveryPoint(point)
+      const result = await lookupDeliveryPoint(
+        point,
+        featureFlags.data?.address_geocoding_enabled === true,
+      )
       if (!result.isInChennai) {
         setLocationStatus((current) => { const next = { ...current }; delete next[service]; return next })
         setLocationEligibility((current) => ({ ...current, [service]: false }))
         setLocationToasts((current) => ({ ...current, [service]: c.location.outsideChennai }))
         return
       }
-      updateMapLocation(service, point, result.approximateName)
+      updateMapLocation(service, point, result.address)
       setLocationStatus((current) => ({ ...current, [service]: c.location.currentLocationDetected }))
+      setLocationToasts((current) => { const next = { ...current }; delete next[service]; return next })
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return
       setLocationStatus((current) => { const next = { ...current }; delete next[service]; return next })
+      setLocationToasts((current) => ({ ...current, [service]: c.location.unavailable }))
       console.warn(JSON.stringify({ event: 'location.reverse_geocode_failed', error: error instanceof Error ? error.message : 'Unknown error' }))
     }
   }
@@ -1030,6 +1035,6 @@ export default function BookingScreen() {
         <BookingSummary items={summaryItems} total={total} />
       </form>
     </div>
-    {locationModalOpen && <Suspense fallback={<div className="surface booking-map-loading" role="status">{c.location.loadingMap}</div>}><LocationPickerModal value={sharedCoordinates} onChange={(point, name) => updateMapLocation('shared', point, name)} onClose={() => setLocationModalOpen(false)} /></Suspense>}
+    {locationModalOpen && <Suspense fallback={<div className="surface booking-map-loading" role="status">{c.location.loadingMap}</div>}><LocationPickerModal value={sharedCoordinates} addressGeocodingEnabled={featureFlags.data?.address_geocoding_enabled === true} onChange={(point, address) => updateMapLocation('shared', point, address)} onClose={() => setLocationModalOpen(false)} /></Suspense>}
   </section>
 }

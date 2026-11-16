@@ -12,7 +12,7 @@ export const defaultFeatureFlags = {
   admin_dashboard_v2_enabled: true,
   area_availability_enabled: true,
   partner_application_otp_enabled: true,
-  address_geocoding_enabled: false,
+  address_geocoding_enabled: true,
   invoice_generation_enabled: false,
   wallet_enabled: false,
 } as const

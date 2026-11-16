@@ -6,11 +6,11 @@ import { Modal } from './Modal'
 import { lookupDeliveryPoint } from '../services/geocoding'
 import { locationContent } from '../content/location'
 
-type Props = { value: LatLngLiteral | null; onChange: (value: LatLngLiteral, approximateName: string) => void; onClose: () => void }
+type Props = { value: LatLngLiteral | null; addressGeocodingEnabled: boolean; onChange: (value: LatLngLiteral, address: string) => void; onClose: () => void }
 
-export function LocationPickerModal({ value, onChange, onClose }: Props) {
+export function LocationPickerModal({ value, addressGeocodingEnabled, onChange, onClose }: Props) {
   const [candidatePoint, setCandidatePoint] = useState<LatLngLiteral | null>(value)
-  const [selectedName, setSelectedName] = useState<string | null>(null)
+  const [selectedAddress, setSelectedAddress] = useState<string | null>(null)
   const [candidateIsInChennai, setCandidateIsInChennai] = useState<boolean | null>(null)
   const [isResolving, setIsResolving] = useState(false)
   const [lookupError, setLookupError] = useState<string | null>(null)
@@ -19,13 +19,13 @@ export function LocationPickerModal({ value, onChange, onClose }: Props) {
     const requestId = ++latestRequest.current
     setIsResolving(true)
     setLookupError(null)
-    setSelectedName(null)
+    setSelectedAddress(null)
     setCandidatePoint(point)
     setCandidateIsInChennai(null)
     try {
-      const result = await lookupDeliveryPoint(point)
+      const result = await lookupDeliveryPoint(point, addressGeocodingEnabled)
       if (requestId !== latestRequest.current) return
-      setSelectedName(result.approximateName)
+      setSelectedAddress(result.address)
       setCandidateIsInChennai(result.isInChennai)
       if (!result.isInChennai) setLookupError(locationContent.modal.outsideChennai)
     } catch (error) {
@@ -33,11 +33,11 @@ export function LocationPickerModal({ value, onChange, onClose }: Props) {
       const message = error instanceof Error ? error.message : 'Location name lookup failed'
       setLookupError(locationContent.modal.lookupFailed)
       setCandidateIsInChennai(false)
-      setSelectedName(locationContent.modal.selectedArea(point.lat.toFixed(5), point.lng.toFixed(5)))
+      setSelectedAddress(locationContent.modal.selectedArea(point.lat.toFixed(5), point.lng.toFixed(5)))
       console.warn(JSON.stringify({ event: 'location.reverse_geocode_failed', error: message }))
     } finally {
       if (requestId === latestRequest.current) setIsResolving(false)
     }
   }
-  return <Modal title={locationContent.modal.title} onClose={onClose}><div className="location-picker-modal"><p className="modal-required-note"><MapPin size={15} /> {locationContent.modal.hint}</p><LocationPicker value={candidatePoint} onChange={(point) => void selectLocation(point)} />{selectedName && <p className="location-selected-name" role="status"><MapPin size={15} /> {isResolving ? locationContent.modal.finding : selectedName}</p>}{lookupError && <p className="location-lookup-error" role="alert">{lookupError}</p>}<button className="button button-primary button-large" type="button" disabled={!candidatePoint || isResolving || candidateIsInChennai !== true} onClick={() => { if (candidatePoint && selectedName) onChange(candidatePoint, selectedName); onClose() }}>{isResolving ? locationContent.modal.findingButton : locationContent.modal.useLocation}</button></div></Modal>
+  return <Modal title={locationContent.modal.title} onClose={onClose}><div className="location-picker-modal"><p className="modal-required-note"><MapPin size={15} /> {locationContent.modal.hint}</p><LocationPicker value={candidatePoint} onChange={(point) => void selectLocation(point)} />{selectedAddress && <p className="location-selected-name" role="status"><MapPin size={15} /> {isResolving ? locationContent.modal.finding : selectedAddress}</p>}{lookupError && <p className="location-lookup-error" role="alert">{lookupError}</p>}<button className="button button-primary button-large" type="button" disabled={!candidatePoint || isResolving || candidateIsInChennai !== true} onClick={() => { if (candidatePoint && selectedAddress) onChange(candidatePoint, selectedAddress); onClose() }}>{isResolving ? locationContent.modal.findingButton : locationContent.modal.useLocation}</button></div></Modal>
 }
