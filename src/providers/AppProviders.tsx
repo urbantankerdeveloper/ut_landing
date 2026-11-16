@@ -1,8 +1,9 @@
-import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MutationCache, QueryCache, QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { useEffect, type PropsWithChildren } from 'react'
 import { ApiError } from '../api/client'
 import { customerApi } from '../api/customer'
 import { vendorApi } from '../api/vendor'
+import { configApi } from '../api/config'
 import { ToastHost } from '../components/ToastHost'
 import { SOCKET_RECONNECTED, subscribeToRealtime } from '../services/realtime'
 import { useAuthStore } from '../stores/authStore'
@@ -93,8 +94,20 @@ function ToastLayer() {
   return <ToastHost />
 }
 
+function RuntimeConfiguration() {
+  useQuery({
+    queryKey: ['config', 'flags'],
+    queryFn: configApi.featureFlags,
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+    retry: false,
+  })
+  return null
+}
+
 export function AppProviders({ children }: PropsWithChildren) {
   return <QueryClientProvider client={queryClient}>
+    <RuntimeConfiguration />
     {children}
     <ToastLayer />
   </QueryClientProvider>

@@ -7,6 +7,9 @@ const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
   createUser: vi.fn(),
   deleteUser: vi.fn(),
+  updateUserById: vi.fn(),
+  generateLink: vi.fn(),
+  verifyOtp: vi.fn(),
   signInWithPassword: vi.fn(),
   isEmailConfigured: vi.fn(() => true),
   sendEmail: vi.fn(),
@@ -42,9 +45,11 @@ vi.mock('../supabase.js', () => ({
       admin: {
         createUser: (...args: unknown[]) => mocks.createUser(...args),
         deleteUser: (...args: unknown[]) => mocks.deleteUser(...args),
-        generateLink: vi.fn(),
+        updateUserById: (...args: unknown[]) => mocks.updateUserById(...args),
+        generateLink: (...args: unknown[]) => mocks.generateLink(...args),
         getUserById: vi.fn(),
       },
+      verifyOtp: (...args: unknown[]) => mocks.verifyOtp(...args),
       signInWithPassword: (...args: unknown[]) => mocks.signInWithPassword(...args),
     },
   },
@@ -87,6 +92,7 @@ beforeEach(() => {
       return { data: { id: table === 'email_otp_challenges' ? EMAIL_CHALLENGE : CHALLENGE }, error: null }
     }
     if (last === 'maybeSingle' && table === 'email_otp_challenges') return { data: { id: EMAIL_CHALLENGE }, error: null }
+    if (last === 'maybeSingle' && table === 'guest_otp_challenges') return { data: { id: CHALLENGE }, error: null }
     return { data: null, error: null }
   })
   mocks.rpc.mockReset()
@@ -94,6 +100,12 @@ beforeEach(() => {
   mocks.createUser.mockResolvedValue({ data: { user: { id: 'user-1' } }, error: null })
   mocks.deleteUser.mockReset()
   mocks.deleteUser.mockResolvedValue({ error: null })
+  mocks.updateUserById.mockReset()
+  mocks.updateUserById.mockResolvedValue({ data: { user: { id: 'user-1', email: 'new@example.com' } }, error: null })
+  mocks.generateLink.mockReset()
+  mocks.generateLink.mockResolvedValue({ data: { properties: { hashed_token: 'magic-token' } }, error: null })
+  mocks.verifyOtp.mockReset()
+  mocks.verifyOtp.mockResolvedValue({ data: { session: { access_token: 'access-token', refresh_token: 'refresh-token' }, user: { id: 'user-1', email: 'new@example.com' } }, error: null })
   mocks.signInWithPassword.mockReset()
   mocks.signInWithPassword.mockResolvedValue({ data: { session: { access_token: 'access-token', refresh_token: 'refresh-token' } }, error: null })
   mocks.isEmailConfigured.mockReturnValue(true)
@@ -124,6 +136,11 @@ describe('POST /signup', () => {
     const response = await request(buildApp()).post('/signup').send(body)
     expect(response.status).toBe(201)
     expect(response.body).toMatchObject({ phoneOtpSent: true, phoneChallengeId: CHALLENGE })
+    expect(mocks.sendTemplateSms).toHaveBeenCalledWith(
+      'user_registration_otp',
+      '+919876543210',
+      expect.any(Object),
+    )
   })
 
   it('still creates the account when the SMS provider throws', async () => {
@@ -131,6 +148,174 @@ describe('POST /signup', () => {
     const response = await request(buildApp()).post('/signup').send(body)
     expect(response.status).toBe(201)
     expect(response.body.phoneOtpSent).toBe(false)
+  })
+})
+
+describe('POST /email/verify-otp signup phone verification', () => {
+    it('rejects a duplicate phone before creating an email-OTP signup account', async () => {
+      mocks.rpc.mockImplementation(async (procedure: string) => {
+        if (procedure === 'consume_email_otp_attempt') {
+          return { data: [{ otp_hash: hashOtp('123456'), purpose: 'signup', user_id: null }], error: null }
+        }
+        if (procedure === 'consume_guest_otp_attempt') {
+          return { data: [{ otp_hash: hashOtp('654321') }], error: null }
+        }
+        return { data: null, error: null }
+      })
+      mocks.respond.mockImplementation((table, ops) => {
+        const last = ops[ops.length - 1]?.name
+        const hasEq = (column: string, value: string) => ops.some(
+          (op) => op.name === 'eq' && op.args[0] === column && op.args[1] === value,
+        )
+        if (table === 'profiles' && last === 'maybeSingle' && hasEq('phone_e164', '+919876543210')) {
+          return { data: { id: 'another-user' }, error: null }
+        }
+        if (table === 'email_otp_challenges' && last === 'maybeSingle') {
+          return { data: { id: EMAIL_CHALLENGE }, error: null }
+        }
+        return { data: null, error: null }
+      })
+
+      const response = await request(buildApp()).post('/email/verify-otp').send({
+        challengeId: EMAIL_CHALLENGE,
+        email: 'new@example.com',
+        otp: '123456',
+        name: 'New User',
+        phone: PHONE,
+        phoneChallengeId: CHALLENGE,
+        phoneOtp: '654321',
+      })
+
+      expect(response.status).toBe(409)
+      expect(response.body.error).toBe('This mobile number is already registered. Try signing in instead.')
+      expect(mocks.createUser).not.toHaveBeenCalled()
+      expect(mocks.rpc).toHaveBeenCalledWith(
+        'consume_guest_otp_attempt',
+        expect.objectContaining({ p_phone: '+919876543210', p_challenge_id: CHALLENGE }),
+      )
+    })
+
+    it('rejects an already-verified phone only after the SMS challenge passes', async () => {
+      mocks.rpc.mockImplementation(async (procedure: string) => {
+        if (procedure === 'consume_email_otp_attempt') {
+          return { data: [{ otp_hash: hashOtp('123456'), purpose: 'signup', user_id: 'user-1' }], error: null }
+        }
+        if (procedure === 'consume_guest_otp_attempt') {
+          return { data: [{ otp_hash: hashOtp('654321') }], error: null }
+        }
+        return { data: null, error: null }
+      })
+      mocks.respond.mockImplementation((table, ops) => {
+        const last = ops[ops.length - 1]?.name
+        const hasEq = (column: string, value: string) => ops.some(
+          (op) => op.name === 'eq' && op.args[0] === column && op.args[1] === value,
+        )
+        if (table === 'profiles' && last === 'maybeSingle' && hasEq('id', 'user-1')) {
+          return {
+            data: {
+              id: 'user-1',
+              role: 'customer',
+              full_name: 'New User',
+              username: 'new',
+              phone_e164: null,
+              theme_mode: null,
+              selfie_required: false,
+              approval_status: 'approved',
+            },
+            error: null,
+          }
+        }
+        if (table === 'profiles' && last === 'maybeSingle' && hasEq('phone_e164', '+919876543210')) {
+          return { data: { id: 'another-user' }, error: null }
+        }
+        if (table === 'email_otp_challenges' && last === 'maybeSingle') {
+          return { data: { id: EMAIL_CHALLENGE }, error: null }
+        }
+        return { data: null, error: null }
+      })
+
+      const response = await request(buildApp()).post('/email/verify-otp').send({
+        challengeId: EMAIL_CHALLENGE,
+        email: 'new@example.com',
+        otp: '123456',
+        phone: PHONE,
+        phoneChallengeId: CHALLENGE,
+        phoneOtp: '654321',
+      })
+
+      expect(response.status).toBe(409)
+      expect(response.body.error).toBe('This mobile number is already registered. Try signing in instead.')
+      expect(mocks.createUser).not.toHaveBeenCalled()
+      expect(mocks.rpc).toHaveBeenCalledWith(
+        'consume_guest_otp_attempt',
+        expect.objectContaining({ p_phone: '+919876543210', p_challenge_id: CHALLENGE }),
+      )
+    })
+
+    it('marks the profile phone verified only after the SMS challenge passes', async () => {
+      mocks.rpc.mockImplementation(async (procedure: string) => {
+        if (procedure === 'consume_email_otp_attempt') {
+          return { data: [{ otp_hash: hashOtp('123456'), purpose: 'signup', user_id: 'user-1' }], error: null }
+        }
+        if (procedure === 'consume_guest_otp_attempt') {
+          return { data: [{ otp_hash: hashOtp('654321') }], error: null }
+        }
+        return { data: null, error: null }
+      })
+      mocks.respond.mockImplementation((table, ops) => {
+        const last = ops[ops.length - 1]?.name
+        const hasEq = (column: string, value: string) => ops.some(
+          (op) => op.name === 'eq' && op.args[0] === column && op.args[1] === value,
+        )
+        if (table === 'profiles' && last === 'maybeSingle' && hasEq('id', 'user-1')) {
+          return {
+            data: {
+              id: 'user-1',
+              role: 'customer',
+              full_name: 'New User',
+              username: 'new',
+              phone_e164: null,
+              theme_mode: null,
+              selfie_required: false,
+              approval_status: 'approved',
+            },
+            error: null,
+          }
+        }
+        if (table === 'profiles' && last === 'maybeSingle' && hasEq('phone_e164', '+919876543210')) {
+          return { data: null, error: null }
+        }
+        if (last === 'maybeSingle' && table === 'email_otp_challenges') {
+          return { data: { id: EMAIL_CHALLENGE }, error: null }
+        }
+        if (last === 'maybeSingle' && table === 'guest_otp_challenges') {
+          return { data: { id: CHALLENGE }, error: null }
+        }
+        return { data: null, error: null }
+      })
+
+      const response = await request(buildApp()).post('/email/verify-otp').send({
+        challengeId: EMAIL_CHALLENGE,
+        email: 'new@example.com',
+        otp: '123456',
+        phone: PHONE,
+        phoneChallengeId: CHALLENGE,
+        phoneOtp: '654321',
+      })
+
+      expect(response.status).toBe(200)
+      expect(mocks.respond).toHaveBeenCalledWith(
+        'profiles',
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: 'update',
+            args: [expect.objectContaining({
+              phone_e164: '+919876543210',
+              phone_verified_at: expect.any(String),
+            })],
+          }),
+        ]),
+      )
   })
 })
 
