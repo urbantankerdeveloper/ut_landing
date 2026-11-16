@@ -13,6 +13,7 @@ import { sendPushNotification } from '../services/pushNotifications.js'
 import { isJpeg, selfieBucket, selfieMaxBytes, selfieObjectPath } from '../services/selfie.js'
 import { notifyCustomerSms } from '../services/bookingNotifications.js'
 import { config } from '../config.js'
+import { getManualAssignmentModeEnabled } from '../services/manualAssignmentMode.js'
 import { toE164IndianMobile } from '../lib/phone.js'
 import { allocateServiceAmountsPaise, PricingError } from '../services/pricingMath.js'
 import { databaseFailure, failure } from '../lib/httpErrors.js'
@@ -370,7 +371,10 @@ async function createCheckoutBooking(checkout: CheckoutRow, method: 'gateway' | 
   let result: { booking: CreatedBooking; created: boolean; bookings?: CreatedBooking[] }
   try {
     const services = getBookingServices(data)
-    const vendors = await findNearbyVendors(data.latitude, data.longitude)
+    const manualAssignmentModeEnabled = await getManualAssignmentModeEnabled()
+    const vendors = manualAssignmentModeEnabled
+      ? []
+      : await findNearbyVendors(data.latitude, data.longitude)
     if (config.featureFlags.multi_service_tasks_enabled && services.length > 1) {
       const weights = await quoteServices(services, undefined, checkout.customer_id, true)
       if (!weights.serviceAmountsPaise) throw new Error('Service prices could not be allocated.')
@@ -544,7 +548,10 @@ async function placeQuotedBooking(request: Request, response: Response, includeQ
     }
   }
   try {
-    const vendors = await findNearbyVendors(parsed.data.latitude, parsed.data.longitude)
+    const manualAssignmentModeEnabled = await getManualAssignmentModeEnabled()
+    const vendors = manualAssignmentModeEnabled
+      ? []
+      : await findNearbyVendors(parsed.data.latitude, parsed.data.longitude)
     let result: { booking: CreatedBooking; created: boolean; bookings: CreatedBooking[] }
     if (splitServices) {
       result = await createMultiServiceBookings({

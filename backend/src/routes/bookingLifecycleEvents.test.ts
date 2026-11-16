@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
   emitRealtimeToUser: vi.fn(),
   emitRealtimeToVendor: vi.fn(),
   emitRealtimeToBooking: vi.fn(),
+  getManualAssignmentModeEnabled: vi.fn(),
+  setManualAssignmentModeEnabled: vi.fn(),
 }))
 
 function nextResult(table: string) {
@@ -76,6 +78,10 @@ vi.mock('express-rate-limit', () => ({
   default: () => (_request: unknown, _response: unknown, next: () => void) => next(),
 }))
 vi.mock('../services/scaling.js', () => ({ limiterStore: () => undefined }))
+vi.mock('../services/manualAssignmentMode.js', () => ({
+  getManualAssignmentModeEnabled: mocks.getManualAssignmentModeEnabled,
+  setManualAssignmentModeEnabled: mocks.setManualAssignmentModeEnabled,
+}))
 
 import adminRouter from './adminExtended.js'
 import vendorRouter from './vendorExtended.js'
@@ -100,6 +106,42 @@ beforeEach(() => {
   mocks.transitionBooking.mockResolvedValue({ data: { id: BOOKING_ID, reference: 'UT-1', customer_id: 'cust-9', status: 'accepted' }, error: null })
   mocks.otpMatches.mockReturnValue(true)
   mocks.deliveryVerificationMethod.mockReturnValue('otp')
+  mocks.getManualAssignmentModeEnabled.mockResolvedValue(false)
+  mocks.setManualAssignmentModeEnabled.mockImplementation(async (enabled: boolean) => enabled)
+})
+
+describe('admin dispatch settings', () => {
+  it('returns the current manual assignment mode to admins', async () => {
+    mocks.getManualAssignmentModeEnabled.mockResolvedValueOnce(true)
+
+    const response = await request(buildApp())
+      .get('/api/admin/dispatch-settings')
+      .set('x-test-role', 'admin')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ manualAssignmentModeEnabled: true })
+  })
+
+  it('allows admins to persist the manual assignment mode', async () => {
+    const response = await request(buildApp())
+      .patch('/api/admin/dispatch-settings')
+      .set('x-test-role', 'admin')
+      .send({ manualAssignmentModeEnabled: true })
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ manualAssignmentModeEnabled: true })
+    expect(mocks.setManualAssignmentModeEnabled).toHaveBeenCalledWith(true)
+  })
+
+  it('does not allow dispatchers to change global dispatch settings', async () => {
+    const response = await request(buildApp())
+      .patch('/api/admin/dispatch-settings')
+      .set('x-test-role', 'dispatcher')
+      .send({ manualAssignmentModeEnabled: true })
+
+    expect(response.status).toBe(403)
+    expect(mocks.setManualAssignmentModeEnabled).not.toHaveBeenCalled()
+  })
 })
 
 describe('vendor order lifecycle events', () => {

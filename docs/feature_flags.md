@@ -35,6 +35,17 @@ until those sections pass focused validation.
   unaffected.
 - `mpin_cooldown_enabled` is checked by
   `urban_tanker_app/lib/app/app_controller.dart` in `unlockWithMpin`.
+- `manual_assignment_mode_enabled` is resolved by
+  `backend/src/services/manualAssignmentMode.ts`; a saved boolean in
+  `configs` overrides the environment default. Booking creation checks it in
+  `backend/src/routes/customer.ts`; the admin setting is exposed through
+  `/admin/dispatch-settings` and reflected in the public runtime flags.
+- `admin_availability_toggle_enabled` gates the added independent vehicle and
+  driver availability actions in `src/screens/AdminEntityManagerLive.tsx` and
+  the new vendor-online/vehicle-active/driver-active controls in
+  `urban_tanker_app/lib/screens/admin/operations/people_section.dart`.
+  Existing approval actions remain available when this flag is off. The
+  pre-existing web vendor online control is retained regardless of the flag.
 - The React app fetches the map through `src/api/config.ts` and the Flutter app
   fetches it through `AuthApi.featureFlags`; both refresh on foreground/startup
   and cache for 60 seconds.
@@ -73,7 +84,7 @@ tests and any required end-to-end checks.
 | `vendor_earnings_realtime_enabled` | `true` | `true` | Show unsettled delivery accruals at the 85% default share in vendor earnings; it is not payable until admin settlement. |
 | `online_payment_enabled` | `false` | `true` after both platform checkouts are verified | Expose online checkout while retaining cash on delivery. |
 | `manual_assignment_mode_enabled` | `false` | `false` | When enabled, stop automatic vendor broadcast and await admin assignment. |
-| `admin_availability_toggle_enabled` | `false` | `true` | Expose online/active controls for vendors, vehicles, and drivers. |
+| `admin_availability_toggle_enabled` | `true` | `true` | Expose independent online/active controls for vendors, vehicles, and drivers; existing web vendor online control remains available when off. |
 | `admin_dashboard_v2_enabled` | `false` | `true` | Show the consolidated dashboard while retaining the existing dashboard path. |
 | `area_availability_enabled` | `false` | `true` | Show availability grouped by service area. |
 | `partner_application_otp_enabled` | `false` | `true` after tests | Require phone OTP verification before collecting/submitting the partner application. |
@@ -99,3 +110,12 @@ payments already in flight.
 
 Purely visual web design work (brand palette and landing-page improvements)
 does not need a flag.
+
+`manual_assignment_mode_enabled` defaults to `false` (automatic broadcast).
+The admin can persistently switch it through `/admin/dispatch-settings`;
+`configs.manual_assignment_mode_enabled`, when present, overrides the
+environment default. The web switch is in
+`src/screens/AdminBookingOperationsScreen.tsx`; Flutter's switch is in
+`urban_tanker_app/lib/screens/admin/operations/orders_section.dart`. Both use
+the existing admin-only settings API. New bookings only skip vendor broadcast
+when the resolved setting is `true`.

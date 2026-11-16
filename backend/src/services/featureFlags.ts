@@ -8,7 +8,7 @@ export const defaultFeatureFlags = {
   vendor_earnings_realtime_enabled: true,
   online_payment_enabled: false,
   manual_assignment_mode_enabled: false,
-  admin_availability_toggle_enabled: false,
+  admin_availability_toggle_enabled: true,
   admin_dashboard_v2_enabled: false,
   area_availability_enabled: false,
   partner_application_otp_enabled: false,

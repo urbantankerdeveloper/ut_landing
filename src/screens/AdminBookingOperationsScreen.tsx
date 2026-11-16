@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, ChevronDown, RefreshCw } from 'lucide-react'
 import { adminApi, type AdminOrder } from '../api/admin'
-import { adminQueryKeys, useAdminBookings, useAdminOrderMutations, useAdminDrivers, useAdminOrdersBoard, useAdminVehicles, useAdminVendors } from '../hooks/useAdminData'
+import { adminQueryKeys, useAdminBookings, useAdminDispatchSettings, useAdminOrderMutations, useAdminDrivers, useAdminOrdersBoard, useAdminVehicles, useAdminVendors, useUpdateAdminDispatchSettings } from '../hooks/useAdminData'
 import { Modal } from '../components/Modal'
 import { adminOperationsContent as c } from '../content/admin-operations'
 import { useFeatureFlags } from '../hooks/useFeatureFlags'
@@ -76,6 +76,8 @@ export function AdminBookingOperationsScreen({ onNotice }: { onNotice: (message:
   const featureFlags = useFeatureFlags()
   const boardQuery = useAdminOrdersBoard(featureFlags.data?.order_tracking_board_enabled === true)
   const mutations = useAdminOrderMutations()
+  const dispatchSettingsQuery = useAdminDispatchSettings()
+  const updateDispatchSettings = useUpdateAdminDispatchSettings()
   const vendorsQuery = useAdminVendors()
   const vehiclesQuery = useAdminVehicles()
   const driversQuery = useAdminDrivers()
@@ -150,6 +152,9 @@ export function AdminBookingOperationsScreen({ onNotice }: { onNotice: (message:
   }
 
   return <>
+    {!dispatchSettingsQuery.isLoading && dispatchSettingsQuery.isError && <section className="admin-view-panel" role="alert"><h2>{c.bookings.dispatchMode.unavailable}</h2><button className="button button-quiet" onClick={() => void dispatchSettingsQuery.refetch()}>{c.common.retry}</button></section>}
+    {dispatchSettingsQuery.isLoading && <section className="admin-view-panel" role="status"><p>{c.bookings.dispatchMode.loading}</p></section>}
+    {dispatchSettingsQuery.data && <section className="admin-view-panel" aria-label={c.bookings.dispatchMode.title}><div className="view-panel-heading"><div><p className="eyebrow">{c.bookings.dispatchMode.title}</p></div><label><input type="checkbox" checked={dispatchSettingsQuery.data.manualAssignmentModeEnabled} disabled={updateDispatchSettings.isPending} onChange={(event) => updateDispatchSettings.mutate({ manualAssignmentModeEnabled: event.target.checked }, { onSuccess: (settings) => onNotice(settings.manualAssignmentModeEnabled ? c.bookings.notices.dispatchModeEnabled : c.bookings.notices.dispatchModeDisabled), onError: () => onNotice(c.bookings.notices.dispatchModeFailed) })} /> {c.bookings.dispatchMode.manualLabel}</label></div><p>{dispatchSettingsQuery.data.manualAssignmentModeEnabled ? c.bookings.dispatchMode.manualEnabled : c.bookings.dispatchMode.automaticEnabled}</p></section>}
     {featureFlags.data?.order_tracking_board_enabled && <section className="admin-view-panel order-tracking-board" aria-label="Orders grouped by status">
       <div className="view-panel-heading"><div><p className="eyebrow">{c.bookings.eyebrow}</p><h2>Order tracking board</h2></div></div>
       <div className="booking-table-tools">

@@ -1,6 +1,7 @@
 import { apiFetch } from './client'
 
 export type AdminOrder = { id: string; reference?: string; service: string; vendor?: string; location: string; status: string; amount: number }
+export type AdminDispatchSettings = { manualAssignmentModeEnabled: boolean }
 export type AdminVendor = { id: string; business_name?: string; name?: string; status?: string; verification?: string; is_online?: boolean; phone_e164?: string | null; service_zone?: string | null; rating?: number; email?: string; owner_profile_id?: string; account_only?: boolean }
 export type AdminResource = { id: string; name?: string; status?: string; verification?: string }
 export type AdminCustomer = { id: string; full_name: string; phone_e164?: string; role: string; created_at: string }
@@ -56,6 +57,8 @@ export const adminApi = {
   deleteCoupon: (id: string) => apiFetch<void>(`/admin/coupons/${id}`, { method: 'DELETE' }),
   auditLogs: async () => (await apiFetch<{ rows: unknown[] }>('/admin/audit-logs')).rows,
   featureFlags: () => apiFetch<Record<string, boolean>>('/admin/feature-flags'),
+  dispatchSettings: () => apiFetch<AdminDispatchSettings>('/admin/dispatch-settings'),
+  updateDispatchSettings: (payload: AdminDispatchSettings) => apiFetch<AdminDispatchSettings>('/admin/dispatch-settings', { method: 'PATCH', body: JSON.stringify(payload) }),
   services: () => apiFetch<AdminService[]>('/admin/services'),
   saveService: async (payload: { code?: string; name: string; description?: string; basePricePaise: number; isActive: boolean; effectiveFrom?: string; effectiveTo?: string; capacityOptions?: string[]; detailOptions?: string[]; waterTypeOptions?: string[]; tankerCountOptions?: string[]; optionSurchargesPaise?: Record<string, Record<string, number>> }, id?: string) => id && (payload.effectiveFrom || payload.effectiveTo) ? apiFetch<AdminService>(`/admin/services/${id}/pricing`, { method: 'PATCH', body: JSON.stringify(payload) }) : apiFetch<AdminService>(id ? `/admin/services/${id}` : '/admin/services', { method: id ? 'PATCH' : 'POST', body: JSON.stringify(payload) }),
   subscriptions: () => apiFetch<AdminProgramRecord[]>('/admin/subscriptions'),

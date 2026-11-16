@@ -10,12 +10,13 @@ import { runStorageCleanupSweep } from '../services/jobs.js'
 import { transitionBooking, type BookingStatus } from '../services/bookingLifecycle.js'
 import { config } from '../config.js'
 import { buildVendorPayouts, DEFAULT_VENDOR_SHARE_RATE } from '../services/pricingMath.js'
+import { getManualAssignmentModeEnabled, setManualAssignmentModeEnabled } from '../services/manualAssignmentMode.js'
 import { failure } from '../lib/httpErrors.js'
 import { toE164IndianMobile } from '../lib/phone.js'
 import { listWindow, sendList, type ListWindow } from '../lib/listParams.js'
 import { cachedCatalog, invalidateCatalog } from '../services/catalogCache.js'
 const exactCount = (range: ListWindow) => (range.mode === 'paged' ? { count: 'exact' as const } : undefined)
-const router = Router(); router.use(requireAuth, (request, response, next) => { const role = request.profile?.role; if (role === 'admin') return next(); if (role === 'dispatcher' && (/^\/alerts(?:\/[^/]+)?$/.test(request.path) || /^\/orders\/[^/]+\/(assignment|status|cancel)$/.test(request.path))) return next(); return response.status(403).json({ error: 'Insufficient permissions' }) }); router.use(['/system/health', '/storage/cleanup', '/services', '/services/:id/pricing', '/payments', '/payouts'], requireRole('admin'))
+const router = Router(); router.use(requireAuth, (request, response, next) => { const role = request.profile?.role; if (role === 'admin') return next(); if (role === 'dispatcher' && (/^\/alerts(?:\/[^/]+)?$/.test(request.path) || /^\/orders\/[^/]+\/(assignment|status|cancel)$/.test(request.path))) return next(); return response.status(403).json({ error: 'Insufficient permissions' }) }); router.use(['/system/health', '/storage/cleanup', '/services', '/services/:id/pricing', '/payments', '/payouts', '/dispatch-settings'], requireRole('admin'))
 const optionSurchargesPaiseSchema = z.record(z.enum(['capacity', 'waterType', 'serviceType', 'grade', 'pump', 'materialType']), z.record(z.string().min(1).max(100), z.number().int().nonnegative().max(1_000_000_000))).optional()
 router.use('/services', async (request, response, next) => {
   if (!['POST', 'PATCH'].includes(request.method)) return next()
@@ -48,6 +49,23 @@ router.get('/system/health', async (_request, response) => { const tables = ['cu
 router.get('/notifications', async (_request, response) => { const { data: admins, error: adminError } = await supabase.from('profiles').select('id').eq('role', 'admin'); if (adminError) return databaseFailure(response, 'adminExtended.database_error', adminError, 500); const ids = (admins ?? []).map((admin) => admin.id); if (!ids.length) return response.json([]); const { data, error } = await supabase.from('notifications').select('*').in('recipient_id', ids).order('created_at', { ascending: false }).limit(100); if (error) return databaseFailure(response, 'adminExtended.database_error', error, 500); response.json(data ?? []) })
 router.patch('/notifications/:id/read', async (request, response) => { const { data, error } = await supabase.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', request.params.id).select().single(); if (error) return databaseFailure(response, 'adminExtended.database_error', error, 400); response.json(data) })
 router.post('/storage/cleanup', async (_request, response) => { response.json(await runStorageCleanupSweep()) })
+router.get('/dispatch-settings', async (_request, response) => {
+  try {
+    response.json({ manualAssignmentModeEnabled: await getManualAssignmentModeEnabled() })
+  } catch (error) {
+    databaseFailure(response, 'adminExtended.dispatch_setting_lookup_failed', error, 500)
+  }
+})
+router.patch('/dispatch-settings', async (request, response) => {
+  const parsed = z.object({ manualAssignmentModeEnabled: z.boolean() }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Invalid dispatch setting' })
+  try {
+    const manualAssignmentModeEnabled = await setManualAssignmentModeEnabled(parsed.data.manualAssignmentModeEnabled)
+    response.json({ manualAssignmentModeEnabled })
+  } catch (error) {
+    databaseFailure(response, 'adminExtended.dispatch_setting_update_failed', error, 500)
+  }
+})
 router.post('/notifications', async (request, response) => { const parsed = z.object({ customerId: z.string().uuid(), title: z.string().min(2).max(120), detail: z.string().min(1).max(2000), eventType: z.string().min(2).max(80).default('admin_message'), bookingId: z.string().uuid().optional() }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid notification' }); try { const data = await notifyCustomer({ customerId: parsed.data.customerId, title: parsed.data.title, detail: parsed.data.detail, eventType: parsed.data.eventType, bookingId: parsed.data.bookingId }); response.status(201).json(data) } catch (error) { failure(response, 400, 'Notification could not be created.', 'adminExtended.notification_failed', error) } })
 router.patch('/vendors/:id/status', async (request, response) => { const parsed = z.object({ status: z.enum(['pending','approved','rejected','suspended']).optional(), isOnline: z.boolean().optional() }).refine((value) => value.status !== undefined || value.isOnline !== undefined).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid vendor status' }); const { data: current, error: currentError } = await supabase.from('vendors').select('verification').eq('id', request.params.id).single(); if (currentError || !current) return response.status(404).json({ error: 'Vendor not found' }); const nextVerification = parsed.data.status ?? current.verification; if (parsed.data.isOnline === true && nextVerification !== 'approved') return response.status(409).json({ error: 'Approve the vendor before setting them active.' }); const online = parsed.data.status && parsed.data.status !== 'approved' ? false : parsed.data.isOnline; const update = Object.fromEntries(Object.entries({ verification: parsed.data.status, is_online: online }).filter(([, value]) => value !== undefined)); const { data, error } = await supabase.from('vendors').update(update).eq('id', request.params.id).select().single(); if (error) return databaseFailure(response, 'adminExtended.database_error', error, 400); response.json(data) })
 router.patch('/vendors/:id', async (request, response) => { const parsed = z.object({ businessName: z.string().min(2).optional(), phone: z.string().regex(/^\d{10}$/).optional(), serviceZone: z.string().min(2).optional(), latitude: z.number().finite().min(-90).max(90).optional(), longitude: z.number().finite().min(-180).max(180).optional() }).superRefine((value, context) => { if ((value.latitude === undefined) !== (value.longitude === undefined)) context.addIssue({ code: 'custom', message: 'Latitude and longitude must be provided together.' }) }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid vendor update' }); const { data, error } = await supabase.from('vendors').update(Object.fromEntries(Object.entries({ business_name: parsed.data.businessName, phone_e164: parsed.data.phone, service_zone: parsed.data.serviceZone, latitude: parsed.data.latitude, longitude: parsed.data.longitude }).filter(([, value]) => value !== undefined))).eq('id', request.params.id).select().single(); if (error) return databaseFailure(response, 'adminExtended.database_error', error, 400); response.json(data) })
