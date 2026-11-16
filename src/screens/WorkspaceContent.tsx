@@ -24,6 +24,8 @@ import { demoDataEnabled, customerDemoDataEnabled } from '../constants/demo'
 import { useAdminOrders } from '../hooks/useAdminData'
 import { useCustomerBookings } from '../hooks/useCustomerData'
 import { useVendorOrders } from '../hooks/useVendorData'
+import { useFeatureFlags } from '../hooks/useFeatureFlags'
+import { AdminDashboardV2 } from './AdminDashboardV2'
 const CustomerBookingsTable = lazyWithRetry(() => import('./CustomerBookingsTable').then((module) => ({ default: module.CustomerBookingsTable })))
 
 type Props = { role: WorkspaceRole; item: string; onNavigate: (screen: 'booking' | 'bookings' | 'offers' | 'home') => void; onNotice: (message: string) => void }
@@ -60,8 +62,12 @@ export const WorkspaceContent = memo(function WorkspaceContent({ role, item, onN
 function CustomerHomeHighlights({ onNavigate, onNotice }: { onNavigate: Props['onNavigate']; onNotice: Props['onNotice'] }) { return <section className="customer-home-highlights" aria-label={w.overview.highlightsAria}><CustomerOperationsPanel mode="subscriptions" onNavigate={onNavigate} onNotice={onNotice} /><CustomerUsagePanel /><CustomerOperationsPanel mode="membership" onNavigate={onNavigate} onNotice={onNotice} /><CustomerOperationsPanel mode="offers" onNavigate={onNavigate} onNotice={onNotice} /></section> }
 
 function Overview({ role, onNavigate, onNotice }: { role: WorkspaceRole; onNavigate: Props['onNavigate']; onNotice: Props['onNotice'] }) {
+  const featureFlags = useFeatureFlags()
   if (!demoDataEnabled && role === 'customer') return <CustomerLiveOverview onNavigate={onNavigate} />
   if (!demoDataEnabled && role === 'vendor') return <VendorLiveOverview onNotice={onNotice} />
+  if (!demoDataEnabled && role === 'admin' && featureFlags.data?.admin_dashboard_v2_enabled === true) {
+    return <AdminDashboardV2 areaAvailabilityEnabled={featureFlags.data.area_availability_enabled === true} />
+  }
   if (!demoDataEnabled && (role === 'admin' || role === 'dispatcher')) return <AdminLiveOverview role={role} onNotice={onNotice} />
   const copy = role === 'admin' ? w.overview.demo.admin : role === 'vendor' ? w.overview.demo.vendor : w.overview.demo.customer
   return <><div className="workspace-columns-new"><section className="workspace-surface-new"><div className="surface-heading-new"><div><p className="eyebrow">{copy.eyebrow}</p><h2>{copy.title}</h2></div><button className="button button-quiet" onClick={() => onNotice(w.shell.notice.refreshing)}>{w.common.refresh}</button></div><div className="pulse-card"><div className="pulse-card-icon"><PackageCheck size={22} /></div><div><strong>{copy.summary}</strong><p>{copy.detail}</p></div><CheckCircle2 size={19} /></div><Workflow role={role} /></section><aside className="workspace-surface-new workspace-side-surface"><p className="eyebrow">{w.common.quickActions}</p><h2>{w.common.keepMoving}</h2><Action icon={<ClipboardList />} label={role === 'customer' ? w.overview.actions.startBooking : role === 'vendor' ? w.overview.actions.reviewAvailableOrders : w.overview.actions.openOperationsQueue} onClick={() => role === 'customer' ? onNavigate('booking') : onNotice(w.shell.notice.nextView)} /><Action icon={<Bell />} label={w.overview.actions.viewNotifications} onClick={() => onNotice(w.shell.notice.caughtUp)} /></aside></div></>

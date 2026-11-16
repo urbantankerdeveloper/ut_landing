@@ -14,6 +14,23 @@ export type AdminSystemHealth = { ok: boolean; migrations: Array<{ table: string
 export type AdminNotification = { id: string; title: string; event_type: string; payload?: { detail?: string; bookingId?: string; reference?: string; status?: string }; read_at?: string; created_at: string }
 export type AdminSmsTemplate = { templateKey: string; body: string; variables: string[]; isActive: boolean; msg91TemplateId: string | null; updatedAt: string; isBuiltIn: boolean; allowedVariables: string[] | null }
 export type AdminAnalyticsSummary = { days: number; from: string; to: string; total: number; byEvent: Record<string, number>; funnel: { login: number; bookingStarted: number; bookingCreated: number; vendorAccepted: number; delivered: number; rates: Record<string, number> } }
+export type AdminDashboardSummary = {
+  activeOrdersByStatus: Record<string, number>
+  todayRevenuePaise: number
+  pendingPartnerApplications: number
+  onlineVendors: number
+  activeDrivers: number
+  openOrderAlerts: number
+  failedPayments: number
+  stuckOrders: number
+  generatedAt: string
+}
+export type AdminAreaAvailability = {
+  area: string
+  onlineVendors: number
+  activeVehicles: number
+  activeDrivers: number
+}
 export const adminApi = {
   orders: async () => (await apiFetch<{ rows: AdminOrder[] }>('/admin/orders')).rows,
   ordersForTrackingBoard: async () => {
@@ -52,6 +69,8 @@ export const adminApi = {
   updateOrderStatus: (id: string, status: string) => apiFetch<AdminOrder>(`/admin/orders/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   cancelOrder: (id: string, reason: string) => apiFetch<AdminOrder>(`/admin/orders/${id}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) }),
   report: (payload: AdminReportRequest) => apiFetch<AdminReportResponse>('/admin/reports', { method: 'POST', body: JSON.stringify(payload) }),
+  dashboardSummary: () => apiFetch<AdminDashboardSummary>('/admin/dashboard-summary'),
+  availabilityByArea: () => apiFetch<AdminAreaAvailability[]>('/admin/availability-by-area'),
   coupons: () => apiFetch<AdminCoupon[]>('/admin/coupons'),
   saveCoupon: (payload: Omit<AdminCoupon, 'id'>, id?: string) => apiFetch<AdminCoupon>(id ? `/admin/coupons/${id}` : '/admin/coupons', { method: id ? 'PATCH' : 'POST', body: JSON.stringify(payload) }),
   deleteCoupon: (id: string) => apiFetch<void>(`/admin/coupons/${id}`, { method: 'DELETE' }),

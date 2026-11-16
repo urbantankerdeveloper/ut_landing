@@ -85,8 +85,8 @@ tests and any required end-to-end checks.
 | `online_payment_enabled` | `false` | `true` after both platform checkouts are verified | Expose online checkout while retaining cash on delivery. |
 | `manual_assignment_mode_enabled` | `false` | `false` | When enabled, stop automatic vendor broadcast and await admin assignment. |
 | `admin_availability_toggle_enabled` | `true` | `true` | Expose independent online/active controls for vendors, vehicles, and drivers; existing web vendor online control remains available when off. |
-| `admin_dashboard_v2_enabled` | `false` | `true` | Show the consolidated dashboard while retaining the existing dashboard path. |
-| `area_availability_enabled` | `false` | `true` | Show availability grouped by service area. |
+| `admin_dashboard_v2_enabled` | `true` | `true` | Show the consolidated dashboard while retaining the existing dashboard path. |
+| `area_availability_enabled` | `true` | `true` | Show availability grouped by service area. |
 | `partner_application_otp_enabled` | `false` | `true` after tests | Require phone OTP verification before collecting/submitting the partner application. |
 | `address_geocoding_enabled` | `false` | `true` after location validation | Resolve selected/current coordinates to a usable address label. |
 | `invoice_generation_enabled` | `false` | `false` until trigger and invoice contents are agreed and verified | Generate and reconcile invoice records. |
@@ -121,3 +121,24 @@ the existing admin-only settings API. New bookings only skip vendor broadcast
 when the resolved setting is `true`. Once an admin assigns an order,
 `backend/src/routes/adminExtended.ts` sends `booking.updated` to both the
 customer and assigned vendor rooms so their order lists refresh immediately.
+
+`admin_dashboard_v2_enabled` gates the admin summary API at
+`backend/src/routes/adminExtended.ts`, the web overview at
+`src/screens/WorkspaceContent.tsx`, and the Flutter additions to
+`urban_tanker_app/lib/screens/admin/admin_pulse_screen.dart`. Turning it off
+restores the previous dashboard experience. The summary groups active orders
+by their existing statuses, counts submitted/in-review partner applications,
+approved online vendors, approved active drivers, open dispatcher alerts, and
+failed payment rows. Today's revenue is the sum of payments captured during
+the current India-local day; stale orders are active bookings unchanged for
+more than two hours.
+
+`area_availability_enabled` gates
+`GET /admin/availability-by-area` in `backend/src/routes/adminExtended.ts`, and
+the area sections in the web and Flutter dashboards. Vehicles and drivers are
+grouped through their owning vendor's `service_zone`. That column is free text,
+not a canonical service-area identifier, so grouping trims whitespace and
+merges case-only variants; production values should be standardized before
+relying on area totals for dispatch decisions. Counts include only approved
+resources explicitly marked online/active. The schema has no driver online
+field, so the dashboard labels drivers as active rather than online.

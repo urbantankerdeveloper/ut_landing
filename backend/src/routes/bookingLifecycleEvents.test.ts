@@ -1,6 +1,7 @@
 import express from 'express'
 import request from 'supertest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { config } from '../config.js'
 
 const state = vi.hoisted(() => ({
   results: new Map<string, unknown[]>(),
@@ -31,7 +32,7 @@ function nextResult(table: string) {
 function queryBuilder(table: string) {
   const result = nextResult(table)
   const builder: Record<string, unknown> = {}
-  for (const method of ['select', 'eq', 'in', 'is', 'or', 'update', 'insert', 'order', 'range', 'limit', 'upsert']) {
+  for (const method of ['select', 'eq', 'in', 'is', 'or', 'update', 'insert', 'order', 'range', 'limit', 'upsert', 'gte', 'lt', 'not']) {
     builder[method] = () => builder
   }
   builder.maybeSingle = () => Promise.resolve(result)
@@ -103,6 +104,8 @@ function setResults(table: string, ...results: unknown[]) {
 beforeEach(() => {
   state.results.clear()
   vi.clearAllMocks()
+  config.featureFlags.admin_dashboard_v2_enabled = false
+  config.featureFlags.area_availability_enabled = false
   mocks.transitionBooking.mockResolvedValue({ data: { id: BOOKING_ID, reference: 'UT-1', customer_id: 'cust-9', status: 'accepted' }, error: null })
   mocks.otpMatches.mockReturnValue(true)
   mocks.deliveryVerificationMethod.mockReturnValue('otp')
@@ -141,6 +144,84 @@ describe('admin dispatch settings', () => {
 
     expect(response.status).toBe(403)
     expect(mocks.setManualAssignmentModeEnabled).not.toHaveBeenCalled()
+  })
+})
+
+describe('admin dashboard summaries', () => {
+  it('keeps new summary endpoints disabled until their flags are enabled', async () => {
+    const dashboard = await request(buildApp())
+      .get('/api/admin/dashboard-summary')
+      .set('x-test-role', 'admin')
+    const availability = await request(buildApp())
+      .get('/api/admin/availability-by-area')
+      .set('x-test-role', 'admin')
+
+    expect(dashboard.status).toBe(404)
+    expect(availability.status).toBe(404)
+  })
+
+  it('returns captured revenue, operational counts, and two-hour stale orders', async () => {
+    config.featureFlags.admin_dashboard_v2_enabled = true
+    setResults('bookings',
+      ...[1, 2, 3, 4, 5].map((count) => ({ data: null, error: null, count })),
+      { data: null, error: null, count: 6 },
+    )
+    setResults('payments',
+      { data: [{ amount_paise: 4100 }, { amount_paise: 900 }], error: null },
+      { data: null, error: null, count: 7 },
+    )
+    setResults('partner_applications', { data: null, error: null, count: 8 })
+    setResults('vendors', { data: null, error: null, count: 9 })
+    setResults('drivers', { data: null, error: null, count: 10 })
+    setResults('dispatcher_alerts', { data: null, error: null, count: 11 })
+
+    const response = await request(buildApp())
+      .get('/api/admin/dashboard-summary')
+      .set('x-test-role', 'admin')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toMatchObject({
+      activeOrdersByStatus: {
+        pending_vendor: 1,
+        vendor_assigned: 2,
+        accepted: 3,
+        en_route: 4,
+        arrived: 5,
+      },
+      todayRevenuePaise: 5000,
+      pendingPartnerApplications: 8,
+      onlineVendors: 9,
+      activeDrivers: 10,
+      openOrderAlerts: 11,
+      failedPayments: 7,
+      stuckOrders: 6,
+    })
+  })
+
+  it('returns availability grouped by the vendors service area', async () => {
+    config.featureFlags.area_availability_enabled = true
+    setResults('vendors', {
+      data: [{
+        service_zone: 'Chennai North',
+        is_online: true,
+        verification: 'approved',
+        vehicles: [{ is_active: true, verification: 'approved' }],
+        drivers: [{ is_active: true, verification: 'approved' }],
+      }],
+      error: null,
+    })
+
+    const response = await request(buildApp())
+      .get('/api/admin/availability-by-area')
+      .set('x-test-role', 'admin')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual([{
+      area: 'Chennai North',
+      onlineVendors: 1,
+      activeVehicles: 1,
+      activeDrivers: 1,
+    }])
   })
 })
 

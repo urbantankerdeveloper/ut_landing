@@ -5,19 +5,19 @@ import { subscribeToRealtime } from '../services/realtime'
 const realtimeUrl = import.meta.env.VITE_REALTIME_URL ?? (import.meta.env.PROD ? window.location.origin : 'http://localhost:8080')
 
 const eventQueryPrefixes: Record<string, string[][]> = {
-  'booking.created': [['customer', 'bookings'], ['admin', 'orders']],
-  'booking.updated': [['customer', 'bookings'], ['customer', 'tracking'], ['vendor', 'orders'], ['vendor', 'accrued-earnings'], ['admin', 'orders']],
-  'booking.delivered': [['customer', 'bookings'], ['customer', 'tracking'], ['vendor', 'orders'], ['vendor', 'accrued-earnings'], ['admin', 'orders']],
-  'booking.vendor_accepted': [['customer', 'bookings'], ['customer', 'tracking'], ['vendor', 'orders'], ['admin', 'orders']],
+  'booking.created': [['customer', 'bookings'], ['admin', 'orders'], ['admin', 'dashboard-summary']],
+  'booking.updated': [['customer', 'bookings'], ['customer', 'tracking'], ['vendor', 'orders'], ['vendor', 'accrued-earnings'], ['admin', 'orders'], ['admin', 'dashboard-summary']],
+  'booking.delivered': [['customer', 'bookings'], ['customer', 'tracking'], ['vendor', 'orders'], ['vendor', 'accrued-earnings'], ['admin', 'orders'], ['admin', 'dashboard-summary']],
+  'booking.vendor_accepted': [['customer', 'bookings'], ['customer', 'tracking'], ['vendor', 'orders'], ['admin', 'orders'], ['admin', 'dashboard-summary']],
   'booking.location.updated': [['customer', 'tracking'], ['vendor', 'orders']],
   'vendor.order.created': [['vendor', 'orders'], ['vendor', 'notifications'], ['admin', 'orders']],
   'vendor.order.taken': [['vendor', 'orders'], ['vendor', 'notifications'], ['customer', 'bookings'], ['admin', 'orders']],
   'vendor.order.declined': [['vendor', 'orders'], ['vendor', 'notifications'], ['admin', 'orders']],
   'notification.created': [['customer', 'notifications'], ['vendor', 'notifications'], ['admin', 'notifications']],
-  'vendor.updated': [['admin', 'vendors'], ['vendor', 'dashboard']],
+  'vendor.updated': [['admin', 'vendors'], ['admin', 'availability-by-area'], ['vendor', 'dashboard']],
   'payment.authorized': [['customer', 'bookings'], ['admin', 'payments']],
-  'payment.captured': [['customer', 'bookings'], ['admin', 'payments']],
-  'payment.failed': [['customer', 'bookings'], ['admin', 'payments']],
+  'payment.captured': [['customer', 'bookings'], ['admin', 'payments'], ['admin', 'dashboard-summary']],
+  'payment.failed': [['customer', 'bookings'], ['admin', 'payments'], ['admin', 'dashboard-summary']],
 }
 
 function queryMatchesEvent(queryKey: QueryKey, eventType: string) {

@@ -15,6 +15,7 @@ import { failure } from '../lib/httpErrors.js'
 import { toE164IndianMobile } from '../lib/phone.js'
 import { listWindow, sendList, type ListWindow } from '../lib/listParams.js'
 import { cachedCatalog, invalidateCatalog } from '../services/catalogCache.js'
+import { ACTIVE_BOOKING_STATUSES, groupAvailabilityByArea, indiaDayBounds, type VendorAvailabilityRecord } from '../services/adminDashboard.js'
 const exactCount = (range: ListWindow) => (range.mode === 'paged' ? { count: 'exact' as const } : undefined)
 const router = Router(); router.use(requireAuth, (request, response, next) => { const role = request.profile?.role; if (role === 'admin') return next(); if (role === 'dispatcher' && (/^\/alerts(?:\/[^/]+)?$/.test(request.path) || /^\/orders\/[^/]+\/(assignment|status|cancel)$/.test(request.path))) return next(); return response.status(403).json({ error: 'Insufficient permissions' }) }); router.use(['/system/health', '/storage/cleanup', '/services', '/services/:id/pricing', '/payments', '/payouts', '/dispatch-settings'], requireRole('admin'))
 const optionSurchargesPaiseSchema = z.record(z.enum(['capacity', 'waterType', 'serviceType', 'grade', 'pump', 'materialType']), z.record(z.string().min(1).max(100), z.number().int().nonnegative().max(1_000_000_000))).optional()
@@ -46,6 +47,53 @@ router.use('/services', async (request, response, next) => {
   next()
 })
 router.get('/system/health', async (_request, response) => { const tables = ['customer_contracts', 'membership_plans', 'push_subscriptions', 'vendor_service_availability', 'notification_preferences', 'offline_mutations']; const migrations = await Promise.all(tables.map(async (table) => { const { error } = await supabase.from(table).select('*', { count: 'exact', head: true }); return { table, applied: !error, error: error?.message } })); const { data: bucket } = await supabase.storage.getBucket('urban-tanker-documents'); response.json({ ok: migrations.every((item) => item.applied), migrations, storage: { configured: Boolean(bucket) }, realtime: realtimeHealth(), configuration: { razorpay: Boolean(config.RAZORPAY_KEY_ID && config.RAZORPAY_KEY_SECRET), vapid: Boolean(config.VAPID_PUBLIC_KEY && config.VAPID_PRIVATE_KEY), supabase: Boolean(config.SUPABASE_URL && config.SUPABASE_SERVICE_ROLE_KEY) }, checkedAt: new Date().toISOString() }) })
+router.get('/dashboard-summary', requireRole('admin'), async (_request, response) => {
+  if (!config.featureFlags.admin_dashboard_v2_enabled) return response.status(404).json({ error: 'The admin dashboard is disabled.' })
+  const { from, to } = indiaDayBounds()
+  const staleBefore = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
+  const [statusResults, revenueResult, applicationsResult, vendorsResult, driversResult, alertsResult, failedPaymentsResult, stuckOrdersResult] = await Promise.all([
+    Promise.all(ACTIVE_BOOKING_STATUSES.map((status) =>
+      supabase.from('bookings').select('id', { count: 'exact', head: true }).eq('status', status))),
+    supabase.from('payments').select('amount_paise').eq('status', 'paid').gte('captured_at', from).lt('captured_at', to),
+    supabase.from('partner_applications').select('id', { count: 'exact', head: true }).in('status', ['submitted', 'under_review']),
+    supabase.from('vendors').select('id', { count: 'exact', head: true }).eq('is_online', true).eq('verification', 'approved'),
+    supabase.from('drivers').select('id', { count: 'exact', head: true }).eq('is_active', true).eq('verification', 'approved'),
+    supabase.from('dispatcher_alerts').select('id', { count: 'exact', head: true }).eq('status', 'open'),
+    supabase.from('payments').select('id', { count: 'exact', head: true }).eq('status', 'failed'),
+    supabase.from('bookings').select('id', { count: 'exact', head: true }).in('status', ACTIVE_BOOKING_STATUSES).lt('updated_at', staleBefore),
+  ])
+  const failedResult = [
+    ...statusResults,
+    revenueResult,
+    applicationsResult,
+    vendorsResult,
+    driversResult,
+    alertsResult,
+    failedPaymentsResult,
+    stuckOrdersResult,
+  ].find((result) => result.error)
+  if (failedResult?.error) return databaseFailure(response, 'adminExtended.dashboard_summary_failed', failedResult.error, 500)
+
+  response.json({
+    activeOrdersByStatus: Object.fromEntries(ACTIVE_BOOKING_STATUSES.map((status, index) => [status, statusResults[index]?.count ?? 0])),
+    todayRevenuePaise: (revenueResult.data ?? []).reduce((total, payment) => total + Number(payment.amount_paise ?? 0), 0),
+    pendingPartnerApplications: applicationsResult.count ?? 0,
+    onlineVendors: vendorsResult.count ?? 0,
+    activeDrivers: driversResult.count ?? 0,
+    openOrderAlerts: alertsResult.count ?? 0,
+    failedPayments: failedPaymentsResult.count ?? 0,
+    stuckOrders: stuckOrdersResult.count ?? 0,
+    generatedAt: new Date().toISOString(),
+  })
+})
+router.get('/availability-by-area', requireRole('admin'), async (_request, response) => {
+  if (!config.featureFlags.area_availability_enabled) return response.status(404).json({ error: 'Area availability is disabled.' })
+  const { data, error } = await supabase
+    .from('vendors')
+    .select('service_zone,is_online,verification,vehicles(is_active,verification),drivers(is_active,verification)')
+  if (error) return databaseFailure(response, 'adminExtended.area_availability_failed', error, 500)
+  response.json(groupAvailabilityByArea((data ?? []) as VendorAvailabilityRecord[]))
+})
 router.get('/notifications', async (_request, response) => { const { data: admins, error: adminError } = await supabase.from('profiles').select('id').eq('role', 'admin'); if (adminError) return databaseFailure(response, 'adminExtended.database_error', adminError, 500); const ids = (admins ?? []).map((admin) => admin.id); if (!ids.length) return response.json([]); const { data, error } = await supabase.from('notifications').select('*').in('recipient_id', ids).order('created_at', { ascending: false }).limit(100); if (error) return databaseFailure(response, 'adminExtended.database_error', error, 500); response.json(data ?? []) })
 router.patch('/notifications/:id/read', async (request, response) => { const { data, error } = await supabase.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', request.params.id).select().single(); if (error) return databaseFailure(response, 'adminExtended.database_error', error, 400); response.json(data) })
 router.post('/storage/cleanup', async (_request, response) => { response.json(await runStorageCleanupSweep()) })
