@@ -306,6 +306,12 @@ export const vendorContent = {
     today: 'Today',
     periodSeparator: ' - ',
     empty: 'No payout records found.',
+    accruedTitle: 'Unsettled delivery earnings (85%)',
+    accruedNote: 'Estimated from completed deliveries. This amount is not payable until admin settlement; the final amount is confirmed during settlement.',
+    accruedLoading: 'Loading unsettled earnings...',
+    accruedUnavailable: 'Unsettled earnings are unavailable.',
+    accruedEmpty: 'No completed deliveries are awaiting settlement.',
+    deliveredAt: 'Delivered',
   },
   complaints: {
     loading: 'Loading complaints...',

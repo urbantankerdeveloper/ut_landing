@@ -312,6 +312,7 @@ export default function BookingScreen() {
   const setBookingCompleted = useNavigationStore((state) => state.setBookingCompleted)
   const createBooking = useCreateCustomerBooking()
   const featureFlags = useFeatureFlags()
+  const onlinePaymentEnabled = featureFlags.data?.online_payment_enabled === true
   const servicesQuery = useCustomerServices()
   const razorpay = useRazorpayPayment()
   const [paymentFailure, setPaymentFailure] = useState<CheckoutError | null>(null)
@@ -348,6 +349,11 @@ export default function BookingScreen() {
   const paymentMethod = useWatch({ control, name: 'paymentMethod' })
   const capacity = getValues('capacity') ?? '5000'
   const details = { notes: getValues('notes') ?? '' }
+  useEffect(() => {
+    if (featureFlags.isSuccess && !onlinePaymentEnabled && paymentMethod === 'gateway') {
+      setValue('paymentMethod', 'cod')
+    }
+  }, [featureFlags.isSuccess, onlinePaymentEnabled, paymentMethod, setValue])
   const couponCode = getValues('couponCode') ?? ''
   const guestName = getValues('guestName') ?? ''
   const [serviceEntries, setServiceEntries] = useState<BookingServiceEntry[]>(draft.serviceEntries ?? (draft.selectedServices ?? []).map((serviceId, index) => ({ id: `item-${index + 1}`, serviceId })))
@@ -772,6 +778,11 @@ export default function BookingScreen() {
       setIsSubmitting(false)
       return
     }
+    if (paymentMethod === 'gateway' && !onlinePaymentEnabled) {
+      setError(c.payment.onlineUnavailable)
+      setIsSubmitting(false)
+      return
+    }
     try {
       const primaryService = serviceItems[0]
       if (!primaryService) throw new Error(c.errors.selectServiceBeforeConfirm)
@@ -944,7 +955,7 @@ export default function BookingScreen() {
             <div className="booking-price-summary"><div><span>{c.payment.services}</span><b>{c.payment.inr(subtotal.toLocaleString('en-IN'))}</b></div><div><span>{gstWaived ? c.payment.gstWaived : c.payment.gst(gstPercentage)}</span><b>{gst === undefined ? '—' : c.payment.inr(gst.toLocaleString('en-IN'))}</b></div>{couponDiscount > 0 && <div><span>{c.payment.couponDiscount}</span><b>{c.payment.couponDiscountAmount(couponDiscount.toLocaleString('en-IN'))}</b></div>}<div className="booking-price-total"><span>{c.payment.total}</span><b>{c.payment.inr(total.toLocaleString('en-IN'))}</b></div></div>
             <div className="payment-choice-list">
               <label className={paymentMethod === 'wallet' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'wallet'} onChange={() => setValue('paymentMethod', 'wallet')} /><Wallet size={18} /><span><b>{c.payment.methods[0].title}</b><small>{c.payment.methods[0].detail}</small></span></label>
-              <label className={paymentMethod === 'gateway' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'gateway'} onChange={() => setValue('paymentMethod', 'gateway')} /><CreditCard size={18} /><span><b>{c.payment.methods[1].title}</b><small>{c.payment.methods[1].detail}</small></span></label>
+              {onlinePaymentEnabled && <label className={paymentMethod === 'gateway' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'gateway'} onChange={() => setValue('paymentMethod', 'gateway')} /><CreditCard size={18} /><span><b>{c.payment.methods[1].title}</b><small>{c.payment.methods[1].detail}</small></span></label>}
               <label className={paymentMethod === 'cod' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'cod'} onChange={() => setValue('paymentMethod', 'cod')} /><Wallet size={18} /><span><b>{c.payment.methods[2].title}</b><small>{c.payment.methods[2].detail}</small></span></label>
               {paymentFailure ? <div className="payment-recovery" role="alert">
                 <p>{paymentFailureMessage}</p>

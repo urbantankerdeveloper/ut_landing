@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { allocateServiceAmountsPaise, buildVendorPayouts, isServiceInEffectiveWindow, sumServiceItemPrices } from './pricingMath.js'
+import { allocateServiceAmountsPaise, buildVendorPayouts, isServiceInEffectiveWindow, sumServiceItemPrices, vendorAccrualPaise } from './pricingMath.js'
 import { GST_PERCENTAGE, GST_RATE, quoteServices } from './pricing.js'
 
 const mock = vi.hoisted(() => ({ tables: new Map<string, { data: unknown; error: unknown }>(), testPricing: false }))
@@ -92,6 +92,11 @@ describe('effective pricing windows', () => {
 
 describe('vendor settlement payouts', () => {
   const period = { from: '2026-10-01', to: '2026-10-31' }
+  it('calculates accrued earnings at the default vendor share with per-booking rounding', () => {
+    expect(vendorAccrualPaise(10001)).toBe(8501)
+    expect(() => vendorAccrualPaise(Number.NaN)).toThrow('The vendor accrual amount is invalid.')
+  })
+
   it('groups delivered bookings by vendor and records the booking ids', () => {
     const payouts = buildVendorPayouts([
       { id: 'b1', vendor_id: 'v1', quoted_amount_paise: 100001 },

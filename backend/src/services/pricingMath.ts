@@ -21,8 +21,16 @@ const maxUnits = 50
 const maxCapacityLitres = 100_000
 const maxDepth = 1000
 export const maxPayablePaise = 100_000_000
+export const DEFAULT_VENDOR_SHARE_RATE = 0.85
 
 export class PricingError extends Error {}
+
+export function vendorAccrualPaise(quotedAmountPaise: number) {
+  if (!Number.isSafeInteger(quotedAmountPaise) || quotedAmountPaise < 0) {
+    throw new PricingError('The vendor accrual amount is invalid.')
+  }
+  return Math.round(quotedAmountPaise * DEFAULT_VENDOR_SHARE_RATE)
+}
 
 export function assertPayableAmount(amountPaise: number) {
   if (!Number.isSafeInteger(amountPaise) || amountPaise <= 0 || amountPaise > maxPayablePaise) throw new PricingError('The booking total is outside the payable range.')

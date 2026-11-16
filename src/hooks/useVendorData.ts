@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { apiFetch } from '../api/client'
-import { vendorApi, type VendorOrderMutation, type VendorOrderPage } from '../api/vendor'
+import { vendorApi, type VendorAccruedEarnings, type VendorOrderMutation, type VendorOrderPage } from '../api/vendor'
 import { demoDataEnabled } from '../constants/demo'
 import { enqueueMutation, flushMutationQueue, queuedMutationCount } from '../services/offlineMutationQueue'
 import { useRealtimeInvalidation } from './useRealtimeInvalidation'
 
-export const vendorQueryKeys = { dashboard: ['vendor', 'dashboard'], orders: ['vendor', 'orders'], vehicles: ['vendor', 'vehicles'], drivers: ['vendor', 'drivers'], payouts: ['vendor', 'payouts'], services: ['vendor', 'services'] } as const
+export const vendorQueryKeys = { dashboard: ['vendor', 'dashboard'], orders: ['vendor', 'orders'], vehicles: ['vendor', 'vehicles'], drivers: ['vendor', 'drivers'], payouts: ['vendor', 'payouts'], accruedEarnings: ['vendor', 'accrued-earnings'], services: ['vendor', 'services'] } as const
 const liveOptions = { enabled: !demoDataEnabled, staleTime: 30_000 }
 const LOCATION_POST_INTERVAL_MS = 15_000
 export function useVendorOfflineSync(enabled = true) { useEffect(() => { if (!enabled) return; const flush = async () => { const count = await flushMutationQueue((endpoint, init) => apiFetch(endpoint, init), (payload) => vendorApi.registerOfflineMutation(payload)); if (count) window.dispatchEvent(new Event('vendor-queue-flushed')) }; const handleServiceWorkerMessage = (event: MessageEvent) => { if (event.data?.type === 'urban-tanker-sync') void flush() }; window.addEventListener('online', flush); navigator.serviceWorker?.addEventListener('message', handleServiceWorkerMessage); void flush(); return () => { window.removeEventListener('online', flush); navigator.serviceWorker?.removeEventListener('message', handleServiceWorkerMessage) } }, [enabled]) }
@@ -19,12 +19,13 @@ export function useCreateVendorVehicle() { const queryClient = useQueryClient();
 export function useUpdateVendorDriver() { const queryClient = useQueryClient(); return useMutation({ mutationFn: ({ id, payload }: { id: string; payload: Parameters<typeof vendorApi.updateDriver>[1] }) => vendorApi.updateDriver(id, payload), onSuccess: () => queryClient.invalidateQueries({ queryKey: vendorQueryKeys.drivers }) }) }
 export function useCreateVendorDriver() { const queryClient = useQueryClient(); return useMutation({ mutationFn: vendorApi.createDriver, onSuccess: () => queryClient.invalidateQueries({ queryKey: vendorQueryKeys.drivers }) }) }
 export function useVendorPayouts() { const query = useQuery({ queryKey: vendorQueryKeys.payouts, queryFn: vendorApi.payouts, ...liveOptions }); useRealtimeInvalidation(vendorQueryKeys.payouts); return query }
+export function useVendorAccruedEarnings(enabled = true) { const query = useQuery<VendorAccruedEarnings>({ queryKey: vendorQueryKeys.accruedEarnings, queryFn: vendorApi.accruedEarnings, ...liveOptions, enabled: enabled && !demoDataEnabled }); useRealtimeInvalidation(vendorQueryKeys.accruedEarnings); return query }
 export function useRequestVendorPayout() { const queryClient = useQueryClient(); return useMutation({ mutationFn: async (payload: Parameters<typeof vendorApi.requestPayout>[0]) => { if (!navigator.onLine) { enqueueMutation({ endpoint: '/vendor/payouts/request', init: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) } }); return payload as Awaited<ReturnType<typeof vendorApi.requestPayout>> }; return vendorApi.requestPayout(payload) }, onSuccess: () => queryClient.invalidateQueries({ queryKey: vendorQueryKeys.payouts }) }) }
 export function useVendorServices() { const query = useQuery({ queryKey: vendorQueryKeys.services, queryFn: vendorApi.services, ...liveOptions }); useRealtimeInvalidation(vendorQueryKeys.services); return query }
 export function useUpdateVendorServiceAvailability() { const queryClient = useQueryClient(); return useMutation({ mutationFn: async ({ code, enabled }: { code: string; enabled: boolean }) => { if (!navigator.onLine) { enqueueMutation({ endpoint: `/vendor/services/${code}/availability`, init: { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) } }); return { code, enabled } }; return vendorApi.updateServiceAvailability(code, enabled) }, onSuccess: () => queryClient.invalidateQueries({ queryKey: vendorQueryKeys.services }) }) }
 export function useCreateVendorService() { const queryClient = useQueryClient(); return useMutation({ mutationFn: vendorApi.createService, onSuccess: () => queryClient.invalidateQueries({ queryKey: vendorQueryKeys.services }) }) }
 export function useVendorAttendance() { return useMutation({ mutationFn: async (payload: Parameters<typeof vendorApi.attendance>[0]) => { if (!navigator.onLine) { enqueueMutation({ endpoint: '/vendor/attendance', init: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) } }); return undefined }; return vendorApi.attendance(payload) } }) }
-export function useVendorDeliveryVerification() { return useMutation({ mutationFn: ({ id, otp, proofPath }: { id: string; otp?: string; proofPath?: string }) => vendorApi.verifyDelivery(id, { otp, proofPath }) }) }
+export function useVendorDeliveryVerification() { const queryClient = useQueryClient(); return useMutation({ mutationFn: ({ id, otp, proofPath }: { id: string; otp?: string; proofPath?: string }) => vendorApi.verifyDelivery(id, { otp, proofPath }), onSuccess: () => { void queryClient.invalidateQueries({ queryKey: vendorQueryKeys.orders }); void queryClient.invalidateQueries({ queryKey: vendorQueryKeys.accruedEarnings }) } }) }
 export function useVendorComplaints() { return useQuery({ queryKey: ['vendor', 'complaints'], queryFn: vendorApi.complaints, ...liveOptions }) }
 export function useVendorNotifications() { const query = useQuery({ queryKey: ['vendor', 'notifications'], queryFn: vendorApi.notifications, ...liveOptions }); useRealtimeInvalidation(['vendor', 'notifications']); return query }
 export function useCreateVendorComplaint() { const queryClient = useQueryClient(); return useMutation({ mutationFn: async (payload: Parameters<typeof vendorApi.createComplaint>[0]) => { if (!navigator.onLine) { enqueueMutation({ endpoint: '/vendor/complaints', init: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) } }); return payload as unknown as Awaited<ReturnType<typeof vendorApi.createComplaint>> }; return vendorApi.createComplaint(payload) }, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['vendor', 'complaints'] }) }) }
@@ -71,7 +72,10 @@ export function useVendorOrderMutation() {
     onError: (_error, _payload, context) => queryClient.setQueryData(vendorQueryKeys.orders, context?.previous),
     onSettled: async () => {
       queryClient.setQueryData<InfiniteData<VendorOrderPage, number>>(vendorQueryKeys.orders, (data) => data ? { ...data, pages: data.pages.slice(0, 1), pageParams: data.pageParams.slice(0, 1) } : data)
-      await queryClient.invalidateQueries({ queryKey: vendorQueryKeys.orders })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: vendorQueryKeys.orders }),
+        queryClient.invalidateQueries({ queryKey: vendorQueryKeys.accruedEarnings }),
+      ])
     },
   })
   function mutate(payload: VendorOrderMutation, options?: Parameters<typeof mutation.mutate>[1]) {

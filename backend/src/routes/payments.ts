@@ -12,6 +12,7 @@ import { notifyPaidOnlineAfterCodSwitch } from '../services/codOnlineSwitch.js'
 import { loadOrderGroup } from '../services/orderGroups.js'
 import { failure } from '../lib/httpErrors.js'
 import { settleBookingCheckout, type CheckoutRow } from './customer.js'
+import { config } from '../config.js'
 const router = Router()
 const razorpay = () => ({ key: process.env.RAZORPAY_KEY_ID, secret: process.env.RAZORPAY_KEY_SECRET })
 type RazorpayKeys = { key?: string; secret?: string }
@@ -79,6 +80,7 @@ router.post('/razorpay/order', requireAuth, async (request, response) => {
     .safeParse(request.body)
   const keys = razorpay()
   if (!parsed.success) return response.status(400).json({ error: 'Invalid payment order' })
+  if (!config.featureFlags.online_payment_enabled) return response.status(503).json({ error: 'Online payments are currently unavailable. Please choose cash on delivery.' })
   if (parsed.data.checkoutId) return checkoutPaymentOrder(response, request.authUser!.id, parsed.data.checkoutId, keys)
   const bookingId = parsed.data.bookingId
   if (!bookingId) return response.status(400).json({ error: 'Invalid payment order' })

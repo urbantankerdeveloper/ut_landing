@@ -70,7 +70,7 @@ tests and any required end-to-end checks.
 | `mpin_cooldown_enabled` | `true` | `true` | Keep a session locked during cooldown instead of signing out after failed MPIN attempts. |
 | `multi_service_tasks_enabled` | `false` | `true` after tests | Create independent tasks grouped under one order. |
 | `order_tracking_board_enabled` | `true` | `true` | Show status-grouped admin/vendor boards and customer progress. |
-| `vendor_earnings_realtime_enabled` | `false` | `true` if a completion-time earnings change is needed | Refresh or create earnings data when delivery is completed. |
+| `vendor_earnings_realtime_enabled` | `true` | `true` | Show unsettled delivery accruals at the 85% default share in vendor earnings; it is not payable until admin settlement. |
 | `online_payment_enabled` | `false` | `true` after both platform checkouts are verified | Expose online checkout while retaining cash on delivery. |
 | `manual_assignment_mode_enabled` | `false` | `false` | When enabled, stop automatic vendor broadcast and await admin assignment. |
 | `admin_availability_toggle_enabled` | `false` | `true` | Expose online/active controls for vendors, vehicles, and drivers. |
@@ -80,6 +80,22 @@ tests and any required end-to-end checks.
 | `address_geocoding_enabled` | `false` | `true` after location validation | Resolve selected/current coordinates to a usable address label. |
 | `invoice_generation_enabled` | `false` | `false` until trigger and invoice contents are agreed and verified | Generate and reconcile invoice records. |
 | `wallet_enabled` | `false` | `false` | Keep wallet code/routes available but hide wallet UI and reject wallet operations. |
+
+`vendor_earnings_realtime_enabled` is checked by the backend
+`GET /vendor/earnings/accrued` route and the delivery-event fan-out, and by the
+React `VendorPayoutPanel`/`VendorManagementPanel` and Flutter
+`VendorEarningsScreen`. Accruals include
+only delivered bookings without `settled_payout_id`; they are derived from the
+quoted amount at the 85% default rate, while payout requests remain limited to
+settled payout records. An admin settlement using a custom share rate can
+produce a different final payout amount.
+
+`online_payment_enabled` is checked by the backend booking, Razorpay-order, and
+COD-to-online-switch routes; the web `BookingScreen` and `CustomerBookingsTable`;
+and the Flutter booking payment selector and booking-details action. It remains
+off until checkout is verified end to end on both platforms. COD remains
+available, and payment verification/webhook handling stays enabled for
+payments already in flight.
 
 Purely visual web design work (brand palette and landing-page improvements)
 does not need a flag.

@@ -16,6 +16,7 @@ import { cachedCatalog } from '../services/catalogCache.js'
 import { limiterStore } from '../services/scaling.js'
 import { codSwitchStatuses, notifyRevertedToCash } from '../services/codOnlineSwitch.js'
 import { loadOrderGroup } from '../services/orderGroups.js'
+import { config } from '../config.js'
 const catalogCacheControl = 'private, max-age=30, stale-while-revalidate=120'
 const router = Router(); router.use(requireAuth)
 const deliveryOtpLimit = rateLimit({ windowMs: 10 * 60 * 1000, limit: 3, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:customerExtended:deliveryOtp:', 'open'), passOnStoreError: true, keyGenerator: (request) => `${request.authUser!.id}:${request.params.orderId}`, message: { error: 'Too many delivery codes requested for this order. Try again later.' } })
@@ -161,6 +162,7 @@ router.post('/orders/:orderId/payment-method/online', async (request, response) 
   if (!booking) return response.status(404).json({ error: 'Booking not found' })
   if (booking.payment_method === 'gateway') return response.json({ id: booking.id, paymentMethod: 'gateway' })
   if (booking.payment_method !== 'cod') return response.status(409).json({ error: 'Payment method cannot be changed for this booking' })
+  if (!config.featureFlags.online_payment_enabled) return response.status(503).json({ error: 'Online payments are currently unavailable. Please choose cash on delivery.' })
   if (!codSwitchStatuses.includes(booking.status)) return response.status(409).json({ error: 'Online payment can only be chosen before the driver starts the trip' })
   const orderGroup = await loadOrderGroup(booking.id, customerId)
   if (orderGroup.error) return databaseFailure(response, 'customerExtended.database_error', orderGroup.error, 500)

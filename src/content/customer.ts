@@ -452,6 +452,7 @@ export const customerContent = {
       cancelled: 'Payment was cancelled. Your booking is still set to cash on delivery.',
       failed: 'Payment failed. Your booking is still set to cash on delivery.',
       switchFailed: 'Could not switch this booking to online payment. Please try again.',
+      unavailable: 'Online payments are currently unavailable. Please choose cash on delivery.',
       revertFailed: 'Payment was not completed, and we could not switch this booking back to cash on delivery. Please contact support.',
     },
     demo: {

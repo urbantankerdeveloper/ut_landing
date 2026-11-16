@@ -1,10 +1,11 @@
-import { databaseFailure } from '../lib/httpErrors.js'
+import { databaseFailure, failure } from '../lib/httpErrors.js'
 import { Router } from 'express'
 import { requireAuth, requireRole } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 import { listWindow, sendList, type ListWindow } from '../lib/listParams.js'
 import { cachedCatalog } from '../services/catalogCache.js'
 import { config } from '../config.js'
+import { DEFAULT_VENDOR_SHARE_RATE, vendorAccrualPaise } from '../services/pricingMath.js'
 const exactCount = (range: ListWindow) => (range.mode === 'paged' ? { count: 'exact' as const } : undefined)
 const router = Router(); router.use(requireAuth, requireRole('vendor'))
 type BookingServiceDetail = { serviceId: string; capacity?: string; waterType?: string; tankerCount?: string; serviceType?: string; quantity?: string; depth?: string; grade?: string; pump?: string; pickupLocation?: string; materialType?: string; details?: string; deliveryDate?: string; preferredTime?: string; location?: string }
@@ -128,4 +129,47 @@ router.get('/vehicles', async (request, response) => { const { data: vendor } = 
 router.get('/drivers', async (request, response) => { const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', request.authUser!.id).single(); if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' }); const listRange = listWindow(request.query); const { data, error, count } = await supabase.from('drivers').select('id,name,mobile_e164,is_active,verification', exactCount(listRange)).eq('vendor_id', vendor.id).order('name').range(listRange.from, listRange.to); if (error) return databaseFailure(response, 'vendor.database_error', error, 500); sendList(response, listRange, data ?? [], count) })
 router.get('/services', async (request, response) => { const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', request.authUser!.id).single(); if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' }); let services; try { services = await cachedCatalog('vendor.services.base', async () => { const { data, error } = await supabase.from('service_catalog').select('*').eq('is_active', true).order('name'); if (error) throw error; return data ?? [] }) } catch (error) { return databaseFailure(response, 'vendor.database_error', error, 500) } const { data: availability, error: availabilityError } = await supabase.from('vendor_service_availability').select('service_code,is_enabled').eq('vendor_id', vendor.id); if (availabilityError) return databaseFailure(response, 'vendor.database_error', availabilityError, 500); const enabled = new Map((availability ?? []).map((item) => [item.service_code, item.is_enabled])); response.json(services.map((service) => ({ ...service, vendor_enabled: enabled.has(service.code) ? enabled.get(service.code) : true }))) })
 router.get('/payouts', async (request, response) => { const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', request.authUser!.id).single(); if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' }); const listRange = listWindow(request.query); const { data, error, count } = await supabase.from('vendor_payouts').select('*', exactCount(listRange)).eq('vendor_id', vendor.id).order('created_at', { ascending: false }).range(listRange.from, listRange.to); if (error) return databaseFailure(response, 'vendor.database_error', error, 500); sendList(response, listRange, data ?? [], count) })
+router.get('/earnings/accrued', async (request, response) => {
+  if (!config.featureFlags.vendor_earnings_realtime_enabled) {
+    return response.status(404).json({ error: 'Unsettled delivery earnings are not enabled.' })
+  }
+  const { data: vendor, error: vendorError } = await supabase.from('vendors').select('id').eq('owner_profile_id', request.authUser!.id).single()
+  if (vendorError) return databaseFailure(response, 'vendor.earnings_vendor_lookup_failed', vendorError, 500)
+  if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' })
+
+  const bookings: Array<{ id: string; reference: string; service_code: string; quoted_amount_paise: number; updated_at: string }> = []
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await supabase.from('bookings')
+      .select('id,reference,service_code,quoted_amount_paise,updated_at')
+      .eq('vendor_id', vendor.id)
+      .eq('status', 'delivered')
+      .is('settled_payout_id', null)
+      .order('updated_at', { ascending: false })
+      .range(offset, offset + 999)
+    if (error) return databaseFailure(response, 'vendor.earnings_accrual_lookup_failed', error, 500)
+    const page = data ?? []
+    bookings.push(...page)
+    if (page.length < 1000) break
+  }
+
+  try {
+    const rows = bookings.map((booking) => ({
+      id: booking.id,
+      reference: booking.reference,
+      serviceCode: booking.service_code,
+      amountPaise: vendorAccrualPaise(Number(booking.quoted_amount_paise)),
+      deliveredAt: booking.updated_at,
+    }))
+    const totalAmountPaise = rows.reduce((total, row) => total + row.amountPaise, 0)
+    if (!Number.isSafeInteger(totalAmountPaise)) throw new Error('The vendor accrual total is invalid.')
+    response.json({
+      shareRate: DEFAULT_VENDOR_SHARE_RATE,
+      totalAmountPaise,
+      totalCount: rows.length,
+      rows: rows.slice(0, 20),
+    })
+  } catch (error) {
+    failure(response, 500, 'Unsettled delivery earnings could not be calculated.', 'vendor.earnings_accrual_invalid', error)
+  }
+})
 export default router

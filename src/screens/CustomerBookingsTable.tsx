@@ -101,6 +101,10 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
   }
 
   async function payOnlineNow(booking: CustomerBooking) {
+    if (featureFlags.data?.online_payment_enabled !== true) {
+      setPayState({ kind: 'error', message: c.bookingsTable.payOnline.unavailable })
+      return
+    }
     setPayState({ kind: 'working' })
     try {
       await customerApi.switchBookingToOnline(booking.id)
@@ -207,7 +211,7 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
             : <button className="button button-primary" type="button" disabled={deliveryOtp.isPending} onClick={requestSelectedDeliveryOtp}>{deliveryOtp.isPending ? c.bookingsTable.deliveryOtp.requesting : c.bookingsTable.deliveryOtp.request}</button>}
           {deliveryOtpError && <p role="alert">{deliveryOtpError}</p>}
         </section>}
-        {!customerDemoDataEnabled && (payState.kind !== 'idle' || (payOnlineStatuses.includes(selectedBooking.status) && selectedBooking.paymentMethod === 'cod')) && <section className="customer-booking-pay-online">
+        {!customerDemoDataEnabled && (payState.kind !== 'idle' || (featureFlags.data?.online_payment_enabled === true && payOnlineStatuses.includes(selectedBooking.status) && selectedBooking.paymentMethod === 'cod')) && <section className="customer-booking-pay-online">
           {payState.kind === 'idle' && <>
             <p>{c.bookingsTable.payOnline.hint}</p>
             <button className="button button-primary" type="button" onClick={() => void payOnlineNow(selectedBooking)}>{c.bookingsTable.payOnline.action}</button>

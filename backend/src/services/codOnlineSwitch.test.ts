@@ -1,6 +1,7 @@
 import express from 'express'
 import request from 'supertest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { config } from '../config.js'
 
 const state = vi.hoisted(() => ({
   results: new Map<string, unknown[]>(),
@@ -77,6 +78,7 @@ const switchedBooking = {
 beforeEach(() => {
   state.results.clear()
   state.calls.length = 0
+  config.featureFlags.online_payment_enabled = true
   vi.mocked(sendTemplateSms).mockClear()
   vi.mocked(sendPushNotification).mockClear()
   vi.mocked(emitRealtimeToVendor).mockClear()
@@ -193,6 +195,19 @@ describe('POST /orders/:orderId/payment-method/online', () => {
     } finally {
       vi.unstubAllEnvs()
     }
+  })
+
+  it('returns 503 when online payments are disabled by the feature flag', async () => {
+    config.featureFlags.online_payment_enabled = false
+    setResults('bookings', {
+      data: { id: BOOKING_ID, status: 'accepted', payment_method: 'cod' },
+      error: null,
+    })
+
+    const response = await request(app()).post(switchRoute)
+
+    expect(response.status).toBe(503)
+    expect(updatePayloads('bookings')).toHaveLength(0)
   })
 
   it('rejects a switch once the driver has started the trip', async () => {

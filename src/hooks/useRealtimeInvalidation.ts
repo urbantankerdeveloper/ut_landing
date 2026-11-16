@@ -6,8 +6,8 @@ const realtimeUrl = import.meta.env.VITE_REALTIME_URL ?? (import.meta.env.PROD ?
 
 const eventQueryPrefixes: Record<string, string[][]> = {
   'booking.created': [['customer', 'bookings'], ['admin', 'orders']],
-  'booking.updated': [['customer', 'bookings'], ['customer', 'tracking'], ['vendor', 'orders'], ['admin', 'orders']],
-  'booking.delivered': [['customer', 'bookings'], ['customer', 'tracking'], ['vendor', 'orders'], ['admin', 'orders']],
+  'booking.updated': [['customer', 'bookings'], ['customer', 'tracking'], ['vendor', 'orders'], ['vendor', 'accrued-earnings'], ['admin', 'orders']],
+  'booking.delivered': [['customer', 'bookings'], ['customer', 'tracking'], ['vendor', 'orders'], ['vendor', 'accrued-earnings'], ['admin', 'orders']],
   'booking.vendor_accepted': [['customer', 'bookings'], ['customer', 'tracking'], ['vendor', 'orders'], ['admin', 'orders']],
   'booking.location.updated': [['customer', 'tracking'], ['vendor', 'orders']],
   'vendor.order.created': [['vendor', 'orders'], ['vendor', 'notifications'], ['admin', 'orders']],
