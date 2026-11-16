@@ -79,6 +79,7 @@ beforeEach(() => {
   state.results.clear()
   state.calls.length = 0
   config.featureFlags.online_payment_enabled = true
+  config.featureFlags.wallet_enabled = false
   vi.mocked(sendTemplateSms).mockClear()
   vi.mocked(sendPushNotification).mockClear()
   vi.mocked(emitRealtimeToVendor).mockClear()
@@ -248,5 +249,29 @@ describe('POST /orders/:orderId/payment-method/online', () => {
 
     expect(response.status).toBe(409)
     expect(updatePayloads('bookings')[1]).toMatchObject({ payment_method: 'cod', payment_switched_to_online_at: null })
+  })
+})
+
+describe('wallet feature flag', () => {
+  function app() {
+    const instance = express()
+    instance.use(express.json())
+    instance.use('/api/customer', customerRouter)
+    return instance
+  }
+
+  it('blocks wallet reads and top-ups before database access when disabled', async () => {
+    config.featureFlags.wallet_enabled = false
+
+    const wallet = await request(app()).get('/api/customer/wallet')
+    const topUp = await request(app())
+      .post('/api/customer/wallet/top-up/order')
+      .send({ amount: 100 })
+
+    expect(wallet.status).toBe(403)
+    expect(wallet.body).toEqual({ error: 'Wallet is currently disabled.' })
+    expect(topUp.status).toBe(403)
+    expect(topUp.body).toEqual({ error: 'Wallet is currently disabled.' })
+    expect(state.calls).toHaveLength(0)
   })
 })

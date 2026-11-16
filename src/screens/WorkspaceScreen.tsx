@@ -7,6 +7,7 @@ import { type WorkspaceRole } from '../stores/navigationStore'
 import { useAppNavigation } from '../routing/useAppNavigation'
 import { WorkspaceContentSkeleton } from '../components/ScreenSkeleton'
 import { useVendorOfflineSync } from '../hooks/useVendorData'
+import { useFeatureFlags } from '../hooks/useFeatureFlags'
 import { authApi } from '../api/auth'
 import { clearOfflineQueue } from '../services/offlineMutationQueue'
 import { BOOKING_DRAFT_KEY, REPEAT_BOOKING_KEY } from '../constants/bookingDraft'
@@ -48,8 +49,16 @@ export default function WorkspaceScreen() {
   const user = useAuthStore((state) => state.user)
   const signOut = useAuthStore((state) => state.signOut)
   const queryClient = useQueryClient()
+  const featureFlags = useFeatureFlags()
+  const walletEnabled = featureFlags.data?.wallet_enabled === true
   const data = roleData[activeRole]
+  const navItems = activeRole === 'customer' && !walletEnabled
+    ? data.nav.filter((item) => item.key !== 'wallet')
+    : data.nav
   const [activeItem, setActiveItem] = useState(() => (activeRole === 'vendor' && useVendorOrderRequestStore.getState().request ? 'orders' : 'overview'))
+  const visibleActiveItem = activeRole === 'customer' && activeItem === 'wallet' && !walletEnabled
+    ? 'overview'
+    : activeItem
   const unreadRealtime = useRealtimeNotificationStore((state) => state.unread)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -57,7 +66,7 @@ export default function WorkspaceScreen() {
   const [notices, setNotices] = useState<Array<{ id: number; message: string }>>([])
   const displayName = user?.name ?? (activeRole === 'admin' ? w.shell.displayName.admin : activeRole === 'dispatcher' ? w.shell.displayName.dispatcher : activeRole === 'vendor' ? w.shell.displayName.vendor : w.shell.displayName.customer)
   const navigationGroups = activeRole === 'admin' ? adminNavGroups : activeRole === 'vendor' ? vendorNavGroups : dispatcherNavGroups
-  const selectItem = useCallback((key: string) => { setActiveItem(key); if (key === 'notifications') useRealtimeNotificationStore.getState().clear(); const group = navigationGroups.find((item) => item.keys.includes(key)); if (group) setExpandedAdminGroups(new Set([group.label])); setNotices([]); setSidebarOpen(false) }, [navigationGroups])
+  const selectItem = useCallback((key: string) => { const selectedKey = key === 'wallet' && activeRole === 'customer' && !walletEnabled ? 'overview' : key; setActiveItem(selectedKey); if (selectedKey === 'notifications') useRealtimeNotificationStore.getState().clear(); const group = navigationGroups.find((item) => item.keys.includes(selectedKey)); if (group) setExpandedAdminGroups(new Set([group.label])); setNotices([]); setSidebarOpen(false) }, [activeRole, navigationGroups, setSidebarOpen, walletEnabled])
   const addNotice = useCallback((message: string) => { const id = Date.now() + Math.random(); setNotices((current) => [...current.slice(-4), { id, message }]); window.setTimeout(() => setNotices((current) => current.filter((notice) => notice.id !== id)), 5000) }, [])
   const showWorkspaceOverview = useCallback(() => selectItem('overview'), [selectItem])
   useEffect(() => {
@@ -83,13 +92,13 @@ export default function WorkspaceScreen() {
     signOut()
     navigate('home')
   }
-  const renderNavItem = ({ label, icon: Icon, key }: NavItem) => <button className={activeItem === key ? 'is-active' : ''} aria-current={activeItem === key ? 'page' : undefined} key={key} onClick={() => selectItem(key)} title={sidebarCollapsed ? label : undefined}><Icon size={16} /><span>{label}</span>{key === 'notifications' && unreadRealtime > 0 && <span className="nav-unread-badge" aria-label={realtimeContent.unreadLabel(unreadRealtime)}>{unreadRealtime}</span>}</button>
+  const renderNavItem = ({ label, icon: Icon, key }: NavItem) => <button className={visibleActiveItem === key ? 'is-active' : ''} aria-current={visibleActiveItem === key ? 'page' : undefined} key={key} onClick={() => selectItem(key)} title={sidebarCollapsed ? label : undefined}><Icon size={16} /><span>{label}</span>{key === 'notifications' && unreadRealtime > 0 && <span className="nav-unread-badge" aria-label={realtimeContent.unreadLabel(unreadRealtime)}>{unreadRealtime}</span>}</button>
   const renderNavGroups = (groups: NavGroup[]) => <>
-    {data.nav.filter((item) => item.key === 'overview').map(renderNavItem)}
+    {navItems.filter((item) => item.key === 'overview').map(renderNavItem)}
     {groups.map((group) => {
       const GroupIcon = group.icon
       const isExpanded = expandedAdminGroups.has(group.label)
-      const items = data.nav.filter((item) => group.keys.includes(item.key))
+      const items = navItems.filter((item) => group.keys.includes(item.key))
       return <div className="workspace-nav-group" key={group.label}>
         <button className="workspace-nav-group-toggle" type="button" aria-expanded={isExpanded} onClick={() => setExpandedAdminGroups((current) => current.has(group.label) ? new Set() : new Set([group.label]))} title={sidebarCollapsed ? group.label : undefined}>
           <GroupIcon size={16} /><span>{group.label}</span>{!isExpanded && unreadRealtime > 0 && group.keys.includes('notifications') && <span className="nav-group-unread" role="img" aria-label={realtimeContent.unreadLabel(unreadRealtime)} />}<ChevronDown className="workspace-nav-group-chevron" size={14} />
@@ -107,7 +116,7 @@ export default function WorkspaceScreen() {
       <nav className="workspace-nav-new" aria-label={w.shell.workspacePagesAria(activeRole)}>
         {activeRole === 'admin' || activeRole === 'vendor' || activeRole === 'dispatcher'
           ? renderNavGroups(navigationGroups)
-          : data.nav.map(renderNavItem)}
+          : navItems.map(renderNavItem)}
       </nav>
       <p className="workspace-caption-new sidebar-footer-label">{w.shell.footerLabel}</p>
     </aside>
@@ -115,7 +124,7 @@ export default function WorkspaceScreen() {
     <main className="workspace-main-new">
       <header className="workspace-topbar-new">
         <button className="sidebar-open" onClick={() => setSidebarOpen(true)} aria-label={w.shell.openSidebar}><Menu size={19} /></button>
-        <span className="topbar-title">{activeItem === 'overview' ? data.title : data.nav.find((item) => item.key === activeItem)?.label}</span>
+        <span className="topbar-title">{visibleActiveItem === 'overview' ? data.title : data.nav.find((item) => item.key === visibleActiveItem)?.label}</span>
         <div className="topbar-identity">
           <button className="topbar-home" onClick={showWorkspaceOverview}>{w.shell.home}</button>
           <span className="workspace-avatar-new">{displayName.slice(0, 1)}</span><span className="topbar-person">{displayName}</span>
@@ -123,8 +132,8 @@ export default function WorkspaceScreen() {
         </div>
       </header>
       <div className="workspace-content-new">
-        {activeItem === 'overview' && <><div className="workspace-heading-new"><div><p className="eyebrow">{data.caption}</p><h1>{data.description}</h1></div></div><div className="workspace-metrics-new">{data.metrics.map(({ label, value, note, icon: Icon }) => <article key={label}><span className="metric-icon"><Icon size={18} /></span><small>{label}</small><strong>{value}</strong><span className="metric-note">{note}</span></article>)}</div></>}
-        <Suspense fallback={<WorkspaceContentSkeleton />}><WorkspaceContent role={activeRole} item={activeItem} onNavigate={navigateContent} onNotice={addNotice} /></Suspense>
+        {visibleActiveItem === 'overview' && <><div className="workspace-heading-new"><div><p className="eyebrow">{data.caption}</p><h1>{data.description}</h1></div></div><div className="workspace-metrics-new">{data.metrics.map(({ label, value, note, icon: Icon }) => <article key={label}><span className="metric-icon"><Icon size={18} /></span><small>{label}</small><strong>{value}</strong><span className="metric-note">{note}</span></article>)}</div></>}
+        <Suspense fallback={<WorkspaceContentSkeleton />}><WorkspaceContent role={activeRole} item={visibleActiveItem} onNavigate={navigateContent} onNotice={addNotice} /></Suspense>
         {notices.length > 0 && <div className="workspace-notice-stack" aria-live="polite">{notices.map((notice) => <p className="workspace-notice-global" role="status" key={notice.id}>{notice.message}</p>)}</div>}
       </div>
     </main>

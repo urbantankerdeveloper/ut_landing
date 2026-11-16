@@ -3,7 +3,7 @@ import { lazyWithRetry } from '../utils/lazyWithRetry'
 import { Controller, useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { ArrowLeft, ArrowRight, Check, CreditCard, Crosshair, MapPin, Phone, Plus, Trash2, Wallet } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Banknote, Check, CreditCard, Crosshair, MapPin, Phone, Plus, Trash2, Wallet } from 'lucide-react'
 import { useAppNavigation } from '../routing/useAppNavigation'
 import { useCreateCustomerAddress, useCreateCustomerBooking, useCustomerAddresses, useCustomerOffers, useCustomerPhoneVerification, useCustomerPricing, useCustomerServices } from '../hooks/useCustomerData'
 import { useCouponValidation, useRazorpayPayment } from '../hooks/useFrontendFeatures'
@@ -312,6 +312,7 @@ export default function BookingScreen() {
   const setBookingCompleted = useNavigationStore((state) => state.setBookingCompleted)
   const createBooking = useCreateCustomerBooking()
   const featureFlags = useFeatureFlags()
+  const walletEnabled = featureFlags.data?.wallet_enabled === true
   const onlinePaymentEnabled = featureFlags.data?.online_payment_enabled === true
   const servicesQuery = useCustomerServices()
   const razorpay = useRazorpayPayment()
@@ -350,10 +351,12 @@ export default function BookingScreen() {
   const capacity = getValues('capacity') ?? '5000'
   const details = { notes: getValues('notes') ?? '' }
   useEffect(() => {
-    if (featureFlags.isSuccess && !onlinePaymentEnabled && paymentMethod === 'gateway') {
+    const flagsResolved = featureFlags.isSuccess || featureFlags.isError
+    if (flagsResolved && ((!walletEnabled && paymentMethod === 'wallet')
+      || (!onlinePaymentEnabled && paymentMethod === 'gateway'))) {
       setValue('paymentMethod', 'cod')
     }
-  }, [featureFlags.isSuccess, onlinePaymentEnabled, paymentMethod, setValue])
+  }, [featureFlags.isError, featureFlags.isSuccess, onlinePaymentEnabled, paymentMethod, setValue, walletEnabled])
   const couponCode = getValues('couponCode') ?? ''
   const guestName = getValues('guestName') ?? ''
   const [serviceEntries, setServiceEntries] = useState<BookingServiceEntry[]>(draft.serviceEntries ?? (draft.selectedServices ?? []).map((serviceId, index) => ({ id: `item-${index + 1}`, serviceId })))
@@ -959,9 +962,9 @@ export default function BookingScreen() {
             {couponMessage && <p className={couponDiscount ? 'coupon-success' : 'coupon-error'} role="status">{couponMessage}</p>}
             <div className="booking-price-summary"><div><span>{c.payment.services}</span><b>{c.payment.inr(subtotal.toLocaleString('en-IN'))}</b></div><div><span>{gstWaived ? c.payment.gstWaived : c.payment.gst(gstPercentage)}</span><b>{gst === undefined ? '—' : c.payment.inr(gst.toLocaleString('en-IN'))}</b></div>{couponDiscount > 0 && <div><span>{c.payment.couponDiscount}</span><b>{c.payment.couponDiscountAmount(couponDiscount.toLocaleString('en-IN'))}</b></div>}<div className="booking-price-total"><span>{c.payment.total}</span><b>{c.payment.inr(total.toLocaleString('en-IN'))}</b></div></div>
             <div className="payment-choice-list">
-              <label className={paymentMethod === 'wallet' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'wallet'} onChange={() => setValue('paymentMethod', 'wallet')} /><Wallet size={18} /><span><b>{c.payment.methods[0].title}</b><small>{c.payment.methods[0].detail}</small></span></label>
+              {walletEnabled && <label className={paymentMethod === 'wallet' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'wallet'} onChange={() => setValue('paymentMethod', 'wallet')} /><Wallet size={18} /><span><b>{c.payment.methods[0].title}</b><small>{c.payment.methods[0].detail}</small></span></label>}
               {onlinePaymentEnabled && <label className={paymentMethod === 'gateway' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'gateway'} onChange={() => setValue('paymentMethod', 'gateway')} /><CreditCard size={18} /><span><b>{c.payment.methods[1].title}</b><small>{c.payment.methods[1].detail}</small></span></label>}
-              <label className={paymentMethod === 'cod' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'cod'} onChange={() => setValue('paymentMethod', 'cod')} /><Wallet size={18} /><span><b>{c.payment.methods[2].title}</b><small>{c.payment.methods[2].detail}</small></span></label>
+              <label className={paymentMethod === 'cod' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'cod'} onChange={() => setValue('paymentMethod', 'cod')} /><Banknote size={18} /><span><b>{c.payment.methods[2].title}</b><small>{c.payment.methods[2].detail}</small></span></label>
               {paymentFailure ? <div className="payment-recovery" role="alert">
                 <p>{paymentFailureMessage}</p>
                 <div className="action-row">

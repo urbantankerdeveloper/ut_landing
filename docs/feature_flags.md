@@ -150,6 +150,13 @@ off until checkout is verified end to end on both platforms. COD remains
 available, and payment verification/webhook handling stays enabled for
 payments already in flight.
 
+`wallet_enabled` defaults to `false`. The backend gates customer wallet reads and
+top-up routes in `backend/src/routes/customerExtended.ts` and rejects wallet
+booking debits in `backend/src/routes/customer.ts`. The web workspace navigation,
+wallet panel, and booking selector check the public flag; Flutter's customer
+account and booking selector check the same flag. Razorpay webhook settlement
+for wallet top-ups already in flight is intentionally left enabled.
+
 Purely visual web design work (brand palette and landing-page improvements)
 does not need a flag.
 

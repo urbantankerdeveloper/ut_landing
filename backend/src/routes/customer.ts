@@ -485,6 +485,7 @@ async function placeQuotedBooking(request: Request, response: Response, includeQ
   const parsed = bookingSchema.safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Invalid booking', details: parsed.error.flatten() })
   if (!parsed.data.paymentMethod) return response.status(400).json({ error: 'Choose a payment method: wallet, online payment, or cash on delivery.' })
+  if (parsed.data.paymentMethod === 'wallet' && !config.featureFlags.wallet_enabled) return response.status(403).json({ error: 'Wallet is currently disabled. Choose another payment method.' })
   if (parsed.data.paymentMethod === 'gateway' && !config.featureFlags.online_payment_enabled) return response.status(503).json({ error: 'Online payments are currently unavailable. Please choose cash on delivery.' })
   const customerId = request.authUser!.id
   if (!config.REQUIRE_BOOKING_PHONE_VERIFICATION) {

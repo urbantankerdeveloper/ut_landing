@@ -7,6 +7,7 @@ import { CustomerTrackingPanel } from './CustomerTrackingPanel'
 import { CustomerMembershipPanel } from './CustomerMembershipPanel'
 import { CustomerPushSettings } from './CustomerPushSettings'
 import { customerContent as c } from '../content/customer'
+import { useFeatureFlags } from '../hooks/useFeatureFlags'
 
 type Mode = 'bookings' | 'tracking' | 'addresses' | 'profile' | 'subscriptions' | 'usage' | 'wallet' | 'invoices' | 'membership' | 'offers' | 'notifications' | 'contracts'
 type Props = { mode: Mode; onNavigate: (screen: 'booking' | 'home') => void; onNotice: (message: string) => void }
@@ -29,13 +30,14 @@ export function CustomerOperationsPanel({ mode, onNavigate, onNotice }: Props) {
   const [bookings] = useState(bookingData)
   const [subscriptions, setSubscriptions] = useState(subscriptionData)
   const [notifications, setNotifications] = useState(notificationData)
+  const featureFlags = useFeatureFlags()
   if (mode === 'bookings') return <CustomerBookings bookings={bookings} onNavigate={onNavigate} onOpen={(id) => onNotice(c.bookings.bookingOptionsOpened(id))} />
   if (mode === 'tracking') return <CustomerTrackingPanel onNotice={onNotice} />
   if (mode === 'addresses') return <LiveCustomerAddresses onNotice={onNotice} />
   if (mode === 'profile') return <CustomerProfile onNotice={onNotice} />
   if (mode === 'subscriptions') return <CustomerSubscriptions subscriptions={subscriptions} setSubscriptions={setSubscriptions} onNavigate={onNavigate} onNotice={onNotice} />
   if (mode === 'usage') return <CustomerUsage />
-  if (mode === 'wallet') return <CustomerWallet onNotice={onNotice} />
+  if (mode === 'wallet') return featureFlags.data?.wallet_enabled === true ? <CustomerWallet onNotice={onNotice} /> : null
   if (mode === 'membership') return <CustomerMembershipPanel onNotice={onNotice} />
   if (mode === 'offers') return <CustomerOffers onNotice={onNotice} />
   if (mode === 'notifications') return <><CustomerNotifications notifications={notifications} setNotifications={setNotifications} onNotice={onNotice} /><CustomerPushSettings onNotice={onNotice} /></>
