@@ -64,10 +64,10 @@ function unitsFor(serviceId: string, item: Exclude<PriceableServiceItem, string>
   return units
 }
 
-export function sumServiceItemPrices(items: PriceableServiceItem[], services: ServicePrice[]) {
+export function serviceItemPrices(items: PriceableServiceItem[], services: ServicePrice[]) {
   const pricesByCode = new Map(services.map((service) => [service.code, Number(service.base_price_paise)]))
   const surchargesByCode = new Map(services.map((service) => [service.code, service.config?.optionSurchargesPaise ?? {}]))
-  const subtotal = items.reduce((sum, item) => {
+  return items.map((item) => {
     const serviceId = typeof item === 'string' ? item : item.serviceId
     const units = typeof item === 'string' ? 1 : unitsFor(serviceId, item)
     const capacityMultiplier = typeof item === 'string' ? 1 : capacityFactor(serviceId, item.capacity)
@@ -79,9 +79,40 @@ export function sumServiceItemPrices(items: PriceableServiceItem[], services: Se
       const surcharge = Number(optionSurcharges[field]?.[value] ?? 0)
       return optionTotal + (Number.isFinite(surcharge) && surcharge > 0 ? surcharge : 0)
     }, 0)
-    return sum + Math.round(((pricesByCode.get(serviceId) ?? 0) * capacityMultiplier * depthMultiplier + surchargePaise) * units)
-  }, 0)
-  return assertPayableAmount(subtotal)
+    return Math.round(((pricesByCode.get(serviceId) ?? 0) * capacityMultiplier * depthMultiplier + surchargePaise) * units)
+  })
+}
+
+export function sumServiceItemPrices(items: PriceableServiceItem[], services: ServicePrice[]) {
+  return assertPayableAmount(serviceItemPrices(items, services).reduce((sum, price) => sum + price, 0))
+}
+
+export function allocateServiceAmountsPaise(totalPaise: number, weights: number[]) {
+  if (!Number.isSafeInteger(totalPaise) || totalPaise <= 0 || !weights.length) {
+    throw new PricingError('The service amount allocation is invalid.')
+  }
+  const totalWeight = weights.reduce((sum, weight) => {
+    if (!Number.isSafeInteger(weight) || weight < 0) {
+      throw new PricingError('The service amount allocation is invalid.')
+    }
+    return sum + BigInt(weight)
+  }, 0n)
+  if (totalWeight <= 0n) throw new PricingError('The service amount allocation is invalid.')
+  const total = BigInt(totalPaise)
+  const allocations = weights.map((weight) => Number(total * BigInt(weight) / totalWeight))
+  const remainders = weights.map((weight, index) => ({
+    index,
+    remainder: total * BigInt(weight) % totalWeight,
+  }))
+  const unallocated = totalPaise - allocations.reduce((sum, amount) => sum + amount, 0)
+  remainders.sort((first, second) => first.remainder === second.remainder
+    ? first.index - second.index
+    : first.remainder > second.remainder ? -1 : 1)
+  for (let index = 0; index < unallocated; index += 1) {
+    const allocationIndex = remainders[index]!.index
+    allocations[allocationIndex] = allocations[allocationIndex]! + 1
+  }
+  return allocations
 }
 
 export type SettlementBooking = { id: string; vendor_id: string | null; quoted_amount_paise?: number | string | null }

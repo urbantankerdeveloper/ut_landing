@@ -4,10 +4,11 @@ import { requireAuth, requireRole } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 import { listWindow, sendList, type ListWindow } from '../lib/listParams.js'
 import { cachedCatalog } from '../services/catalogCache.js'
+import { config } from '../config.js'
 const exactCount = (range: ListWindow) => (range.mode === 'paged' ? { count: 'exact' as const } : undefined)
 const router = Router(); router.use(requireAuth, requireRole('vendor'))
 type BookingServiceDetail = { serviceId: string; capacity?: string; waterType?: string; tankerCount?: string; serviceType?: string; quantity?: string; depth?: string; grade?: string; pump?: string; pickupLocation?: string; materialType?: string; details?: string; deliveryDate?: string; preferredTime?: string; location?: string }
-type BookingRecord = { id: string; reference: string; service_code: string; service_details?: BookingServiceDetail[] | null; address_text: string; latitude?: number | null; longitude?: number | null; quoted_amount_paise?: number | null; status: string; vendor_id?: string | null; vehicle_id?: string | null; driver_id?: string | null; created_at: string; scheduled_for?: string | null }
+type BookingRecord = { id: string; reference: string; service_code: string; service_details?: BookingServiceDetail[] | null; address_text: string; latitude?: number | null; longitude?: number | null; quoted_amount_paise?: number | null; status: string; vendor_id?: string | null; vehicle_id?: string | null; driver_id?: string | null; created_at: string; scheduled_for?: string | null; order_group_reference?: string | null; order_group_size?: number | null }
 type RelatedRecord = { id: string; name?: string; registration_number?: string }
 type OrderOffer = { event_type: string; distanceKm?: number }
 const statusMap: Record<string, 'Available' | 'Assigned' | 'Accepted' | 'En route' | 'Arrived' | 'Delivered' | 'Rejected' | 'Unavailable'> = { pending_vendor: 'Available', vendor_assigned: 'Assigned', accepted: 'Accepted', en_route: 'En route', arrived: 'Arrived', delivered: 'Delivered', cancelled: 'Rejected' }
@@ -92,7 +93,25 @@ async function loadVendorOrders(vendorId: string, offset = 0, pageSize?: number)
   const services = new Map((servicesResult.data ?? []).map((service) => [service.code, service.name]))
   const vehicles = new Map((vehiclesResult.data as RelatedRecord[] ?? []).map((vehicle) => [vehicle.id, vehicle.registration_number ?? vehicle.id]))
   const drivers = new Map((driversResult.data as RelatedRecord[] ?? []).map((driver) => [driver.id, driver.name ?? driver.id]))
-  return { data: orders.map((order) => normalizeOrder(order, vendorId, offerByBooking.get(order.id), services, vehicles, drivers)), error: null, hasMore }
+  const groupMetadata = new Map<string, { reference: string | null; size: number | null }>()
+  if (config.featureFlags.multi_service_tasks_enabled && orders.length) {
+    const { data: groupedRows, error: groupError } = await supabase.from('bookings')
+      .select('id,order_group_reference,order_group_size')
+      .in('id', orders.map((order) => order.id))
+    if (groupError) return { data: null, error: groupError, hasMore: false }
+    for (const row of groupedRows ?? []) {
+      groupMetadata.set(row.id, { reference: row.order_group_reference, size: row.order_group_size })
+    }
+  }
+  return {
+    data: orders.map((order) => ({
+      ...normalizeOrder(order, vendorId, offerByBooking.get(order.id), services, vehicles, drivers),
+      orderGroupReference: groupMetadata.get(order.id)?.reference ?? undefined,
+      orderGroupSize: groupMetadata.get(order.id)?.size ?? undefined,
+    })),
+    error: null,
+    hasMore,
+  }
 }
 router.get('/dashboard', async (request, response) => { const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', request.authUser!.id).single(); if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' }); const [ordersResult, vehiclesResult, driversResult] = await Promise.all([loadVendorOrders(vendor.id, 0, 100), supabase.from('vehicles').select('id,registration_number,capacity_litres,is_active,verification').eq('vendor_id', vendor.id).order('registration_number'), supabase.from('drivers').select('id,name,mobile_e164,is_active,verification').eq('vendor_id', vendor.id).order('name')]); const queryError = ordersResult.error ?? vehiclesResult.error ?? driversResult.error; if (queryError) return databaseFailure(response, 'vendor.database_error', queryError, 500); response.json({ orders: ordersResult.data ?? [], vehicles: vehiclesResult.data ?? [], drivers: driversResult.data ?? [] }) })
 router.get('/orders', async (request, response) => {

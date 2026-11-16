@@ -1,6 +1,6 @@
 import { config } from '../config.js'
 import { supabase } from '../supabase.js'
-import { assertPayableAmount, istToday, isServiceInEffectiveWindow, PricingError, sumServiceItemPrices, type PriceableServiceItem } from './pricingMath.js'
+import { allocateServiceAmountsPaise, assertPayableAmount, istToday, isServiceInEffectiveWindow, PricingError, serviceItemPrices, sumServiceItemPrices, type PriceableServiceItem } from './pricingMath.js'
 
 // Test mode (TEST_PRICING_ENABLED=true) charges each service line this flat amount with no GST.
 export const TEST_PRICING_PER_SERVICE_PAISE = 100
@@ -9,6 +9,16 @@ export const GST_RATE = GST_PERCENTAGE / 100
 // Null when test pricing is off, so clients only override their estimates when it is on.
 export function testPricingPerServicePaise() {
   return config.TEST_PRICING_ENABLED ? TEST_PRICING_PER_SERVICE_PAISE : null
+}
+
+type ServiceQuote = {
+  subtotalPaise: number
+  gstPaise: number
+  gstRate: number
+  discountPaise: number
+  totalPaise: number
+  couponId: string | undefined
+  serviceAmountsPaise?: number[]
 }
 
 // A customer with an active recurring subscription or an active membership pays no GST.
@@ -21,7 +31,7 @@ export async function customerHasGstWaiver(customerId: string) {
   return Boolean(subscription.data || membership.data)
 }
 
-export async function quoteServices(items: PriceableServiceItem[], couponCode?: string, customerId?: string) {
+export async function quoteServices(items: PriceableServiceItem[], couponCode?: string, customerId?: string, includeServiceAmounts = false): Promise<ServiceQuote> {
   const serviceItems = items.map((item) => typeof item === 'string' ? { serviceId: item } : item)
   const codes = serviceItems.map((item) => item.serviceId.trim()).filter(Boolean)
   const { data: services, error: servicesError } = await supabase.from('service_catalog').select('code,base_price_paise,config').in('code', codes).eq('is_active', true)
@@ -32,7 +42,10 @@ export async function quoteServices(items: PriceableServiceItem[], couponCode?: 
   const subtotalPaise = sumServiceItemPrices(serviceItems, activeServices)
   if (config.TEST_PRICING_ENABLED) {
     const testSubtotalPaise = TEST_PRICING_PER_SERVICE_PAISE * serviceItems.length
-    return { subtotalPaise: testSubtotalPaise, gstPaise: 0, gstRate: 0, discountPaise: 0, totalPaise: testSubtotalPaise, couponId: undefined }
+    const quote = { subtotalPaise: testSubtotalPaise, gstPaise: 0, gstRate: 0, discountPaise: 0, totalPaise: testSubtotalPaise, couponId: undefined }
+    return includeServiceAmounts
+      ? { ...quote, serviceAmountsPaise: serviceItems.map(() => TEST_PRICING_PER_SERVICE_PAISE) }
+      : quote
   }
   const gstWaived = customerId ? await customerHasGstWaiver(customerId) : false
   const appliedGstRate = gstWaived ? 0 : GST_RATE
@@ -54,5 +67,8 @@ export async function quoteServices(items: PriceableServiceItem[], couponCode?: 
     discountPaise = Math.min(Math.max(discountPaise, 0), subtotalPaise + gstPaise)
   }
   const totalPaise = assertPayableAmount(Math.max(0, subtotalPaise + gstPaise - discountPaise))
-  return { subtotalPaise, gstPaise, gstRate: appliedGstRate, discountPaise, totalPaise, couponId }
+  const quote = { subtotalPaise, gstPaise, gstRate: appliedGstRate, discountPaise, totalPaise, couponId }
+  return includeServiceAmounts
+    ? { ...quote, serviceAmountsPaise: allocateServiceAmountsPaise(totalPaise, serviceItemPrices(serviceItems, activeServices)) }
+    : quote
 }

@@ -39,6 +39,26 @@ until those sections pass focused validation.
   fetches it through `AuthApi.featureFlags`; both refresh on foreground/startup
   and cache for 60 seconds.
 
+## Section 2 runtime checks
+
+- `multi_service_tasks_enabled` is checked by
+  `backend/src/routes/customer.ts` for task creation, customer order reads, and
+  order payment/cancellation paths; by `backend/src/routes/payments.ts` for
+  grouped checkout; and by `backend/src/routes/vendor.ts` for vendor task
+  metadata. The grouped insert/cancel RPCs and additive schema are in
+  `backend/supabase/002_multi_service_tasks.sql`. Apply and verify that
+  migration before enabling the flag in any environment.
+- Web reads the cached public flags through `src/hooks/useFeatureFlags.ts`.
+  The task-count confirmation is checked in `src/screens/BookingScreen.tsx`;
+  grouped customer tasks/progress in `CustomerBookingsTable.tsx`;
+  administrator status board in `AdminBookingOperationsScreen.tsx`; and the
+  vendor board in `VendorOrderPanel.tsx`.
+- Flutter stores the map in `lib/app/app_controller.dart`. The task-count
+  confirmation and grouped customer booking views read the controller's
+  `multiServiceTasksEnabled` getter; customer progress, admin board, and vendor
+  board read `orderTrackingBoardEnabled` in their corresponding booking,
+  admin-orders, and vendor-operations screens.
+
 ## Planned flags
 
 “Target default” is applied only once the related section passes its focused
@@ -49,7 +69,7 @@ tests and any required end-to-end checks.
 | `duplicate_phone_check_enabled` | `true` | `true` | Reject use of an already verified phone during account phone verification. |
 | `mpin_cooldown_enabled` | `true` | `true` | Keep a session locked during cooldown instead of signing out after failed MPIN attempts. |
 | `multi_service_tasks_enabled` | `false` | `true` after tests | Create independent tasks grouped under one order. |
-| `order_tracking_board_enabled` | `false` | `true` | Show status-grouped admin/vendor boards and customer progress. |
+| `order_tracking_board_enabled` | `true` | `true` | Show status-grouped admin/vendor boards and customer progress. |
 | `vendor_earnings_realtime_enabled` | `false` | `true` if a completion-time earnings change is needed | Refresh or create earnings data when delivery is completed. |
 | `online_payment_enabled` | `false` | `true` after both platform checkouts are verified | Expose online checkout while retaining cash on delivery. |
 | `manual_assignment_mode_enabled` | `false` | `false` | When enabled, stop automatic vendor broadcast and await admin assignment. |

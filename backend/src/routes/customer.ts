@@ -14,8 +14,8 @@ import { isJpeg, selfieBucket, selfieMaxBytes, selfieObjectPath } from '../servi
 import { notifyCustomerSms } from '../services/bookingNotifications.js'
 import { config } from '../config.js'
 import { toE164IndianMobile } from '../lib/phone.js'
+import { allocateServiceAmountsPaise, PricingError } from '../services/pricingMath.js'
 import { databaseFailure, failure } from '../lib/httpErrors.js'
-import { PricingError } from '../services/pricingMath.js'
 import { listWindow, sendList } from '../lib/listParams.js'
 import { cachedCatalog } from '../services/catalogCache.js'
 import { limiterStore } from '../services/scaling.js'
@@ -155,9 +155,21 @@ router.get('/orders', async (request, response) => {
   const offset = Number(request.query.offset ?? 0)
   const pageSize = Number(request.query.pageSize ?? 100)
   if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) return response.status(400).json({ error: 'Invalid booking page' })
-  const { data, error } = await supabase.from('bookings')
-    .select('id,reference,service_code,service_details,address_text,latitude,longitude,quoted_amount_paise,status,scheduled_for,customer_phone_e164,access_notes,payment_method,created_at')
-    .eq('customer_id', request.authUser!.id).order('created_at', { ascending: false }).range(offset, offset + pageSize)
+  let data: unknown[] | null
+  let error: { message: string } | null
+  if (config.featureFlags.multi_service_tasks_enabled) {
+    const result = await supabase.from('bookings')
+      .select('id,reference,service_code,service_details,address_text,latitude,longitude,quoted_amount_paise,status,scheduled_for,customer_phone_e164,access_notes,payment_method,created_at,order_group_id,order_group_reference,order_group_size')
+      .eq('customer_id', request.authUser!.id).order('created_at', { ascending: false }).range(offset, offset + pageSize)
+    data = result.data
+    error = result.error
+  } else {
+    const result = await supabase.from('bookings')
+      .select('id,reference,service_code,service_details,address_text,latitude,longitude,quoted_amount_paise,status,scheduled_for,customer_phone_e164,access_notes,payment_method,created_at')
+      .eq('customer_id', request.authUser!.id).order('created_at', { ascending: false }).range(offset, offset + pageSize)
+    data = result.data
+    error = result.error
+  }
   if (error) return databaseFailure(response, 'customer.database_error', error, 500)
   const rows = data ?? []
   response.json({ rows: rows.slice(0, pageSize), nextOffset: rows.length > pageSize ? offset + pageSize : null })
@@ -250,6 +262,7 @@ function bookingInsert(data: z.infer<typeof bookingSchema>, services: ReturnType
     quoted_amount_paise: quotedAmountPaise,
   }
 }
+type CreatedBooking = { id: string; reference: string; vendor_id: string | null; quoted_amount_paise?: number; payment_method?: string; order_group_id?: string | null; order_group_reference?: string | null; order_group_size?: number | null }
 async function createBookingAndNotifications(input: {
   customerId: string
   reference: string
@@ -257,7 +270,7 @@ async function createBookingAndNotifications(input: {
   booking: ReturnType<typeof bookingInsert>
   vendors: Awaited<ReturnType<typeof findNearbyVendors>>
   payment?: { provider: string; amount_paise: number; currency: string; status: string }
-}) {
+}): Promise<{ booking: CreatedBooking; created: boolean }> {
   const { data, error } = await supabase.rpc('create_customer_booking', {
     p_booking: {
       ...input.booking,
@@ -269,12 +282,49 @@ async function createBookingAndNotifications(input: {
     p_payment: input.payment ?? null,
   })
   if (error) throw error
-  const result = data as { booking: { id: string; reference: string; vendor_id: string | null; quoted_amount_paise?: number; payment_method?: string }; created: boolean }
+  const result = data as { booking: CreatedBooking; created: boolean }
   if (result?.booking?.id) notifyNearbyVendors(input.vendors, result.booking, result.created)
   if (result?.created && input.booking.customer_phone_e164) {
     void notifyCustomerSms(input.booking.customer_phone_e164, 'guest_booking_confirmation', { reference: input.reference })
   }
   return result
+}
+async function createMultiServiceBookings(input: {
+  customerId: string
+  groupId: string
+  groupReference: string
+  idempotencyKey?: string
+  services: ReturnType<typeof getBookingServices>
+  data: z.infer<typeof bookingSchema>
+  taskAmountsPaise: number[]
+  vendors: Awaited<ReturnType<typeof findNearbyVendors>>
+  payment?: { provider: string; amount_paise: number; currency: string; status: string }
+}): Promise<{ booking: CreatedBooking; bookings: CreatedBooking[]; created: boolean }> {
+  const bookings = input.services.map((service, index) => ({
+    ...bookingInsert(input.data, [service], null, input.taskAmountsPaise[index]!),
+    reference: `${input.groupReference}-${String(index + 1).padStart(2, '0')}`,
+    customer_id: input.customerId,
+    idempotency_key: index === 0 ? input.idempotencyKey ?? null : null,
+    order_group_id: input.groupId,
+    order_group_reference: input.groupReference,
+    order_group_size: input.services.length,
+  }))
+  const { data, error } = await supabase.rpc('create_customer_bookings', {
+    p_bookings: bookings,
+    p_notifications: vendorNotifications(input.vendors, { id: '', reference: input.groupReference, payment_method: input.data.paymentMethod }),
+    p_payment: input.payment ?? null,
+  })
+  if (error) throw error
+  const result = data as { bookings: CreatedBooking[]; created: boolean }
+  if (!Array.isArray(result?.bookings) || !result.bookings.length) {
+    throw new Error('The grouped booking response was invalid.')
+  }
+  for (const booking of result.bookings) notifyNearbyVendors(input.vendors, booking, result.created)
+  const customerPhone = input.data.phone ? toE164IndianMobile(input.data.phone) : null
+  if (result.created && customerPhone) {
+    void notifyCustomerSms(customerPhone, 'guest_booking_confirmation', { reference: input.groupReference })
+  }
+  return { booking: result.bookings[0]!, bookings: result.bookings, created: result.created }
 }
 function quoteFailure(response: Response, error: unknown) {
   if (error instanceof PricingError) return response.status(400).json({ error: error.message })
@@ -317,18 +367,35 @@ async function createCheckoutBooking(checkout: CheckoutRow, method: 'gateway' | 
     else redeemed = true
   }
   const data = checkout.booking_request
-  let result: Awaited<ReturnType<typeof createBookingAndNotifications>>
+  let result: { booking: CreatedBooking; created: boolean; bookings?: CreatedBooking[] }
   try {
     const services = getBookingServices(data)
     const vendors = await findNearbyVendors(data.latitude, data.longitude)
-    result = await createBookingAndNotifications({
-      customerId: checkout.customer_id,
-      reference: bookingReference(),
-      idempotencyKey: checkout.id,
-      booking: { ...bookingInsert(data, services, null, checkout.quoted_amount_paise), payment_method: method },
-      vendors,
-      payment: method === 'cod' ? { provider: 'cash_on_delivery', amount_paise: checkout.quoted_amount_paise, currency: 'INR', status: 'pending' } : undefined,
-    })
+    if (config.featureFlags.multi_service_tasks_enabled && services.length > 1) {
+      const weights = await quoteServices(services, undefined, checkout.customer_id, true)
+      if (!weights.serviceAmountsPaise) throw new Error('Service prices could not be allocated.')
+      const taskAmountsPaise = allocateServiceAmountsPaise(checkout.quoted_amount_paise, weights.serviceAmountsPaise)
+      result = await createMultiServiceBookings({
+        customerId: checkout.customer_id,
+        groupId: crypto.randomUUID(),
+        groupReference: bookingReference(),
+        idempotencyKey: checkout.id,
+        services,
+        data: { ...data, paymentMethod: method },
+        taskAmountsPaise,
+        vendors,
+        payment: method === 'cod' ? { provider: 'cash_on_delivery', amount_paise: checkout.quoted_amount_paise, currency: 'INR', status: 'pending' } : undefined,
+      })
+    } else {
+      result = await createBookingAndNotifications({
+        customerId: checkout.customer_id,
+        reference: bookingReference(),
+        idempotencyKey: checkout.id,
+        booking: { ...bookingInsert(data, services, null, checkout.quoted_amount_paise), payment_method: method },
+        vendors,
+        payment: method === 'cod' ? { provider: 'cash_on_delivery', amount_paise: checkout.quoted_amount_paise, currency: 'INR', status: 'pending' } : undefined,
+      })
+    }
   } catch (error) {
     if (redeemed) await supabase.from('coupon_redemptions').delete().eq('coupon_id', checkout.coupon_id!).eq('customer_id', checkout.customer_id)
     throw error
@@ -419,16 +486,35 @@ async function placeQuotedBooking(request: Request, response: Response, includeQ
   if (verificationError) return response.status(verificationError.status).json({ error: verificationError.message })
   let quote: Awaited<ReturnType<typeof quoteServices>>
   try {
-    quote = await quoteServices(services, parsed.data.couponCode, customerId)
+    quote = await quoteServices(services, parsed.data.couponCode, customerId, config.featureFlags.multi_service_tasks_enabled && services.length > 1)
   } catch (error) {
     return quoteFailure(response, error)
   }
   const method = parsed.data.paymentMethod
+  const splitServices = config.featureFlags.multi_service_tasks_enabled && services.length > 1
+  const clientQuote = { ...quote }
+  delete clientQuote.serviceAmountsPaise
+  if (splitServices && !quote.serviceAmountsPaise) {
+    return failure(response, 500, 'Service prices could not be allocated.', 'customer.booking_amount_allocation_failed')
+  }
   if (method === 'wallet' && parsed.data.idempotencyKey) {
     // A retried wallet booking must not debit the wallet a second time.
     const { data: existing, error: existingError } = await supabase.from('bookings').select('id,reference,vendor_id,quoted_amount_paise,payment_method').eq('customer_id', customerId).eq('idempotency_key', parsed.data.idempotencyKey).maybeSingle()
     if (existingError) return databaseFailure(response, 'customer.booking_failed', existingError, 500)
-    if (existing) return response.status(200).json(includeQuote ? { ...existing, quote } : existing)
+    if (existing) {
+      const group = splitServices
+        ? await supabase.from('bookings').select('order_group_id,order_group_reference,order_group_size').eq('id', existing.id).maybeSingle()
+        : null
+      if (group?.error) return databaseFailure(response, 'customer.booking_failed', group.error, 500)
+      const order = group?.data?.order_group_id
+        ? await supabase.from('bookings').select('id,reference,service_code,service_details,address_text,quoted_amount_paise,status,scheduled_for,order_group_id,order_group_reference,order_group_size').eq('customer_id', customerId).eq('order_group_id', group.data.order_group_id).order('created_at')
+        : null
+      if (order?.error) return databaseFailure(response, 'customer.booking_failed', order.error, 500)
+      const responseBody = order?.data?.length
+        ? { ...existing, tasks: order.data, order_group_reference: group?.data?.order_group_reference, order_group_size: group?.data?.order_group_size }
+        : existing
+      return response.status(200).json(includeQuote ? { ...responseBody, quote: clientQuote } : responseBody)
+    }
   }
   let debitId: string | null = null
   if (method === 'wallet') {
@@ -443,8 +529,10 @@ async function placeQuotedBooking(request: Request, response: Response, includeQ
     if (couponRedeemed && quote.couponId) await supabase.from('coupon_redemptions').delete().eq('coupon_id', quote.couponId).eq('customer_id', customerId)
     if (debitId) await supabase.from('wallet_transactions').delete().eq('id', debitId)
   }
+  let couponRedemptionAt: string | null = null
   if (quote.couponId) {
-    const { error: redemptionError } = await supabase.from('coupon_redemptions').insert({ coupon_id: quote.couponId, customer_id: customerId, redeemed_at: new Date().toISOString() })
+    couponRedemptionAt = new Date().toISOString()
+    const { error: redemptionError } = await supabase.from('coupon_redemptions').insert({ coupon_id: quote.couponId, customer_id: customerId, redeemed_at: couponRedemptionAt })
     if (redemptionError?.code === '23505') {
       await releaseHold(false)
       return response.status(409).json({ error: 'This coupon has already been used on this account.' })
@@ -456,16 +544,48 @@ async function placeQuotedBooking(request: Request, response: Response, includeQ
   }
   try {
     const vendors = await findNearbyVendors(parsed.data.latitude, parsed.data.longitude)
-    const result = await createBookingAndNotifications({
-      customerId,
-      reference: bookingReference(),
-      idempotencyKey: parsed.data.idempotencyKey,
-      booking: bookingInsert(parsed.data, services, null, quote.totalPaise),
-      vendors,
-      payment: method === 'cod' ? { provider: 'cash_on_delivery', amount_paise: quote.totalPaise, currency: 'INR', status: 'pending' } : undefined,
-    })
+    let result: { booking: CreatedBooking; created: boolean; bookings: CreatedBooking[] }
+    if (splitServices) {
+      result = await createMultiServiceBookings({
+        customerId,
+        groupId: crypto.randomUUID(),
+        groupReference: bookingReference(),
+        idempotencyKey: parsed.data.idempotencyKey,
+        services,
+        data: parsed.data,
+        taskAmountsPaise: quote.serviceAmountsPaise!,
+        vendors,
+        payment: method === 'cod' ? { provider: 'cash_on_delivery', amount_paise: quote.totalPaise, currency: 'INR', status: 'pending' } : undefined,
+      })
+    } else {
+      const singleBooking = await createBookingAndNotifications({
+        customerId,
+        reference: bookingReference(),
+        idempotencyKey: parsed.data.idempotencyKey,
+        booking: bookingInsert(parsed.data, services, null, quote.totalPaise),
+        vendors,
+        payment: method === 'cod' ? { provider: 'cash_on_delivery', amount_paise: quote.totalPaise, currency: 'INR', status: 'pending' } : undefined,
+      })
+      result = { ...singleBooking, bookings: [] }
+    }
+    if (!result.created) {
+      if (debitId) {
+        const { error: debitCleanupError } = await supabase.from('wallet_transactions').delete().eq('id', debitId)
+        if (debitCleanupError) return databaseFailure(response, 'customer.wallet_debit_failed', debitCleanupError, 500)
+      }
+      if (quote.couponId && couponRedemptionAt) {
+        const { error: couponCleanupError } = await supabase.from('coupon_redemptions').delete()
+          .eq('coupon_id', quote.couponId)
+          .eq('customer_id', customerId)
+          .eq('redeemed_at', couponRedemptionAt)
+        if (couponCleanupError) return databaseFailure(response, 'customer.coupon_redemption_failed', couponCleanupError, 500)
+      }
+    }
     emitRealtimeToUser(customerId, 'booking.created', result.booking)
-    return response.status(result.created ? 201 : 200).json(includeQuote ? { ...result.booking, quote } : result.booking)
+    const responseBody = result.bookings.length > 0
+      ? { ...result.booking, tasks: result.bookings, order_group_reference: result.booking.reference.replace(/-\d{2}$/, ''), order_group_size: result.bookings.length }
+      : result.booking
+    return response.status(result.created ? 201 : 200).json(includeQuote ? { ...responseBody, quote: clientQuote } : responseBody)
   } catch (error) {
     await releaseHold(Boolean(quote.couponId))
     return databaseFailure(response, 'customer.booking_failed', error, 500, 'Booking could not be saved. Please try again.')
@@ -507,6 +627,21 @@ router.post('/bookings/:bookingId/cancel-online-payment', async (request, respon
   const { data: booking, error } = await supabase.from('bookings').select('id,status,payment_method,created_at').eq('id', request.params.bookingId).eq('customer_id', customerId).maybeSingle()
   if (error) return databaseFailure(response, 'customer.booking_failed', error, 500)
   if (!booking) return response.status(404).json({ error: 'Booking not found' })
+  if (config.featureFlags.multi_service_tasks_enabled) {
+    const { data, error: cancelError } = await supabase.rpc('cancel_customer_unpaid_order', {
+      p_booking_id: booking.id,
+      p_customer_id: customerId,
+    })
+    if (cancelError) return databaseFailure(response, 'customer.booking_failed', cancelError, 500)
+    const outcome = data as { deleted?: boolean; reason?: string } | null
+    if (!outcome?.deleted) {
+      if (outcome?.reason === 'not_found') return response.status(404).json({ error: 'Booking not found' })
+      if (outcome?.reason === 'paid') return response.status(409).json({ error: 'This booking has already been paid.' })
+      return response.status(409).json({ error: 'This booking has already been accepted and cannot be removed.' })
+    }
+    if (parsed.data.couponCode) await releaseCouponForCancelledBooking(customerId, parsed.data.couponCode, booking.created_at)
+    return response.status(204).send()
+  }
   if (booking.payment_method !== 'gateway') return response.status(409).json({ error: 'Only an online payment booking can be removed this way.' })
   if (!['pending_vendor', 'vendor_assigned'].includes(booking.status)) return response.status(409).json({ error: 'This booking has already been accepted and cannot be removed.' })
   const { data: payment, error: paymentError } = await supabase.from('payments').select('status').eq('booking_id', booking.id).maybeSingle()

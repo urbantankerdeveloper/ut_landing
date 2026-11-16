@@ -4,7 +4,7 @@ export const defaultFeatureFlags = {
   duplicate_phone_check_enabled: true,
   mpin_cooldown_enabled: true,
   multi_service_tasks_enabled: false,
-  order_tracking_board_enabled: false,
+  order_tracking_board_enabled: true,
   vendor_earnings_realtime_enabled: false,
   online_payment_enabled: false,
   manual_assignment_mode_enabled: false,

@@ -1,7 +1,7 @@
 import { ApiError, apiFetch } from './client'
 import { feedbackContent } from '../content/feedback'
 
-export type CustomerBooking = { id: string; service: string; services: BookingServiceDetails[]; location: string; status: string; amount: number; scheduledAt: string; phone?: string; notes?: string; paymentMethod?: BookingPaymentMethod; latitude?: number; longitude?: number }
+export type CustomerBooking = { id: string; reference?: string; orderGroupId?: string; orderGroupReference?: string; orderGroupSize?: number; service: string; services: BookingServiceDetails[]; location: string; status: string; amount: number; scheduledAt: string; phone?: string; notes?: string; paymentMethod?: BookingPaymentMethod; latitude?: number; longitude?: number }
 export type CustomerBookingPage = { rows: CustomerBooking[]; nextOffset: number | null }
 export type SavedAddress = { id: string; label: string; address: string; city: string; pincode: string; latitude?: number; longitude?: number }
 export type CustomerSubscription = { id: string; name: string; status: 'active' | 'paused' | 'cancelled'; nextDelivery?: string; amount: number }
@@ -15,7 +15,7 @@ export type CustomerProfileUpdate = Pick<CustomerProfile, 'name' | 'email'> & { 
 export type TrackingSnapshot = { orderId: string; status: string; latitude?: number; longitude?: number; customerLatitude?: number; customerLongitude?: number; eta?: string; vehicle?: string; driver?: string; otpRequired?: boolean; recorded_at?: string; recordedAt?: string; trackingAvailable?: boolean }
 export type PaymentOrder = { id: string; amount: number; currency: string; keyId?: string }
 export type PaymentVerification = { verified: boolean; orderId: string }
-export type CreateBookingResult = { id: string; quoted_amount_paise?: number; quote?: { totalPaise: number } }
+export type CreateBookingResult = { id: string; reference?: string; order_group_reference?: string; order_group_size?: number; tasks?: Record<string, unknown>[]; quoted_amount_paise?: number; quote?: { totalPaise: number } }
 export type PaymentTarget = { bookingId: string }
 export type PaymentReceipt = { status: 'pending' | 'paid' | 'failed' | 'refunded'; amountPaise: number; currency: string; method: string | null; cardNetwork: string | null; cardLast4: string | null; bank: string | null; wallet: string | null; vpa: string | null; capturedAt: string | null; feePaise: number | null; taxPaise: number | null; refundedPaise: number | null }
 export type BookingPaymentMethod = 'wallet' | 'gateway' | 'cod'
@@ -96,6 +96,10 @@ function normalizeBooking(item: Record<string, unknown>): CustomerBooking {
     : undefined
   return {
     id: String(item.id ?? item.reference),
+    reference: typeof item.reference === 'string' ? item.reference : undefined,
+    orderGroupId: typeof item.order_group_id === 'string' ? item.order_group_id : undefined,
+    orderGroupReference: typeof item.order_group_reference === 'string' ? item.order_group_reference : undefined,
+    orderGroupSize: typeof item.order_group_size === 'number' ? item.order_group_size : undefined,
     service: serviceNames.join(', ') || String(item.service ?? item.service_code ?? 'Service'),
     services,
     location: String(item.location ?? item.address_text ?? ''),

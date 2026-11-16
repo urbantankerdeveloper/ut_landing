@@ -9,6 +9,7 @@ import { refundAmountInPaise, signaturesMatch } from '../services/paymentSecurit
 import { epochSecondsToIso, extractPaymentDetails, type RazorpayPaymentEntity } from '../services/paymentDetails.js'
 import { refundCapturedAfterCod } from '../services/paymentReconciliation.js'
 import { notifyPaidOnlineAfterCodSwitch } from '../services/codOnlineSwitch.js'
+import { loadOrderGroup } from '../services/orderGroups.js'
 import { failure } from '../lib/httpErrors.js'
 import { settleBookingCheckout, type CheckoutRow } from './customer.js'
 const router = Router()
@@ -84,19 +85,23 @@ router.post('/razorpay/order', requireAuth, async (request, response) => {
   const { data: booking, error: bookingError } = await supabase.from('bookings').select('id,status,quoted_amount_paise').eq('id', bookingId).eq('customer_id', request.authUser!.id).single()
   if (bookingError || !booking) return response.status(404).json({ error: 'Booking not found' })
   if (['cancelled', 'delivered'].includes(booking.status)) return response.status(409).json({ error: 'This booking can no longer be paid.' })
-  const { data: existing, error: existingError } = await supabase.from('payments').select('status').eq('booking_id', booking.id).maybeSingle()
+  const orderGroup = await loadOrderGroup(booking.id, request.authUser!.id)
+  if (orderGroup.error) return databaseFailure(response, 'payments.group_lookup_failed', orderGroup.error, 500)
+  if (orderGroup.data?.tasks.every((task) => ['cancelled', 'delivered'].includes(task.status))) return response.status(409).json({ error: 'This booking can no longer be paid.' })
+  const paymentBookingId = orderGroup.data?.leadId ?? booking.id
+  const { data: existing, error: existingError } = await supabase.from('payments').select('status').eq('booking_id', paymentBookingId).maybeSingle()
   if (existingError) return databaseFailure(response, 'payments.lookup_failed', existingError, 500)
   if (existing?.status === 'paid') return response.status(409).json({ error: 'This booking has already been paid.' })
-  const amountPaise = Number(booking.quoted_amount_paise)
+  const amountPaise = orderGroup.data?.totalPaise ?? Number(booking.quoted_amount_paise)
   if (!Number.isInteger(amountPaise) || amountPaise <= 0) return response.status(409).json({ error: 'Booking does not have an authoritative quote' })
   if (!keys.key || !keys.secret) return response.status(503).json({ error: 'Payment provider is not configured' })
   const order = await createRazorpayOrder(response, keys, amountPaise, bookingId)
   if (!order) return
   const orderFields = { provider: 'razorpay', provider_order_id: order.id, amount_paise: order.amount, currency: order.currency, status: 'pending' }
-  const { error: insertError } = await supabase.from('payments').insert({ booking_id: booking.id, ...orderFields })
+  const { error: insertError } = await supabase.from('payments').insert({ booking_id: paymentBookingId, ...orderFields })
   if (insertError) {
     if (insertError.code !== '23505') return databaseFailure(response, 'payments.order_insert_failed', insertError, 500)
-    const { data: updated, error: updateError } = await supabase.from('payments').update({ ...orderFields, updated_at: new Date().toISOString() }).eq('booking_id', booking.id).in('status', ['pending', 'failed']).select('id').maybeSingle()
+    const { data: updated, error: updateError } = await supabase.from('payments').update({ ...orderFields, updated_at: new Date().toISOString() }).eq('booking_id', paymentBookingId).in('status', ['pending', 'failed']).select('id').maybeSingle()
     if (updateError) return databaseFailure(response, 'payments.order_update_failed', updateError, 500)
     if (!updated) return response.status(409).json({ error: 'A payment for this booking is already in progress or complete.' })
   }

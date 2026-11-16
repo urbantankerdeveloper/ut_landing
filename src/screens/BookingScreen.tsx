@@ -7,6 +7,7 @@ import { ArrowLeft, ArrowRight, Check, CreditCard, Crosshair, MapPin, Phone, Plu
 import { useAppNavigation } from '../routing/useAppNavigation'
 import { useCreateCustomerAddress, useCreateCustomerBooking, useCustomerAddresses, useCustomerOffers, useCustomerPhoneVerification, useCustomerPricing, useCustomerServices } from '../hooks/useCustomerData'
 import { useCouponValidation, useRazorpayPayment } from '../hooks/useFrontendFeatures'
+import { useFeatureFlags } from '../hooks/useFeatureFlags'
 import { CheckoutError } from '../utils/razorpayCheckout'
 import { PaymentReceiptCard } from '../components/PaymentReceiptCard'
 import { useAuthStore } from '../stores/authStore'
@@ -71,6 +72,8 @@ type BookingDraft = {
 }
 type CompletedBooking = {
   id: string | null
+  reference: string | null
+  taskCount: number
   services: BookingServiceDetails[]
   location: string
   deliveryDate: string
@@ -308,6 +311,7 @@ export default function BookingScreen() {
   const { navigate } = useAppNavigation()
   const setBookingCompleted = useNavigationStore((state) => state.setBookingCompleted)
   const createBooking = useCreateCustomerBooking()
+  const featureFlags = useFeatureFlags()
   const servicesQuery = useCustomerServices()
   const razorpay = useRazorpayPayment()
   const [paymentFailure, setPaymentFailure] = useState<CheckoutError | null>(null)
@@ -379,6 +383,7 @@ export default function BookingScreen() {
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [bookingId, setBookingId] = useState<string | null>(draft.bookingId ?? null)
+  const [bookingReference, setBookingReference] = useState<string | null>(null)
   const [quotedTotal, setQuotedTotal] = useState<number | null>(draft.quotedTotal ?? null)
   const [successBooking, setSuccessBooking] = useState<CompletedBooking | null>(null)
   const [idempotencyKey] = useState(() => draft.idempotencyKey ?? crypto.randomUUID())
@@ -706,9 +711,11 @@ export default function BookingScreen() {
     trackEvent('booking.created', { service: servicesForQuote.join(','), capacity: Number(capacity) || 0, paymentMethod, bookingId: createdBookingId, locationDetected: Boolean(serviceItems[0]?.latitude) })
   }
 
-  function finishBooking(createdBookingId: string | null, finalTotal: number, finalPaymentMethod = paymentMethod) {
+  function finishBooking(createdBookingId: string | null, finalTotal: number, finalPaymentMethod = paymentMethod, finalReference = bookingReference) {
     setSuccessBooking({
       id: createdBookingId,
+      reference: finalReference,
+      taskCount: featureFlags.data?.multi_service_tasks_enabled ? activeServiceEntries.length : 1,
       services: serviceItems.map((item) => ({ ...item })),
       location: sharedDeliveryAddress,
       deliveryDate: sharedDate,
@@ -748,6 +755,7 @@ export default function BookingScreen() {
     setOtpMessages({})
     setOtpPendingPhone(null)
     setBookingId(null)
+    setBookingReference(null)
     setQuotedTotal(null)
     setError(null)
     setPaymentFailure(null)
@@ -776,6 +784,7 @@ export default function BookingScreen() {
         setSaveAddressForFuture(false)
       }
       let currentBookingId = bookingId
+      let currentBookingReference = bookingReference
       let payableTotal = quotedTotal ?? total
       if (!customerDemoDataEnabled && !currentBookingId) {
         const booking = await createBooking.mutateAsync({
@@ -795,6 +804,8 @@ export default function BookingScreen() {
           paymentMethod,
         })
         currentBookingId = booking.id
+        currentBookingReference = booking.reference ?? booking.order_group_reference ?? null
+        setBookingReference(currentBookingReference)
         payableTotal = Number(booking.quote?.totalPaise ?? booking.quoted_amount_paise ?? 0) / 100 || total
         setQuotedTotal(payableTotal)
         setBookingId(currentBookingId)
@@ -814,7 +825,7 @@ export default function BookingScreen() {
           throw paymentError
         }
       }
-      finishBooking(currentBookingId, payableTotal)
+      finishBooking(currentBookingId, payableTotal, paymentMethod, currentBookingReference)
     } catch (paymentError) {
       if (paymentError instanceof CheckoutError) setPaymentFailure(paymentError)
       else setError(paymentError instanceof Error ? paymentError.message : c.errors.bookingFailed)
@@ -871,9 +882,10 @@ export default function BookingScreen() {
           <div>
             <p className="eyebrow">{c.success.eyebrow}</p>
             <h1>{successBooking && successBooking.services.length > 1 ? c.success.combinedHeading : c.success.heading}</h1>
+            {featureFlags.data?.multi_service_tasks_enabled && successBooking && successBooking.taskCount > 1 && <p>{successBooking.taskCount} tasks in this order</p>}
             <p className="booking-success-reference">
               <span>{c.success.referenceLead}</span>
-              <strong>{successBooking?.id ?? c.success.referenceFallback}</strong>
+              <strong>{successBooking?.reference ?? c.success.referenceFallback}</strong>
               <span>{c.success.referenceTrail}</span>
             </p>
           </div>

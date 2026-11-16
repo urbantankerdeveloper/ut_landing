@@ -1,6 +1,6 @@
 import { apiFetch } from './client'
 
-export type AdminOrder = { id: string; service: string; vendor?: string; location: string; status: string; amount: number }
+export type AdminOrder = { id: string; reference?: string; service: string; vendor?: string; location: string; status: string; amount: number }
 export type AdminVendor = { id: string; business_name?: string; name?: string; status?: string; verification?: string; is_online?: boolean; phone_e164?: string | null; service_zone?: string | null; rating?: number; email?: string; owner_profile_id?: string; account_only?: boolean }
 export type AdminResource = { id: string; name?: string; status?: string; verification?: string }
 export type AdminCustomer = { id: string; full_name: string; phone_e164?: string; role: string; created_at: string }
@@ -15,6 +15,17 @@ export type AdminSmsTemplate = { templateKey: string; body: string; variables: s
 export type AdminAnalyticsSummary = { days: number; from: string; to: string; total: number; byEvent: Record<string, number>; funnel: { login: number; bookingStarted: number; bookingCreated: number; vendorAccepted: number; delivered: number; rates: Record<string, number> } }
 export const adminApi = {
   orders: async () => (await apiFetch<{ rows: AdminOrder[] }>('/admin/orders')).rows,
+  ordersForTrackingBoard: async () => {
+    const pageSize = 100
+    const first = await apiFetch<{ rows: Record<string, unknown>[]; total: number }>('/admin/orders?page=1&pageSize=100')
+    const rows = [...first.rows]
+    const pageCount = Math.ceil(first.total / pageSize)
+    for (let page = 2; page <= pageCount; page += 1) {
+      const result = await apiFetch<{ rows: Record<string, unknown>[] }>(`/admin/orders?page=${page}&pageSize=${pageSize}`)
+      rows.push(...result.rows)
+    }
+    return rows
+  },
   vendors: () => apiFetch<AdminVendor[]>('/admin/vendors'),
   customers: () => apiFetch<AdminCustomer[]>('/admin/customers'),
   createCustomer: (payload: { email: string; password: string; name: string; phone: string }) => apiFetch<AdminCustomer>('/admin/customers', { method: 'POST', body: JSON.stringify(payload) }),

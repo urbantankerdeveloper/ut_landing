@@ -7,9 +7,10 @@ import { useFileUpload } from '../hooks/useFrontendFeatures'
 import { vendorContent as c } from '../content/vendor'
 import { useVendorOrderRequestStore } from '../stores/vendorOrderRequestStore'
 import { dismissNotice } from '../utils/notify'
+import { useFeatureFlags } from '../hooks/useFeatureFlags'
 
 type OrderStatus = 'Available' | 'Assigned' | 'Accepted' | 'En route' | 'Arrived' | 'Delivered' | 'Rejected' | 'Unavailable'
-type VendorOrder = { id: string; reference?: string; service: string; serviceDetails?: { service: string; capacity?: string; waterType?: string; tankerCount?: string; details?: string; deliveryDate?: string; location?: string }[]; location: string; distance?: number | null; amount: string; status: OrderStatus; statusMessage?: string; vehicle?: string; driver?: string }
+type VendorOrder = { id: string; reference?: string; orderGroupReference?: string; orderGroupSize?: number; service: string; serviceDetails?: { service: string; capacity?: string; waterType?: string; tankerCount?: string; details?: string; deliveryDate?: string; location?: string }[]; location: string; distance?: number | null; amount: string; status: OrderStatus; statusMessage?: string; vehicle?: string; driver?: string }
 type Props = { onNotice: (message: string) => void }
 const demoOrders: VendorOrder[] = demoDataEnabled ? [...c.orders.demo.orders] : []
 const demoVehicles = [...c.orders.demo.vehicles]
@@ -19,6 +20,7 @@ const nextStatus: Partial<Record<OrderStatus, OrderStatus>> = { Accepted: 'En ro
 export default function VendorOrderPanel({ onNotice }: Props) {
   const [orders, setOrders] = useState(demoOrders)
   const ordersQuery = useVendorOrders()
+  const featureFlags = useFeatureFlags()
   const vehiclesQuery = useVendorVehicles()
   const driversQuery = useVendorDrivers()
   const orderMutation = useVendorOrderMutation()
@@ -58,11 +60,11 @@ export default function VendorOrderPanel({ onNotice }: Props) {
   }, [orderRequest, orders, clearOrderRequest])
   /* eslint-enable react-hooks/set-state-in-effect */
   function updateOrder(id: string, update: Partial<VendorOrder>) { setOrders((items) => items.map((order) => order.id === id ? { ...order, ...update } : order)) }
-  function mutateOrder(order: VendorOrder, update: Partial<VendorOrder>, payload: Parameters<typeof orderMutation.mutate>[0], success: string) { updateOrder(order.id, update); orderMutation.mutate(payload, { onSuccess: () => { dismissNotice(`offer:${order.id}`); onNotice(success) }, onError: () => { updateOrder(order.id, order); onNotice(c.orders.messages.updateFailed(order.id)) } }) }
-  function accept(order: VendorOrder) { mutateOrder(order, { status: 'Accepted' }, { orderId: order.id, action: 'accept', status: 'Accepted' }, c.orders.messages.accepted(order.id)) }
-  function reject(order: VendorOrder) { const reason = window.prompt(c.orders.messages.rejectReasonPrompt(order.reference ?? order.id))?.trim(); if (!reason) return; mutateOrder(order, { status: 'Rejected' }, { orderId: order.id, action: 'reject', status: 'Rejected', reason }, c.orders.messages.rejected(order.id)) }
-  function advance(order: VendorOrder) { const status = nextStatus[order.status]; if (status) mutateOrder(order, { status }, { orderId: order.id, action: 'status', status }, c.orders.messages.marked(order.id, status)) }
-  function assign(event: FormEvent<HTMLFormElement>) { event.preventDefault(); if (!selected) return; const values = new FormData(event.currentTarget); const vehicle = String(values.get('vehicle')); const driver = String(values.get('driver')); const vehicleId = vehicleRecords.find((item) => item.label === vehicle)?.id; const driverId = driverRecords.find((item) => item.label === driver)?.id; if (!vehicleId || !driverId || !vehicle || !driver) return; const previous = selected; updateOrder(selected.id, { status: 'Accepted', vehicle, driver }); orderMutation.mutate({ orderId: selected.id, action: 'accept', status: 'Accepted', vehicleId, driverId }, { onSuccess: () => { setDialog(null); dismissNotice(`offer:${selected.id}`); onNotice(c.orders.messages.acceptedAssigned(selected.id)) }, onError: () => { updateOrder(selected.id, previous); onNotice(c.orders.messages.acceptFailed(selected.id)) } }) }
+  function mutateOrder(order: VendorOrder, update: Partial<VendorOrder>, payload: Parameters<typeof orderMutation.mutate>[0], success: string) { const reference = order.reference ?? 'Booking reference unavailable'; updateOrder(order.id, update); orderMutation.mutate(payload, { onSuccess: () => { dismissNotice(`offer:${order.id}`); onNotice(success) }, onError: () => { updateOrder(order.id, order); onNotice(c.orders.messages.updateFailed(reference)) } }) }
+  function accept(order: VendorOrder) { mutateOrder(order, { status: 'Accepted' }, { orderId: order.id, action: 'accept', status: 'Accepted' }, c.orders.messages.accepted(order.reference ?? 'Booking reference unavailable')) }
+  function reject(order: VendorOrder) { const reference = order.reference ?? 'Booking reference unavailable'; const reason = window.prompt(c.orders.messages.rejectReasonPrompt(reference))?.trim(); if (!reason) return; mutateOrder(order, { status: 'Rejected' }, { orderId: order.id, action: 'reject', status: 'Rejected', reason }, c.orders.messages.rejected(reference)) }
+  function advance(order: VendorOrder) { const status = nextStatus[order.status]; if (status) mutateOrder(order, { status }, { orderId: order.id, action: 'status', status }, c.orders.messages.marked(order.reference ?? 'Booking reference unavailable', status)) }
+  function assign(event: FormEvent<HTMLFormElement>) { event.preventDefault(); if (!selected) return; const values = new FormData(event.currentTarget); const vehicle = String(values.get('vehicle')); const driver = String(values.get('driver')); const vehicleId = vehicleRecords.find((item) => item.label === vehicle)?.id; const driverId = driverRecords.find((item) => item.label === driver)?.id; if (!vehicleId || !driverId || !vehicle || !driver) return; const previous = selected; const reference = selected.reference ?? 'Booking reference unavailable'; updateOrder(selected.id, { status: 'Accepted', vehicle, driver }); orderMutation.mutate({ orderId: selected.id, action: 'accept', status: 'Accepted', vehicleId, driverId }, { onSuccess: () => { setDialog(null); dismissNotice(`offer:${selected.id}`); onNotice(c.orders.messages.acceptedAssigned(reference)) }, onError: () => { updateOrder(selected.id, previous); onNotice(c.orders.messages.acceptFailed(reference)) } }) }
   async function completeDelivery(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!selected) return
@@ -87,7 +89,7 @@ export default function VendorOrderPanel({ onNotice }: Props) {
       })
       updateOrder(selected.id, { status: 'Delivered' })
       setDialog(null)
-      onNotice(c.orders.messages.deliveryVerified(selected.id))
+      onNotice(c.orders.messages.deliveryVerified(selected.reference ?? 'Booking reference unavailable'))
     } catch (error) {
       setDeliveryError(
         error instanceof Error ? error.message : c.orders.messages.deliveryFailed,
@@ -100,10 +102,15 @@ export default function VendorOrderPanel({ onNotice }: Props) {
   return <section className="workspace-view-panel vendor-order-panel">
     <div className="view-panel-heading"><div><p className="eyebrow">{c.orders.eyebrow}</p><h2>{c.orders.heading}</h2></div><div className="vendor-order-tools"><span className={offline ? 'offline-pill' : 'online-pill'}><i /> {offline ? c.orders.offlineDrafts : c.orders.online}</span><button className="button button-quiet" onClick={toggleOffline}>{offline ? c.orders.reconnect : c.orders.saveOfflineDraft}</button></div></div>
     <div className="vendor-order-filter"><label>{c.orders.filter.radiusLabel}<select value={radius} onChange={(event) => setRadius(event.target.value)}>{c.orders.filter.radiusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><span>{c.orders.filter.requestsAvailable(filtered.length)}</span></div>
+    {featureFlags.data?.order_tracking_board_enabled && <div className="order-tracking-columns vendor-order-board" aria-label="Vendor orders grouped by status">{(['Available', 'Assigned', 'Accepted', 'En route', 'Arrived', 'Delivered'] as const).map((status) => {
+      const statusOrders = filtered.filter((order) => order.status === status)
+      return <section className="order-tracking-column" key={status}><h3>{status} <span>{statusOrders.length}</span></h3>{statusOrders.map((order) => <article className="order-tracking-card" key={order.id}><strong>{order.reference ?? 'Booking reference unavailable'}</strong><span>{order.service}</span><small>{order.location}</small></article>)}</section>
+    })}</div>}
     <div className="vendor-order-list">{filtered.map((order) => <article key={order.id}>
       <span className="vendor-order-icon"><ClipboardList size={18} /></span>
       <div className="vendor-order-copy">
-        <b>{order.reference ?? order.id}{c.common.separator}{order.service}</b>
+        <b>{order.reference ?? 'Booking reference unavailable'}{c.common.separator}{order.service}</b>
+        {order.orderGroupSize && order.orderGroupSize > 1 && <small>{order.orderGroupReference} · {order.orderGroupSize} tasks in this order</small>}
         <p><MapPin size={12} /> {order.location}{c.common.separator}{typeof order.distance === 'number' ? c.orders.distanceAway(order.distance) : c.orders.distanceUnavailable}{c.common.separator}{order.amount}</p>
         {order.serviceDetails?.map((item) => <small key={item.service}>{item.service}{item.capacity ? c.orders.detail.capacity(item.capacity) : ''}{item.waterType ? c.orders.detail.waterType(item.waterType) : ''}{item.tankerCount ? c.orders.detail.tankers(item.tankerCount, item.tankerCount !== '1') : ''}{item.deliveryDate ? c.orders.detail.deliveryDate(item.deliveryDate) : ''}{item.location ? c.orders.detail.location(item.location) : ''}{item.details ? c.orders.detail.details(item.details) : ''}</small>)}
         {order.vehicle && <small><Truck size={12} /> {order.vehicle}{c.common.separator}<UserRound size={12} /> {order.driver}</small>}
@@ -119,7 +126,7 @@ export default function VendorOrderPanel({ onNotice }: Props) {
       </div>
     </article>)}{!filtered.length && <div className="admin-empty-state">{c.orders.emptyRadius}</div>}</div>
     {ordersQuery.hasNextPage && <button className="button button-quiet vendor-orders-load-more" disabled={ordersQuery.isFetchingNextPage} onClick={() => void ordersQuery.fetchNextPage()}>{ordersQuery.isFetchingNextPage ? c.orders.loadingOlder : c.orders.loadOlder}</button>}
-    {dialog === 'assignment' && selected && <Modal title={c.orders.assignment.title(selected.reference ?? selected.id)} onClose={() => setDialog(null)}><form className="modal-form" onSubmit={assign}><p className="modal-required-note">{c.orders.assignment.note}</p><label>{c.orders.assignment.vehicle}<select name="vehicle" required defaultValue={selected.vehicle || ''}><option value="" disabled>{c.orders.assignment.selectVehicle}</option>{vehicles.map((vehicle) => <option key={vehicle}>{vehicle}</option>)}</select></label><label>{c.orders.assignment.driver}<select name="driver" required defaultValue={selected.driver || ''}><option value="" disabled>{c.orders.assignment.selectDriver}</option>{drivers.map((driver) => <option key={driver}>{driver}</option>)}</select></label><button className="button button-primary button-large" type="submit">{c.orders.assignment.submit} <Check size={15} /></button></form></Modal>}
-    {dialog === 'delivery' && selected && <Modal title={c.orders.delivery.title(selected.id)} onClose={() => { setDialog(null); setDeliveryError(null) }}><form className="modal-form" onSubmit={completeDelivery}><p className="modal-required-note">{c.orders.delivery.note}</p><label>{c.orders.delivery.otp}<input name="otp" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} placeholder={c.orders.delivery.otpPlaceholder} /></label><label>{c.orders.delivery.proof}<input name="proof" type="file" accept="image/*" /></label>{deliveryError && <p role="alert">{deliveryError}</p>}<button className="button button-primary button-large" type="submit" disabled={deliveryVerification.isPending}><ShieldCheck size={15} /> {c.orders.delivery.submit}</button></form></Modal>}
+    {dialog === 'assignment' && selected && <Modal title={c.orders.assignment.title(selected.reference ?? 'Booking reference unavailable')} onClose={() => setDialog(null)}><form className="modal-form" onSubmit={assign}><p className="modal-required-note">{c.orders.assignment.note}</p><label>{c.orders.assignment.vehicle}<select name="vehicle" required defaultValue={selected.vehicle || ''}><option value="" disabled>{c.orders.assignment.selectVehicle}</option>{vehicles.map((vehicle) => <option key={vehicle}>{vehicle}</option>)}</select></label><label>{c.orders.assignment.driver}<select name="driver" required defaultValue={selected.driver || ''}><option value="" disabled>{c.orders.assignment.selectDriver}</option>{drivers.map((driver) => <option key={driver}>{driver}</option>)}</select></label><button className="button button-primary button-large" type="submit">{c.orders.assignment.submit} <Check size={15} /></button></form></Modal>}
+    {dialog === 'delivery' && selected && <Modal title={c.orders.delivery.title(selected.reference ?? 'Booking reference unavailable')} onClose={() => { setDialog(null); setDeliveryError(null) }}><form className="modal-form" onSubmit={completeDelivery}><p className="modal-required-note">{c.orders.delivery.note}</p><label>{c.orders.delivery.otp}<input name="otp" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} placeholder={c.orders.delivery.otpPlaceholder} /></label><label>{c.orders.delivery.proof}<input name="proof" type="file" accept="image/*" /></label>{deliveryError && <p role="alert">{deliveryError}</p>}<button className="button button-primary button-large" type="submit" disabled={deliveryVerification.isPending}><ShieldCheck size={15} /> {c.orders.delivery.submit}</button></form></Modal>}
   </section>
 }
