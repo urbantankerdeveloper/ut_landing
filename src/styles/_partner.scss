@@ -1,7 +1,7 @@
 @use '../theme/colors';
 
-.partner-screen { min-height: 100vh; background: colors.$paper; color: colors.$ink; }
-.partner-hero { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: end; max-width: 1240px; padding: 78px 28px 68px; margin: 0 auto; background: radial-gradient(circle at 88% 20%, colors.$teal-50, transparent 42%); }
+.partner-screen { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, .7fr); grid-template-areas: "hero hero" "form aside"; align-content: start; column-gap: 28px; min-height: 100vh; padding: 0 max(28px, calc((100% - 1240px) / 2 + 28px)) 80px; background: colors.$paper; color: colors.$ink; }
+.partner-hero { display: grid; grid-area: hero; grid-template-columns: 1fr 1fr; gap: 48px; align-items: end; max-width: none; padding: 78px 0 68px; margin: 0; background: radial-gradient(circle at 88% 20%, colors.$teal-50, transparent 42%); }
 .partner-hero h1 { max-width: 720px; margin: 0 0 22px; font-size: clamp(50px, 6vw, 84px); line-height: .98; letter-spacing: -4px; }
 .partner-hero h1 em { color: colors.$teal-400; font-style: normal; }
 .partner-hero > div:first-child > p:last-child { max-width: 680px; color: colors.$muted; font-size: 17px; }
@@ -10,8 +10,7 @@
 .partner-hero-stats span:last-child { border-right: 0; }
 .partner-hero-stats b { color: colors.$aqua; font-size: 16px; }
 .partner-hero-stats small { color: colors.$muted; font-size: 10px; }
-.partner-application-shell { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, .7fr); align-items: start; gap: 28px; max-width: 1240px; padding: 0 28px 80px; margin: 0 auto; }
-.partner-application { overflow: hidden; background: colors.$white; border-radius: 26px; box-shadow: 0 18px 45px rgba(colors.$ink, .09); }
+.partner-application { grid-area: form; align-self: start; overflow: hidden; background: colors.$white; border-radius: 26px; box-shadow: 0 18px 45px rgba(colors.$ink, .09); }
 .partner-form-intro { display: flex; align-items: end; justify-content: space-between; gap: 22px; padding: 34px 36px; color: colors.$white; background: colors.$teal-900; }
 .partner-form-intro h2 { margin: 0 0 8px; color: colors.$white; font-size: 30px; }
 .partner-form-intro p:not(.eyebrow) { margin: 0; color: colors.$teal-100; font-size: 12px; }.partner-form-intro .eyebrow { color: colors.$teal-200; }
@@ -43,7 +42,7 @@
 .partner-message, .partner-error { margin: 18px 36px 0; font-size: 12px; }
 .partner-message { color: colors.$teal-700; }
 .partner-error { color: colors.$coral-strong; }
-.partner-side-card { align-self: start; padding: clamp(24px, 2.2vw, 32px); color: colors.$white; background: linear-gradient(145deg, colors.$teal-900, colors.$aqua-dark); border-radius: 26px; box-shadow: 0 18px 45px rgba(colors.$ink, .14); }
+.partner-side-card { grid-area: aside; position: sticky; top: 106px; align-self: start; padding: clamp(24px, 2.2vw, 32px); color: colors.$white; background: linear-gradient(145deg, colors.$teal-900, colors.$aqua-dark); border-radius: 26px; box-shadow: 0 18px 45px rgba(colors.$ink, .14); }
 .partner-side-card h2 { max-width: 300px; margin: 0 0 20px; color: colors.$white; font-size: clamp(29px, 2.2vw, 32px); line-height: 1.05; }
 .partner-side-card ol { display: grid; gap: 16px; padding: 0; margin: 0; list-style: none; }
 .partner-side-card li { display: flex; gap: 14px; align-items: start; }
@@ -56,7 +55,7 @@
 .partner-help p { color: colors.$teal-100; font-size: 11px; }
 .partner-help .button { color: colors.$teal-900; background: colors.$white; border-color: colors.$white; }
 @media (min-width: 901px) {
-  .partner-side-card { position: -webkit-sticky; position: sticky; top: 88px; z-index: 2; }
+  .partner-side-card { position: -webkit-sticky; position: sticky; top: 88px; z-index: 2; max-height: calc(100vh - 104px); overflow-y: auto; }
 }
 @media (min-width: 901px) and (max-height: 760px) {
   .partner-side-card { padding: 18px 22px; }
@@ -67,5 +66,6 @@
   .partner-help { padding: 12px 14px; margin-top: 14px; }
   .partner-help p { margin: 6px 0; }
 }
-@media (max-width: 900px) { .partner-hero { grid-template-columns: 1fr; padding-top: 52px; }.partner-application-shell { grid-template-columns: 1fr; }.partner-side-card { position: static; order: -1; max-height: none; overflow: visible; } }
-@media (max-width: 620px) { .partner-hero, .partner-application-shell { padding-right: 18px; padding-left: 18px; }.partner-hero h1 { font-size: 48px; letter-spacing: -2.5px; }.partner-hero-stats { border-radius: 16px; }.partner-hero-stats span { padding: 18px 6px; }.partner-form-intro, .partner-form-section { padding: 26px 20px; }.partner-form-intro { align-items: start; flex-direction: column; }.partner-field-grid, .service-choice-grid { grid-template-columns: 1fr; }.partner-phone-verified { padding-right: 20px; padding-left: 20px; }.partner-declaration { padding-right: 20px; padding-left: 20px; }.partner-submit, .partner-login-action { width: calc(100% - 40px); margin-right: 20px; margin-left: 20px; }.partner-message, .partner-error { margin-right: 20px; margin-left: 20px; }.partner-side-card { padding: 28px 22px; } }
+@media (max-width: 900px) { .partner-screen { grid-template-columns: 1fr; grid-template-areas: "hero" "aside" "form"; }.partner-hero { grid-template-columns: 1fr; padding-top: 52px; }.partner-side-card { position: sticky; top: 82px; z-index: 20; max-height: calc(100vh - 94px); overflow-y: auto; } }
+@media (max-width: 760px) { .partner-side-card { position: sticky; top: 76px; max-height: calc(100vh - 88px); } }
+@media (max-width: 620px) { .partner-screen { padding-right: 18px; padding-left: 18px; }.partner-hero h1 { font-size: 48px; letter-spacing: -2.5px; }.partner-hero-stats { border-radius: 16px; }.partner-hero-stats span { padding: 18px 6px; }.partner-form-intro, .partner-form-section { padding: 26px 20px; }.partner-form-intro { align-items: start; flex-direction: column; }.partner-field-grid, .service-choice-grid { grid-template-columns: 1fr; }.partner-phone-verified { padding-right: 20px; padding-left: 20px; }.partner-declaration { padding-right: 20px; padding-left: 20px; }.partner-submit, .partner-login-action { width: calc(100% - 40px); margin-right: 20px; margin-left: 20px; }.partner-message, .partner-error { margin-right: 20px; margin-left: 20px; }.partner-side-card { padding: 28px 22px; } }
