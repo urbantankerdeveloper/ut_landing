@@ -1,8 +1,7 @@
-import { useState } from 'react'
 import { ArrowRight, Check, Construction, Droplets, LocateFixed, ShieldCheck, Truck, Waves, type LucideIcon } from 'lucide-react'
 import { useAppNavigation } from '../routing/useAppNavigation'
-import { reverseGeocodeApproximate } from '../services/geocoding'
 import { homeContent as c } from '../content/home'
+import { DeliveryLocationChip } from '../components/DeliveryLocationChip'
 
 type ServiceId = (typeof c.services)[number]['id']
 type BenefitId = (typeof c.benefits)[number]['id']
@@ -26,29 +25,6 @@ const benefitIcons: Record<BenefitId, LucideIcon> = {
 
 export default function HomeScreen() {
   const { navigate } = useAppNavigation()
-  const supportsGeolocation = typeof navigator !== 'undefined' && Boolean(navigator.geolocation)
-  const [locationLabel, setLocationLabel] = useState<string>(c.location.defaultLabel)
-  const [locationState, setLocationState] = useState<'idle' | 'loading' | 'ready' | 'unavailable'>('idle')
-
-  function detectLocation() {
-    if (!supportsGeolocation || locationState === 'loading') return
-    setLocationState('loading')
-    setLocationLabel(c.location.locating)
-    navigator.geolocation.getCurrentPosition(async ({ coords }) => {
-      try {
-        const area = await reverseGeocodeApproximate({ lat: coords.latitude, lng: coords.longitude })
-        setLocationLabel(area)
-        setLocationState('ready')
-      } catch (error) {
-        setLocationLabel(c.location.unableToDetermine)
-        setLocationState('unavailable')
-        console.warn(JSON.stringify({ event: 'home.location_reverse_geocode_failed', error: error instanceof Error ? error.message : 'Unknown error' }))
-      }
-    }, () => {
-      setLocationLabel(c.location.unavailable)
-      setLocationState('unavailable')
-    }, { enableHighAccuracy: false, timeout: 10_000, maximumAge: 60_000 })
-  }
 
   return (
     <div className="home-screen">
@@ -56,16 +32,7 @@ export default function HomeScreen() {
       <section className="hero hero-photo">
         <img className="hero-image" src={heroSrc} srcSet={heroSrcSet} sizes="100vw" width={1920} height={960} fetchPriority="high" decoding="async" alt="" />
         <div className="hero-copy">
-          <button
-            type="button"
-            className={`location-chip ${locationState === 'unavailable' ? 'location-chip-unavailable' : ''}`}
-            onClick={detectLocation}
-            disabled={!supportsGeolocation || locationState === 'loading'}
-            aria-live="polite"
-            aria-busy={locationState === 'loading'}
-          >
-            <LocateFixed size={13} /> <span>{locationState === 'ready' ? c.location.deliveringTo : locationState === 'loading' ? c.location.locatingLabel : supportsGeolocation ? c.location.useMyLocation : c.location.areaLabel}</span> <strong>{locationState === 'loading' ? c.location.locating : locationLabel}</strong>
-          </button>
+          <DeliveryLocationChip />
           <p className="eyebrow">{c.hero.eyebrow}</p>
           <h1>
             {c.hero.titleLead} <em>{c.hero.titleEmphasis}</em>

@@ -1,0 +1,787 @@
+@use '../theme/colors';
+@use '../theme/typography';
+
+.marketing-shell {
+  width: min(calc(100% - 48px), 1184px);
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.marketing-hero {
+  position: relative;
+  display: grid;
+  min-height: 610px;
+  overflow: hidden;
+  align-items: center;
+  isolation: isolate;
+  background: colors.$teal-900;
+}
+
+.marketing-hero::before {
+  position: absolute;
+  z-index: -1;
+  background: linear-gradient(90deg, rgba(colors.$teal-900, .98) 0%, rgba(colors.$teal-900, .9) 48%, rgba(colors.$teal-900, .48) 100%);
+  content: '';
+  inset: 0;
+}
+
+.marketing-hero-image {
+  position: absolute;
+  z-index: -2;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  inset: 0;
+}
+
+.marketing-hero-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(230px, 310px);
+  gap: clamp(32px, 7vw, 100px);
+  align-items: center;
+  padding-top: 70px;
+  padding-bottom: 70px;
+}
+
+.marketing-hero-copy {
+  max-width: 720px;
+}
+
+.marketing-hero .location-chip {
+  max-width: 100%;
+  margin-bottom: 28px;
+  color: colors.$teal-900;
+  background: colors.$teal-50;
+  text-align: left;
+}
+
+.marketing-hero .location-chip strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.marketing-eyebrow {
+  margin: 0 0 12px;
+  color: colors.$aqua;
+  font: 600 11px typography.$font-mono;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+}
+
+.marketing-hero .marketing-eyebrow {
+  color: colors.$teal-100;
+}
+
+.marketing-hero h1,
+.marketing-page-hero h1 {
+  max-width: 760px;
+  margin: 0 0 20px;
+  font-size: clamp(43px, 6vw, 76px);
+  line-height: 1.03;
+  letter-spacing: -.055em;
+}
+
+.marketing-hero h1 {
+  color: colors.$white;
+}
+
+.marketing-hero h1 em {
+  color: colors.$teal-200;
+  font-style: normal;
+}
+
+.marketing-hero-lede {
+  max-width: 620px;
+  margin: 0;
+  color: colors.$teal-100;
+  font-size: clamp(15px, 1.4vw, 18px);
+  line-height: 1.75;
+}
+
+.marketing-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.marketing-button-light {
+  color: colors.$teal-900;
+  background: colors.$white;
+  border-color: colors.$white;
+}
+
+.marketing-button-light:hover {
+  background: colors.$teal-50;
+}
+
+.marketing-trust-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 22px;
+  margin-top: 30px;
+  color: colors.$teal-100;
+  font-size: 12px;
+}
+
+.marketing-trust-row span {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+}
+
+.marketing-trust-row svg {
+  color: colors.$teal-200;
+}
+
+.marketing-trust-row b {
+  color: colors.$white;
+}
+
+.marketing-hero-note {
+  padding: 26px;
+  color: colors.$white;
+  background: rgba(colors.$teal-900, .72);
+  border: 1px solid rgba(colors.$teal-100, .45);
+  border-radius: 20px;
+  backdrop-filter: blur(12px);
+}
+
+.marketing-note-mark,
+.marketing-service-icon,
+.marketing-step-icon {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  color: colors.$aqua;
+  background: colors.$teal-50;
+  border-radius: 14px;
+}
+
+.marketing-note-mark {
+  margin-bottom: 22px;
+}
+
+.marketing-hero-note .marketing-eyebrow {
+  margin-bottom: 8px;
+}
+
+.marketing-hero-note > strong {
+  display: block;
+  font-size: 21px;
+  line-height: 1.25;
+}
+
+.marketing-hero-note > p:not(.marketing-eyebrow) {
+  margin: 10px 0 20px;
+  color: colors.$teal-100;
+  font-size: 13px;
+}
+
+.marketing-inline-link {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  padding: 0;
+  color: colors.$aqua;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: left;
+}
+
+.marketing-hero-note .marketing-inline-link {
+  color: colors.$teal-200;
+}
+
+.marketing-section {
+  padding: clamp(58px, 8vw, 96px) 0;
+}
+
+.marketing-services {
+  background: colors.$white;
+}
+
+.marketing-section-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: end;
+  margin-bottom: 30px;
+}
+
+.marketing-section-heading h2,
+.marketing-plan-cta h2,
+.marketing-closing h2,
+.marketing-bottom-cta h2,
+.marketing-about-promise h2 {
+  max-width: 720px;
+  margin: 0;
+  font-size: clamp(30px, 4vw, 46px);
+  line-height: 1.1;
+  letter-spacing: -.045em;
+}
+
+.marketing-section-heading > div > p:last-child {
+  max-width: 600px;
+  margin: 12px 0 0;
+  color: colors.$muted;
+}
+
+.marketing-service-grid,
+.marketing-about-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.marketing-service-card,
+.marketing-about-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 24px;
+  background: colors.$white;
+  border: 1px solid colors.$line;
+  border-radius: 18px;
+  box-shadow: 0 12px 30px rgba(colors.$ink, .045);
+}
+
+.marketing-service-card {
+  transition: border-color .2s, transform .2s, box-shadow .2s;
+}
+
+.marketing-service-card:hover {
+  transform: translateY(-3px);
+  border-color: colors.$teal-200;
+  box-shadow: 0 18px 34px rgba(colors.$ink, .08);
+}
+
+.marketing-service-icon {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 21px;
+}
+
+.marketing-card-kicker {
+  margin: 0 0 7px;
+  color: colors.$teal-700;
+  font: 600 10px typography.$font-mono;
+  letter-spacing: .1em;
+}
+
+.marketing-service-card h2,
+.marketing-service-card h3,
+.marketing-about-card h3 {
+  margin: 0 0 9px;
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.marketing-service-card > p:not(.marketing-card-kicker),
+.marketing-about-card p {
+  margin: 0;
+  color: colors.$muted;
+  font-size: 13px;
+}
+
+.marketing-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: auto;
+  padding-top: 18px;
+}
+
+.marketing-facts span {
+  padding: 6px 9px;
+  color: colors.$teal-900;
+  background: colors.$teal-50;
+  border-radius: 7px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.marketing-process {
+  padding: clamp(58px, 8vw, 92px) 0;
+  background: colors.$teal-50;
+}
+
+.marketing-step-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.marketing-step {
+  position: relative;
+  min-height: 225px;
+  padding: 26px;
+  background: colors.$white;
+  border: 1px solid colors.$teal-100;
+  border-radius: 18px;
+}
+
+.marketing-step-number {
+  position: absolute;
+  top: 24px;
+  right: 24px;
+  color: colors.$teal-700;
+  font: 600 11px typography.$font-mono;
+}
+
+.marketing-step-icon {
+  margin-bottom: 22px;
+}
+
+.marketing-step h3 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.marketing-step p {
+  margin: 0;
+  color: colors.$muted;
+  font-size: 13px;
+}
+
+.marketing-benefits {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  padding-top: 38px;
+  padding-bottom: 38px;
+}
+
+.marketing-benefits article,
+.marketing-feature-grid article {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.marketing-benefits article > svg,
+.marketing-feature-grid article > svg {
+  color: colors.$aqua;
+}
+
+.marketing-benefits h3,
+.marketing-feature-grid h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+
+.marketing-benefits p,
+.marketing-feature-grid p {
+  margin: 0;
+  color: colors.$muted;
+  font-size: 11px;
+}
+
+.marketing-plan-cta {
+  padding: 54px 0;
+  color: colors.$white;
+  background: colors.$teal-900;
+}
+
+.marketing-plan-cta-inner {
+  display: flex;
+  justify-content: space-between;
+  gap: 30px;
+  align-items: center;
+}
+
+.marketing-plan-cta .marketing-eyebrow {
+  color: colors.$teal-200;
+}
+
+.marketing-plan-cta h2 {
+  max-width: 650px;
+}
+
+.marketing-plan-cta-inner > div > p:last-child {
+  max-width: 580px;
+  margin: 12px 0 0;
+  color: colors.$teal-100;
+  font-size: 14px;
+}
+
+.marketing-closing {
+  display: flex;
+  justify-content: space-between;
+  gap: 28px;
+  align-items: center;
+  padding-top: 68px;
+  padding-bottom: 68px;
+}
+
+.marketing-closing .marketing-eyebrow,
+.marketing-bottom-cta .marketing-eyebrow {
+  margin-bottom: 9px;
+}
+
+.marketing-closing p:last-child,
+.marketing-bottom-cta p:last-child {
+  margin: 12px 0 0;
+  color: colors.$muted;
+}
+
+.marketing-page {
+  background: colors.$paper;
+}
+
+.marketing-page-hero {
+  padding-top: clamp(58px, 8vw, 88px);
+  padding-bottom: clamp(48px, 7vw, 72px);
+}
+
+.marketing-page-hero h1 {
+  color: colors.$ink;
+}
+
+.marketing-page-hero > p:not(.marketing-eyebrow) {
+  max-width: 670px;
+  margin: 0 0 24px;
+  color: colors.$muted;
+  font-size: 17px;
+  line-height: 1.7;
+}
+
+.marketing-service-grid-detail {
+  align-items: stretch;
+}
+
+.marketing-service-card-detail ul {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  padding: 18px 0 0;
+  margin: 20px 0;
+  color: colors.$muted;
+  border-top: 1px solid colors.$line;
+  list-style: none;
+  font-size: 11px;
+}
+
+.marketing-service-card-detail li {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.marketing-service-card-detail li svg {
+  color: colors.$aqua;
+}
+
+.marketing-service-card-detail .marketing-inline-link {
+  margin-top: auto;
+}
+
+.marketing-bottom-cta {
+  padding: 50px 0;
+  background: colors.$teal-50;
+}
+
+.marketing-bottom-cta > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 28px;
+  align-items: center;
+}
+
+.marketing-bottom-cta h2 {
+  font-size: clamp(27px, 3.4vw, 38px);
+}
+
+.marketing-about-section {
+  padding: 68px 0 78px;
+  background: colors.$white;
+}
+
+.marketing-about-card {
+  min-height: 225px;
+}
+
+.marketing-about-card h3 {
+  margin-top: 0;
+}
+
+.marketing-about-promise {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 38px;
+  align-items: center;
+  padding: 32px;
+  margin-top: 24px;
+  background: colors.$teal-50;
+  border-radius: 18px;
+}
+
+.marketing-about-promise h2 {
+  font-size: clamp(26px, 3.3vw, 36px);
+}
+
+.marketing-check-list {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  margin: 0;
+  color: colors.$muted;
+  list-style: none;
+  font-size: 13px;
+}
+
+.marketing-check-list li {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+
+.marketing-check-list svg {
+  flex: none;
+  color: colors.$aqua;
+}
+
+.marketing-pricing {
+  padding-top: 6px;
+  background: colors.$white;
+}
+
+.marketing-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: stretch;
+}
+
+.marketing-plan-card {
+  position: relative;
+  display: flex;
+  min-height: 300px;
+  flex-direction: column;
+  padding: 26px;
+  background: colors.$white;
+  border: 1px solid colors.$line;
+  border-radius: 18px;
+  box-shadow: 0 12px 30px rgba(colors.$ink, .045);
+}
+
+.marketing-plan-card.is-featured {
+  color: colors.$white;
+  background: colors.$teal-900;
+  border-color: colors.$teal-900;
+}
+
+.marketing-plan-card h2 {
+  max-width: 210px;
+  margin: 0 0 8px;
+  font-size: 20px;
+}
+
+.marketing-plan-card > p {
+  min-height: 42px;
+  margin: 0;
+  color: colors.$muted;
+  font-size: 12px;
+}
+
+.marketing-plan-card.is-featured > p,
+.marketing-plan-card.is-featured strong small {
+  color: colors.$teal-100;
+}
+
+.marketing-plan-card strong {
+  margin: 24px 0;
+  font-size: 30px;
+  line-height: 1.1;
+}
+
+.marketing-plan-card strong small {
+  display: block;
+  margin-top: 7px;
+  color: colors.$muted;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.marketing-plan-card .button {
+  margin-top: auto;
+}
+
+.marketing-plan-badge {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  padding: 5px 8px;
+  color: colors.$teal-900;
+  background: colors.$teal-200;
+  border-radius: 6px;
+  font: 700 9px typography.$font-mono;
+}
+
+.marketing-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+  padding: 28px;
+  margin-top: 26px;
+  background: colors.$teal-50;
+  border-radius: 18px;
+}
+
+/* Keep the retained marketing screens on the same palette for easy rollback. */
+.home-screen .location-chip span {
+  color: colors.$muted;
+}
+
+.home-screen .teaser-plan small,
+.home-screen .teaser-plan strong span {
+  color: colors.$teal-200;
+}
+
+.home-screen .teaser-plan p,
+.plan-card.is-featured p,
+.plan-card.is-featured small {
+  color: colors.$teal-100;
+}
+
+.benefit-strip {
+  background: colors.$teal-50;
+}
+
+.service-detail-visual {
+  background: linear-gradient(135deg, colors.$teal-50, colors.$paper);
+}
+
+.service-detail-body .service-category {
+  color: colors.$muted;
+}
+
+.home-screen .service-showcase-card:first-child {
+  color: colors.$white;
+  background: colors.$teal-900;
+  border-color: colors.$teal-900;
+}
+
+.home-screen .service-showcase-card:first-child .service-category,
+.home-screen .service-showcase-card:first-child .service-icon,
+.home-screen .service-showcase-card:first-child > p,
+.home-screen .service-showcase-card:first-child .service-disclosure summary,
+.home-screen .service-showcase-card:first-child .service-disclosure p {
+  color: colors.$teal-100;
+}
+
+.home-screen .service-showcase-card:first-child .service-icon {
+  color: colors.$teal-200;
+}
+
+.home-screen .service-showcase-card:first-child .service-facts span {
+  color: colors.$teal-100;
+  border-color: colors.$teal-200;
+}
+
+.home-screen .service-showcase-card:first-child .service-disclosure {
+  border-color: colors.$teal-200;
+}
+
+@media (max-width: 900px) {
+  .marketing-hero-content {
+    grid-template-columns: minmax(0, 1fr) minmax(210px, 260px);
+    gap: 28px;
+  }
+
+  .marketing-service-grid,
+  .marketing-about-grid,
+  .marketing-plan-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .marketing-service-card:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 680px) {
+  .marketing-shell {
+    width: min(calc(100% - 36px), 1184px);
+  }
+
+  .marketing-hero {
+    min-height: 0;
+  }
+
+  .marketing-hero-content {
+    grid-template-columns: 1fr;
+    gap: 26px;
+    padding-top: 48px;
+    padding-bottom: 48px;
+  }
+
+  .marketing-hero-note {
+    max-width: 440px;
+  }
+
+  .marketing-hero h1,
+  .marketing-page-hero h1 {
+    font-size: clamp(40px, 11vw, 58px);
+    letter-spacing: -.05em;
+  }
+
+  .marketing-section-heading,
+  .marketing-plan-cta-inner,
+  .marketing-closing,
+  .marketing-bottom-cta > div {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .marketing-step-grid,
+  .marketing-benefits,
+  .marketing-feature-grid,
+  .marketing-about-promise {
+    grid-template-columns: 1fr;
+  }
+
+  .marketing-step {
+    min-height: 0;
+  }
+
+  .marketing-about-promise {
+    gap: 22px;
+    padding: 24px;
+  }
+}
+
+@media (max-width: 460px) {
+  .marketing-service-grid,
+  .marketing-about-grid,
+  .marketing-plan-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .marketing-service-card:last-child:nth-child(odd) {
+    grid-column: auto;
+  }
+
+  .marketing-trust-row {
+    gap: 10px 14px;
+  }
+
+  .marketing-plan-card {
+    min-height: 270px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marketing-service-card {
+    transition: none;
+  }
+
+  .marketing-service-card:hover {
+    transform: none;
+  }
+}
