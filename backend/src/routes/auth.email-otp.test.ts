@@ -151,6 +151,46 @@ describe('POST /signup', () => {
   })
 })
 
+describe('partner phone OTP', () => {
+  it('issues a public registration OTP challenge for the partner phone', async () => {
+    mocks.sendTemplateSms.mockResolvedValue({ queued: true, provider: 'msg91', requestId: 'req-1' })
+    const response = await request(buildApp()).post('/partner/request-otp').send({ phone: PHONE })
+    expect(response.status).toBe(202)
+    expect(response.body).toMatchObject({ challengeId: CHALLENGE, expiresInSeconds: 600 })
+    expect(mocks.sendTemplateSms).toHaveBeenCalledWith(
+      'user_registration_otp',
+      '+919876543210',
+      expect.any(Object),
+    )
+  })
+
+  it('marks a valid partner phone challenge verified', async () => {
+    mocks.rpc.mockResolvedValue({ data: [{ otp_hash: hashOtp('654321') }], error: null })
+    const response = await request(buildApp()).post('/partner/verify-otp').send({
+      challengeId: CHALLENGE,
+      phone: PHONE,
+      otp: '654321',
+    })
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ verified: true })
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      'consume_guest_otp_attempt',
+      { p_challenge_id: CHALLENGE, p_phone: '+919876543210' },
+    )
+  })
+
+  it('rejects an incorrect partner phone code', async () => {
+    mocks.rpc.mockResolvedValue({ data: [{ otp_hash: hashOtp('123456') }], error: null })
+    const response = await request(buildApp()).post('/partner/verify-otp').send({
+      challengeId: CHALLENGE,
+      phone: PHONE,
+      otp: '654321',
+    })
+    expect(response.status).toBe(400)
+    expect(response.body.error).toBe('The verification code is incorrect.')
+  })
+})
+
 describe('POST /email/verify-otp signup phone verification', () => {
     it('rejects a duplicate phone before creating an email-OTP signup account', async () => {
       mocks.rpc.mockImplementation(async (procedure: string) => {

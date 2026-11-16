@@ -87,7 +87,7 @@ tests and any required end-to-end checks.
 | `admin_availability_toggle_enabled` | `true` | `true` | Expose independent online/active controls for vendors, vehicles, and drivers; existing web vendor online control remains available when off. |
 | `admin_dashboard_v2_enabled` | `true` | `true` | Show the consolidated dashboard while retaining the existing dashboard path. |
 | `area_availability_enabled` | `true` | `true` | Show availability grouped by service area. |
-| `partner_application_otp_enabled` | `false` | `true` after tests | Require phone OTP verification before collecting/submitting the partner application. |
+| `partner_application_otp_enabled` | `true` | `true` | Require phone OTP verification before collecting/submitting the partner application. |
 | `address_geocoding_enabled` | `false` | `true` after location validation | Resolve selected/current coordinates to a usable address label. |
 | `invoice_generation_enabled` | `false` | `false` until trigger and invoice contents are agreed and verified | Generate and reconcile invoice records. |
 | `wallet_enabled` | `false` | `false` | Keep wallet code/routes available but hide wallet UI and reject wallet operations. |

@@ -11,7 +11,7 @@ export const defaultFeatureFlags = {
   admin_availability_toggle_enabled: true,
   admin_dashboard_v2_enabled: true,
   area_availability_enabled: true,
-  partner_application_otp_enabled: false,
+  partner_application_otp_enabled: true,
   address_geocoding_enabled: false,
   invoice_generation_enabled: false,
   wallet_enabled: false,

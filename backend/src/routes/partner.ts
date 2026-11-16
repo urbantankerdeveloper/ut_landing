@@ -4,6 +4,9 @@ import rateLimit from 'express-rate-limit'
 import crypto from 'node:crypto'
 import { supabase } from '../supabase.js'
 import { limiterStore } from '../services/scaling.js'
+import { config } from '../config.js'
+import { toE164IndianMobile } from '../lib/phone.js'
+import { logger } from '../lib/logger.js'
 
 const router = Router()
 const partnerApplicationLimit = rateLimit({ windowMs: 60 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:partner:', 'open'), passOnStoreError: true, message: { error: 'Too many partner applications from this address. Try again later.' } })
@@ -15,6 +18,7 @@ const applicationSchema = z.object({
   businessName: z.string().trim().min(2).max(120),
   partnerType: z.string().trim().min(2).max(60),
   phone,
+  phoneChallengeId: z.string().uuid().optional(),
   whatsapp: phone.optional().or(z.literal('')),
   email: z.string().trim().email().max(160),
   zone: z.string().trim().min(2).max(120),
@@ -36,6 +40,25 @@ router.post('/applications', partnerApplicationLimit, async (request, response) 
   const parsed = applicationSchema.safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Complete the required partner application fields.', details: parsed.error.flatten() })
   const input = parsed.data
+  if (config.featureFlags.partner_application_otp_enabled) {
+    const phoneE164 = toE164IndianMobile(input.phone)
+    if (!input.phoneChallengeId || !phoneE164) {
+      return response.status(400).json({ error: 'Verify your mobile number before submitting the application.' })
+    }
+    const { data: challenge, error: challengeError } = await supabase
+      .from('guest_otp_challenges')
+      .select('id')
+      .eq('id', input.phoneChallengeId)
+      .eq('phone_e164', phoneE164)
+      .not('verified_at', 'is', null)
+      .gt('expires_at', new Date().toISOString())
+      .maybeSingle()
+    if (challengeError) {
+      logger.error('partner.application_otp_check_failed', { requestId: response.locals.requestId, error: challengeError.message })
+      return response.status(500).json({ error: 'Mobile verification could not be confirmed. Please try again.' })
+    }
+    if (!challenge) return response.status(400).json({ error: 'Verify your mobile number before submitting the application.' })
+  }
   const { data, error } = await supabase.from('partner_applications').insert({ reference: reference(), business_name: input.businessName, partner_type: input.partnerType, phone_e164: input.phone, whatsapp_e164: input.whatsapp || null, email: input.email, service_zone: input.zone, business_address: input.address, service_codes: input.serviceCodes, vehicle_count: input.vehicleCount, primary_registration: input.registration, vehicle_capacity: input.capacity, years_in_operation: input.experience ?? null, availability: input.availability, notes: input.notes || null, document_names: [...input.documentNames, ...(input.documents ?? []).map((document) => document.path.split('/').pop() ?? document.path)] }).select('reference,status,created_at').single()
   if (error) return response.status(500).json({ error: 'The partner application could not be saved.' })
   response.status(201).json({ ok: true, reference: data.reference, status: data.status, message: 'Your partnership request was received for review.' })

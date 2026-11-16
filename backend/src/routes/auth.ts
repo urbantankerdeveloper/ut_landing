@@ -359,6 +359,28 @@ router.post('/guest/request-otp', otpRequestLimit, otpPhoneLimit, async (request
   })
 })
 
+router.post('/partner/request-otp', otpRequestLimit, otpPhoneLimit, async (request, response) => {
+  const parsed = z.object({ phone: phoneSchema }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
+  const phone = toE164IndianMobile(parsed.data.phone)
+  if (!phone) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
+  return issueOtpChallenge(response, phone, 'user_registration_otp')
+})
+
+router.post('/partner/verify-otp', phoneOtpVerifyLimit, async (request, response) => {
+  const parsed = z.object({
+    challengeId: z.string().uuid(),
+    phone: phoneSchema,
+    otp: z.string().regex(/^\d{6}$/),
+  }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Enter the verification code sent to your mobile.' })
+  const phone = toE164IndianMobile(parsed.data.phone)
+  if (!phone) return response.status(400).json({ error: 'Enter the verification code sent to your mobile.' })
+  if (!(await passesChallengeAttempt(response, parsed.data.challengeId, phone, parsed.data.otp))) return
+  if (!(await markChallengeVerified(response, parsed.data.challengeId))) return
+  response.json({ verified: true })
+})
+
 router.post('/booking/email-fallback', requireAuth, otpRequestLimit, otpPhoneLimit, async (request, response) => {
   const parsed = z.object({ phone: phoneSchema }).safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
