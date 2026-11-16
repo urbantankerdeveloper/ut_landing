@@ -1,6 +1,7 @@
 import { apiFetch } from './client'
 
-export type AdminOrder = { id: string; service: string; vendor?: string; location: string; status: string; amount: number }
+export type AdminOrder = { id: string; reference?: string; service: string; vendor?: string; location: string; status: string; amount: number }
+export type AdminDispatchSettings = { manualAssignmentModeEnabled: boolean }
 export type AdminVendor = { id: string; business_name?: string; name?: string; status?: string; verification?: string; is_online?: boolean; phone_e164?: string | null; service_zone?: string | null; rating?: number; email?: string; owner_profile_id?: string; account_only?: boolean }
 export type AdminResource = { id: string; name?: string; status?: string; verification?: string }
 export type AdminCustomer = { id: string; full_name: string; phone_e164?: string; role: string; created_at: string }
@@ -13,8 +14,36 @@ export type AdminSystemHealth = { ok: boolean; migrations: Array<{ table: string
 export type AdminNotification = { id: string; title: string; event_type: string; payload?: { detail?: string; bookingId?: string; reference?: string; status?: string }; read_at?: string; created_at: string }
 export type AdminSmsTemplate = { templateKey: string; body: string; variables: string[]; isActive: boolean; msg91TemplateId: string | null; updatedAt: string; isBuiltIn: boolean; allowedVariables: string[] | null }
 export type AdminAnalyticsSummary = { days: number; from: string; to: string; total: number; byEvent: Record<string, number>; funnel: { login: number; bookingStarted: number; bookingCreated: number; vendorAccepted: number; delivered: number; rates: Record<string, number> } }
+export type AdminDashboardSummary = {
+  activeOrdersByStatus: Record<string, number>
+  todayRevenuePaise: number
+  pendingPartnerApplications: number
+  onlineVendors: number
+  activeDrivers: number
+  openOrderAlerts: number
+  failedPayments: number
+  stuckOrders: number
+  generatedAt: string
+}
+export type AdminAreaAvailability = {
+  area: string
+  onlineVendors: number
+  activeVehicles: number
+  activeDrivers: number
+}
 export const adminApi = {
   orders: async () => (await apiFetch<{ rows: AdminOrder[] }>('/admin/orders')).rows,
+  ordersForTrackingBoard: async () => {
+    const pageSize = 100
+    const first = await apiFetch<{ rows: Record<string, unknown>[]; total: number }>('/admin/orders?page=1&pageSize=100')
+    const rows = [...first.rows]
+    const pageCount = Math.ceil(first.total / pageSize)
+    for (let page = 2; page <= pageCount; page += 1) {
+      const result = await apiFetch<{ rows: Record<string, unknown>[] }>(`/admin/orders?page=${page}&pageSize=${pageSize}`)
+      rows.push(...result.rows)
+    }
+    return rows
+  },
   vendors: () => apiFetch<AdminVendor[]>('/admin/vendors'),
   customers: () => apiFetch<AdminCustomer[]>('/admin/customers'),
   createCustomer: (payload: { email: string; password: string; name: string; phone: string }) => apiFetch<AdminCustomer>('/admin/customers', { method: 'POST', body: JSON.stringify(payload) }),
@@ -40,11 +69,15 @@ export const adminApi = {
   updateOrderStatus: (id: string, status: string) => apiFetch<AdminOrder>(`/admin/orders/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   cancelOrder: (id: string, reason: string) => apiFetch<AdminOrder>(`/admin/orders/${id}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) }),
   report: (payload: AdminReportRequest) => apiFetch<AdminReportResponse>('/admin/reports', { method: 'POST', body: JSON.stringify(payload) }),
+  dashboardSummary: () => apiFetch<AdminDashboardSummary>('/admin/dashboard-summary'),
+  availabilityByArea: () => apiFetch<AdminAreaAvailability[]>('/admin/availability-by-area'),
   coupons: () => apiFetch<AdminCoupon[]>('/admin/coupons'),
   saveCoupon: (payload: Omit<AdminCoupon, 'id'>, id?: string) => apiFetch<AdminCoupon>(id ? `/admin/coupons/${id}` : '/admin/coupons', { method: id ? 'PATCH' : 'POST', body: JSON.stringify(payload) }),
   deleteCoupon: (id: string) => apiFetch<void>(`/admin/coupons/${id}`, { method: 'DELETE' }),
   auditLogs: async () => (await apiFetch<{ rows: unknown[] }>('/admin/audit-logs')).rows,
   featureFlags: () => apiFetch<Record<string, boolean>>('/admin/feature-flags'),
+  dispatchSettings: () => apiFetch<AdminDispatchSettings>('/admin/dispatch-settings'),
+  updateDispatchSettings: (payload: AdminDispatchSettings) => apiFetch<AdminDispatchSettings>('/admin/dispatch-settings', { method: 'PATCH', body: JSON.stringify(payload) }),
   services: () => apiFetch<AdminService[]>('/admin/services'),
   saveService: async (payload: { code?: string; name: string; description?: string; basePricePaise: number; isActive: boolean; effectiveFrom?: string; effectiveTo?: string; capacityOptions?: string[]; detailOptions?: string[]; waterTypeOptions?: string[]; tankerCountOptions?: string[]; optionSurchargesPaise?: Record<string, Record<string, number>> }, id?: string) => id && (payload.effectiveFrom || payload.effectiveTo) ? apiFetch<AdminService>(`/admin/services/${id}/pricing`, { method: 'PATCH', body: JSON.stringify(payload) }) : apiFetch<AdminService>(id ? `/admin/services/${id}` : '/admin/services', { method: id ? 'PATCH' : 'POST', body: JSON.stringify(payload) }),
   subscriptions: () => apiFetch<AdminProgramRecord[]>('/admin/subscriptions'),

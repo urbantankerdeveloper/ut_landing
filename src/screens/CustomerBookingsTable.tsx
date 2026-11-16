@@ -9,11 +9,13 @@ import { useAuthStore } from '../stores/authStore'
 import { CheckoutError, type CheckoutSuccess } from '../utils/razorpayCheckout'
 import { Modal } from '../components/Modal'
 import { customerContent as c } from '../content/customer'
+import { useFeatureFlags } from '../hooks/useFeatureFlags'
 
 type Props = { onNavigate: (screen: 'booking' | 'bookings' | 'offers' | 'home') => void }
 // Statuses before the driver collects cash. Matches the backend codSwitchStatuses.
 const payOnlineStatuses = ['pending_vendor', 'vendor_assigned', 'accepted']
 const customerCancellableStatuses = ['pending_vendor', 'vendor_assigned']
+const orderProgressStatuses = ['pending_vendor', 'vendor_assigned', 'accepted', 'en_route', 'arrived', 'delivered']
 type PayState = { kind: 'idle' } | { kind: 'working' } | { kind: 'paid' } | { kind: 'verify'; pending: CheckoutSuccess } | { kind: 'error'; message: string }
 const demoRows: CustomerBooking[] = customerDemoDataEnabled ? [
   { id: 'UT-2408', service: c.bookingsTable.demo.waterTanker, services: [{ serviceId: 'water_tanker', capacity: c.bookingsTable.demo.tankerCapacity, details: c.bookingsTable.demo.potableWater, deliveryDate: '2026-10-20' }], location: c.bookingsTable.demo.ecr, status: c.bookingsTable.demo.inProgress, amount: 1850, scheduledAt: '2026-10-20' },
@@ -40,6 +42,7 @@ function paymentLabel(value?: CustomerBooking['paymentMethod']) {
 
 export function CustomerBookingsTable({ onNavigate }: Props) {
   const query = useCustomerBookings()
+  const featureFlags = useFeatureFlags()
   const cancellation = useCustomerCancel()
   const deliveryOtp = useCustomerDeliveryOtp()
   const [filter, setFilter] = useState('all')
@@ -61,6 +64,11 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
   const [deliveryOtpError, setDeliveryOtpError] = useState<string | null>(null)
   // Derived from the rows so the modal reflects refetched data (e.g. a switched payment method) without reopening.
   const selectedBooking = selectedBookingId ? rows.find((row) => row.id === selectedBookingId) ?? null : null
+  const selectedTasks = selectedBooking
+    ? selectedBooking.orderGroupId
+      ? rows.filter((row) => row.orderGroupId === selectedBooking.orderGroupId)
+      : [selectedBooking]
+    : []
 
   function closeBookingModal() {
     setSelectedBookingId(null)
@@ -93,6 +101,10 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
   }
 
   async function payOnlineNow(booking: CustomerBooking) {
+    if (featureFlags.data?.online_payment_enabled !== true) {
+      setPayState({ kind: 'error', message: c.bookingsTable.payOnline.unavailable })
+      return
+    }
     setPayState({ kind: 'working' })
     try {
       await customerApi.switchBookingToOnline(booking.id)
@@ -161,10 +173,10 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
         <table className="customer-booking-table">
           <thead><tr><th scope="col">{c.bookingsTable.headers.booking}</th><th scope="col">{c.bookingsTable.headers.service}</th><th scope="col">{c.bookingsTable.headers.location}</th><th scope="col">{c.bookingsTable.headers.status}</th><th scope="col">{c.bookingsTable.headers.amount}</th></tr></thead>
           <tbody>{visibleRows.map((booking) => <tr key={booking.id}>
-            <td><button className="customer-booking-id" type="button" onClick={() => { setPayState({ kind: 'idle' }); setCancelError(null); setDeliveryOtpResult(null); setDeliveryOtpError(null); deliveryOtp.reset(); setSelectedBookingId(booking.id) }}>{booking.id}</button></td>
+            <td><button className="customer-booking-id" type="button" onClick={() => { setPayState({ kind: 'idle' }); setCancelError(null); setDeliveryOtpResult(null); setDeliveryOtpError(null); deliveryOtp.reset(); setSelectedBookingId(booking.id) }}>{booking.reference ?? 'Booking reference unavailable'}</button>{booking.orderGroupSize && booking.orderGroupSize > 1 && <small className="customer-booking-group-label">{booking.orderGroupReference} · {booking.orderGroupSize} tasks in this order</small>}</td>
             <td>{booking.service}</td>
             <td>{booking.location}</td>
-            <td><span className={`status-tag ${booking.status.toLowerCase() === 'delivered' ? '' : 'pending'}`}>{booking.status}</span></td>
+            <td><span className={`status-tag ${booking.status.toLowerCase() === 'delivered' ? '' : 'pending'}`}>{booking.status}</span>{featureFlags.data?.order_tracking_board_enabled && <div className="customer-order-progress" aria-label={`Order progress: ${booking.status}`}><progress max={orderProgressStatuses.length - 1} value={Math.max(0, orderProgressStatuses.indexOf(booking.status.toLowerCase()))} /><small>{booking.status.toLowerCase() === 'cancelled' ? 'Cancelled' : `${Math.max(1, orderProgressStatuses.indexOf(booking.status.toLowerCase()) + 1)} of ${orderProgressStatuses.length} stages`}</small></div>}</td>
             <td>{c.common.rupee(booking.amount.toLocaleString('en-IN'))}</td>
           </tr>)}</tbody>
         </table>
@@ -175,8 +187,15 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
         <div>{query.hasNextPage && <button className="button button-quiet" disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>{query.isFetchingNextPage ? c.bookingsTable.loadingMore : c.bookingsTable.loadOlder}</button>}<button className="button button-quiet" disabled={currentPage <= 1} onClick={() => setPage((value) => value - 1)}>{c.bookingsTable.previous}</button><button className="button button-quiet" disabled={currentPage >= pageCount} onClick={() => setPage((value) => value + 1)}>{c.bookingsTable.next}</button></div>
       </div>
     </section>
-    {selectedBooking && <Modal title={c.bookingsTable.modalTitle(selectedBooking.id)} onClose={closeBookingModal}>
+    {selectedBooking && <Modal title={c.bookingsTable.modalTitle(selectedBooking.reference ?? 'Booking reference unavailable')} onClose={closeBookingModal}>
       <div className="customer-booking-details">
+        {selectedBooking.orderGroupSize && selectedBooking.orderGroupSize > 1 && <section>
+          <h3>{selectedBooking.orderGroupReference} · {selectedBooking.orderGroupSize} tasks in this order</h3>
+          <ul>{selectedTasks.map((task) => <li key={task.id}>
+            <strong>{task.reference ?? 'Booking reference unavailable'}</strong>
+            <span>{task.service} · {task.status} · {c.common.rupee(task.amount.toLocaleString('en-IN'))}</span>
+          </li>)}</ul>
+        </section>}
         <div className="customer-booking-detail-grid">
           <div><span>{c.bookingsTable.detail.status}</span><strong>{selectedBooking.status}</strong></div>
           <div><span>{c.bookingsTable.detail.total}</span><strong>{c.common.rupee(selectedBooking.amount.toLocaleString('en-IN'))}</strong></div>
@@ -192,7 +211,7 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
             : <button className="button button-primary" type="button" disabled={deliveryOtp.isPending} onClick={requestSelectedDeliveryOtp}>{deliveryOtp.isPending ? c.bookingsTable.deliveryOtp.requesting : c.bookingsTable.deliveryOtp.request}</button>}
           {deliveryOtpError && <p role="alert">{deliveryOtpError}</p>}
         </section>}
-        {!customerDemoDataEnabled && (payState.kind !== 'idle' || (payOnlineStatuses.includes(selectedBooking.status) && selectedBooking.paymentMethod === 'cod')) && <section className="customer-booking-pay-online">
+        {!customerDemoDataEnabled && (payState.kind !== 'idle' || (featureFlags.data?.online_payment_enabled === true && payOnlineStatuses.includes(selectedBooking.status) && selectedBooking.paymentMethod === 'cod')) && <section className="customer-booking-pay-online">
           {payState.kind === 'idle' && <>
             <p>{c.bookingsTable.payOnline.hint}</p>
             <button className="button button-primary" type="button" onClick={() => void payOnlineNow(selectedBooking)}>{c.bookingsTable.payOnline.action}</button>

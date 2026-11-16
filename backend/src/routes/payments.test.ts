@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import express from 'express'
 import request from 'supertest'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { config } from '../config.js'
 
 const state = vi.hoisted(() => ({
   results: new Map<string, unknown[]>(),
@@ -53,6 +54,8 @@ import { logger } from '../lib/logger.js'
 import adminRouter from './adminExtended.js'
 import customerRouter from './customerExtended.js'
 import paymentsRouter from './payments.js'
+import vendorRouter from './vendor.js'
+import vendorExtendedRouter from './vendorExtended.js'
 
 const WEBHOOK_SECRET = 'whsec_test'
 const KEY_SECRET = 'key_secret_test'
@@ -67,6 +70,8 @@ function buildApp() {
   app.use('/api/payment', paymentsRouter)
   app.use('/api/customer', customerRouter)
   app.use('/api/admin', adminRouter)
+  app.use('/api/vendor', vendorRouter)
+  app.use('/api/vendor', vendorExtendedRouter)
   return app
 }
 
@@ -117,6 +122,8 @@ const verifyPaymentRow = { id: 'row-1', booking_id: 'booking-1', amount_paise: 5
 beforeEach(() => {
   state.results.clear()
   state.calls.length = 0
+  config.featureFlags.online_payment_enabled = true
+  config.featureFlags.vendor_earnings_realtime_enabled = true
   vi.stubEnv('RAZORPAY_WEBHOOK_SECRET', WEBHOOK_SECRET)
   vi.stubEnv('RAZORPAY_KEY_ID', 'rzp_test_key')
   vi.stubEnv('RAZORPAY_KEY_SECRET', KEY_SECRET)
@@ -261,7 +268,8 @@ describe('razorpay verify payment details', () => {
     expect(updatePayloads('payments')[0]).toMatchObject({ status: 'paid', method: 'upi', vpa: 'payer@okaxis', fee_paise: null, captured_at: expect.any(String) })
   })
 
-  it('still verifies and leaves details to the webhook when the Razorpay fetch fails', async () => {
+  it('still verifies an in-flight payment while new online payments are disabled', async () => {
+    config.featureFlags.online_payment_enabled = false
     setResults('payments', { data: verifyPaymentRow, error: null }, { data: { id: 'row-1' }, error: null })
     setResults('bookings', { data: { id: 'booking-1' }, error: null })
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')))
@@ -373,10 +381,30 @@ describe('switch gateway booking to cash on delivery', () => {
     expect(response.status).toBe(409)
     expect(updatePayloads('bookings').map((payload) => payload.payment_method)).toEqual(['cod', 'gateway'])
   })
+
+  it('does not allow a COD booking to switch to online payment when the flag is off', async () => {
+    config.featureFlags.online_payment_enabled = false
+    vi.stubEnv('COD_ONLINE_SWITCH_ENABLED', 'true')
+    setResults('bookings', { data: { id: 'booking-1', status: 'pending_vendor', payment_method: 'cod' }, error: null })
+
+    const response = await request(buildApp()).post('/api/customer/orders/booking-1/payment-method/online')
+
+    expect(response.status).toBe(503)
+    expect(updatePayloads('bookings')).toHaveLength(0)
+  })
 })
 
 describe('checkout payments before a booking exists', () => {
   const checkout = { id: 'checkout-1', customer_id: 'cust-1', status: 'awaiting_payment', quoted_amount_paise: 50000, provider_order_id: null, booking_id: null }
+
+  it('does not create new Razorpay orders when online payments are disabled', async () => {
+    config.featureFlags.online_payment_enabled = false
+
+    const response = await request(buildApp()).post('/api/payment/razorpay/order').send({ checkoutId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11' })
+
+    expect(response.status).toBe(503)
+    expect(state.calls).toHaveLength(0)
+  })
 
   it('creates the Razorpay order on the checkout without writing any booking or payment row', async () => {
     setResults('booking_checkouts', { data: checkout, error: null }, { data: { id: 'checkout-1' }, error: null })
@@ -430,5 +458,53 @@ describe('admin payment detail', () => {
     const allowed = await request(app).get('/api/admin/payments/row-1').set('x-test-role', 'admin')
     expect(allowed.status).toBe(200)
     expect(allowed.body).toMatchObject({ id: 'row-1', error_reason: 'payment_failed' })
+  })
+})
+
+describe('vendor services and accrued earnings', () => {
+  it('keeps vendor service creation forbidden regardless of client controls', async () => {
+    const response = await request(buildApp())
+      .post('/api/vendor/services')
+      .set('x-test-role', 'vendor')
+      .send({ code: 'water_tanker', name: 'Water tanker', basePricePaise: 10000 })
+
+    expect(response.status).toBe(403)
+    expect(response.body.error).toBe('Only Urban Tanker operations can add services.')
+    expect(state.calls).toHaveLength(0)
+  })
+
+  it('reports the default-share accrual only for delivered, unsettled bookings', async () => {
+    setResults('vendors', { data: { id: 'vendor-1' }, error: null })
+    setResults('bookings', {
+      data: [
+        { id: 'booking-1', reference: 'UT-1', service_code: 'water_tanker', quoted_amount_paise: 10001, updated_at: '2026-10-01T10:00:00.000Z' },
+        { id: 'booking-2', reference: 'UT-2', service_code: 'sewage_tanker', quoted_amount_paise: 10000, updated_at: '2026-10-02T10:00:00.000Z' },
+      ],
+      error: null,
+    })
+
+    const response = await request(buildApp()).get('/api/vendor/earnings/accrued').set('x-test-role', 'vendor')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toMatchObject({
+      shareRate: 0.85,
+      totalAmountPaise: 17001,
+      totalCount: 2,
+      rows: [
+        { id: 'booking-1', amountPaise: 8501 },
+        { id: 'booking-2', amountPaise: 8500 },
+      ],
+    })
+    expect(state.calls.some((call) => call.table === 'bookings' && call.method === 'eq' && call.args[0] === 'status' && call.args[1] === 'delivered')).toBe(true)
+    expect(state.calls.some((call) => call.table === 'bookings' && call.method === 'is' && call.args[0] === 'settled_payout_id' && call.args[1] === null)).toBe(true)
+  })
+
+  it('keeps accrued earnings disabled when its feature flag is off', async () => {
+    config.featureFlags.vendor_earnings_realtime_enabled = false
+
+    const response = await request(buildApp()).get('/api/vendor/earnings/accrued').set('x-test-role', 'vendor')
+
+    expect(response.status).toBe(404)
+    expect(state.calls).toHaveLength(0)
   })
 })

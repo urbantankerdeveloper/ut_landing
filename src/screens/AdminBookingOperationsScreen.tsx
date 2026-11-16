@@ -2,9 +2,10 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, ChevronDown, RefreshCw } from 'lucide-react'
 import { adminApi, type AdminOrder } from '../api/admin'
-import { adminQueryKeys, useAdminBookings, useAdminOrderMutations, useAdminDrivers, useAdminVehicles, useAdminVendors } from '../hooks/useAdminData'
+import { adminQueryKeys, useAdminBookings, useAdminDispatchSettings, useAdminOrderMutations, useAdminDrivers, useAdminOrdersBoard, useAdminVehicles, useAdminVendors, useUpdateAdminDispatchSettings } from '../hooks/useAdminData'
 import { Modal } from '../components/Modal'
 import { adminOperationsContent as c } from '../content/admin-operations'
+import { useFeatureFlags } from '../hooks/useFeatureFlags'
 
 type BookingServiceDetail = {
   serviceId?: string
@@ -35,6 +36,9 @@ type BookingRow = AdminOrder & {
   service_details?: BookingServiceDetail[]
   quoted_amount_paise?: number
   payment_method?: string
+  order_group_id?: string | null
+  order_group_reference?: string | null
+  order_group_size?: number | null
   created_at?: string
   updated_at?: string
 }
@@ -55,6 +59,11 @@ function serviceLabel(value?: string) {
   return value ? value.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) : c.bookings.serviceFallback
 }
 
+function bookingArea(value?: string) {
+  const parts = value?.split(',').map((part) => part.trim()).filter(Boolean) ?? []
+  return parts.length >= 3 ? parts[parts.length - 2] : parts[parts.length - 1] ?? ''
+}
+
 function paymentLabel(value?: string) {
   if (value === 'cod') return c.bookings.paymentMethods.cod
   if (value === 'gateway') return c.bookings.paymentMethods.gateway
@@ -64,7 +73,11 @@ function paymentLabel(value?: string) {
 
 export function AdminBookingOperationsScreen({ onNotice }: { onNotice: (message: string) => void }) {
   const query = useAdminBookings()
+  const featureFlags = useFeatureFlags()
+  const boardQuery = useAdminOrdersBoard(featureFlags.data?.order_tracking_board_enabled === true)
   const mutations = useAdminOrderMutations()
+  const dispatchSettingsQuery = useAdminDispatchSettings()
+  const updateDispatchSettings = useUpdateAdminDispatchSettings()
   const vendorsQuery = useAdminVendors()
   const vehiclesQuery = useAdminVehicles()
   const driversQuery = useAdminDrivers()
@@ -79,8 +92,24 @@ export function AdminBookingOperationsScreen({ onNotice }: { onNotice: (message:
   const [filter, setFilter] = useState('all')
   const [sort, setSort] = useState<'recent' | 'status' | 'amount'>('recent')
   const [page, setPage] = useState(1)
+  const [boardVendorId, setBoardVendorId] = useState('all')
+  const [boardArea, setBoardArea] = useState('all')
+  const [boardDate, setBoardDate] = useState('')
 
   const filteredRows = useMemo(() => ((query.data ?? []) as BookingRow[]).filter((booking) => filter === 'all' || booking.status === filter), [filter, query.data])
+  const boardRows = (boardQuery.data ?? query.data ?? []) as BookingRow[]
+  const boardAreas = [...new Set(boardRows.map((booking) => bookingArea(booking.address_text)).filter(Boolean))].sort()
+  const filteredBoardRows = boardRows.filter((booking) =>
+    (boardVendorId === 'all' || booking.vendor_id === boardVendorId)
+    && (boardArea === 'all' || bookingArea(booking.address_text) === boardArea)
+    && (!boardDate || booking.scheduled_for?.slice(0, 10) === boardDate),
+  )
+  const selectedTasks = selectedBooking?.order_group_id
+    ? boardRows.filter((booking) => booking.order_group_id === selectedBooking.order_group_id)
+    : selectedBooking ? [selectedBooking] : []
+  const selectedCancelBooking = selected
+    ? boardRows.find((booking) => booking.id === selected)
+    : undefined
   const sortedRows = useMemo(() => [...filteredRows].sort((first, second) => {
     if (sort === 'status') return first.status.localeCompare(second.status)
     if (sort === 'amount') return (second.quoted_amount_paise ?? second.amount * 100) - (first.quoted_amount_paise ?? first.amount * 100)
@@ -123,6 +152,22 @@ export function AdminBookingOperationsScreen({ onNotice }: { onNotice: (message:
   }
 
   return <>
+    {!dispatchSettingsQuery.isLoading && dispatchSettingsQuery.isError && <section className="admin-view-panel" role="alert"><h2>{c.bookings.dispatchMode.unavailable}</h2><button className="button button-quiet" onClick={() => void dispatchSettingsQuery.refetch()}>{c.common.retry}</button></section>}
+    {dispatchSettingsQuery.isLoading && <section className="admin-view-panel" role="status"><p>{c.bookings.dispatchMode.loading}</p></section>}
+    {dispatchSettingsQuery.data && <section className="admin-view-panel" aria-label={c.bookings.dispatchMode.title}><div className="view-panel-heading"><div><p className="eyebrow">{c.bookings.dispatchMode.title}</p></div><label><input type="checkbox" checked={dispatchSettingsQuery.data.manualAssignmentModeEnabled} disabled={updateDispatchSettings.isPending} onChange={(event) => updateDispatchSettings.mutate({ manualAssignmentModeEnabled: event.target.checked }, { onSuccess: (settings) => onNotice(settings.manualAssignmentModeEnabled ? c.bookings.notices.dispatchModeEnabled : c.bookings.notices.dispatchModeDisabled), onError: () => onNotice(c.bookings.notices.dispatchModeFailed) })} /> {c.bookings.dispatchMode.manualLabel}</label></div><p>{dispatchSettingsQuery.data.manualAssignmentModeEnabled ? c.bookings.dispatchMode.manualEnabled : c.bookings.dispatchMode.automaticEnabled}</p></section>}
+    {featureFlags.data?.order_tracking_board_enabled && <section className="admin-view-panel order-tracking-board" aria-label="Orders grouped by status">
+      <div className="view-panel-heading"><div><p className="eyebrow">{c.bookings.eyebrow}</p><h2>Order tracking board</h2></div></div>
+      <div className="booking-table-tools">
+        <label>Vendor<select value={boardVendorId} onChange={(event) => setBoardVendorId(event.target.value)}><option value="all">All vendors</option>{vendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.business_name ?? vendor.name ?? vendor.id}</option>)}</select></label>
+        <label>Area<select value={boardArea} onChange={(event) => setBoardArea(event.target.value)}><option value="all">All areas</option>{boardAreas.map((area) => <option key={area} value={area}>{area}</option>)}</select></label>
+        <label>Date<input type="date" value={boardDate} onChange={(event) => setBoardDate(event.target.value)} /></label>
+      </div>
+      {boardQuery.isError && <p role="alert">The full order board could not be loaded.</p>}
+      <div className="order-tracking-columns">{['pending_vendor', 'vendor_assigned', 'accepted', 'en_route', 'arrived', 'delivered', 'cancelled'].map((status) => {
+        const statusRows = filteredBoardRows.filter((booking) => booking.status === status)
+        return <section className="order-tracking-column" key={status}><h3>{formatStatus(status)} <span>{statusRows.length}</span></h3>{statusRows.map((booking) => <button className="order-tracking-card" key={booking.id} type="button" onClick={() => setSelectedBooking(booking)}><strong>{booking.reference || 'Booking reference unavailable'}</strong><span>{booking.service || serviceLabel(booking.service_code)}</span><small>{booking.address_text || booking.location || c.common.notProvided}</small></button>)}</section>
+      })}</div>
+    </section>}
     <section className="admin-view-panel customer-bookings-table-panel">
       <div className="view-panel-heading admin-bookings-heading">
         <div><p className="eyebrow">{c.bookings.eyebrow}</p><h2>{c.bookings.title}</h2></div>
@@ -136,12 +181,12 @@ export function AdminBookingOperationsScreen({ onNotice }: { onNotice: (message:
         <table className="customer-booking-table admin-booking-table">
           <thead><tr><th scope="col">{c.bookings.tableHeaders.booking}</th><th scope="col">{c.bookings.tableHeaders.service}</th><th scope="col">{c.bookings.tableHeaders.location}</th><th scope="col">{c.bookings.tableHeaders.status}</th><th scope="col">{c.bookings.tableHeaders.amount}</th></tr></thead>
           <tbody>{visibleRows.map((booking) => {
-            const id = booking.reference || booking.id
+            const id = booking.reference || 'Booking reference unavailable'
             const amount = booking.quoted_amount_paise !== undefined ? booking.quoted_amount_paise / 100 : booking.amount
             const service = booking.service || serviceLabel(booking.service_code)
             const location = booking.address_text || booking.location || c.common.notProvided
             return <tr key={booking.id}>
-              <td><button className="admin-booking-id" type="button" onClick={() => setSelectedBooking(booking)}>{id}</button></td>
+              <td><button className="admin-booking-id" type="button" onClick={() => setSelectedBooking(booking)}>{id}</button>{booking.order_group_size && booking.order_group_size > 1 && <small className="customer-booking-group-label">{booking.order_group_reference} · {booking.order_group_size} tasks in this order</small>}</td>
               <td>{service}</td>
               <td className="admin-booking-location">{location}</td>
               <td><label className="admin-booking-status-control"><select className={`status-tag admin-booking-status ${booking.status === 'delivered' ? '' : booking.status === 'cancelled' ? 'inactive' : 'pending'}`} aria-label={c.bookings.rows.actionsFor(id)} value={booking.status} onChange={(event) => { if (event.target.value === '__assign__') { setAssigningBooking(booking); setVendorId(''); setVehicleId(''); setDriverId('') } else if (event.target.value === '__cancel__') { setSelected(booking.id); setReason('') } }} disabled={(assignOrder.isPending && assigningBooking?.id === booking.id) || (mutations.cancel.isPending && selected === booking.id) || booking.status === 'cancelled' || booking.status === 'delivered'}><option value={booking.status}>{formatStatus(booking.status)}</option>{booking.status === 'pending_vendor' && <option value="__assign__">{c.bookings.rows.assignVendor}</option>}<option value="__cancel__">{c.bookings.rows.cancelOrder}</option></select><ChevronDown size={12} aria-hidden="true" /></label></td>
@@ -156,7 +201,7 @@ export function AdminBookingOperationsScreen({ onNotice }: { onNotice: (message:
         <div><button className="button button-quiet" disabled={currentPage <= 1} onClick={() => setPage((value) => value - 1)}>{c.bookings.rows.previous}</button><button className="button button-quiet" disabled={currentPage >= pageCount} onClick={() => setPage((value) => value + 1)}>{c.bookings.rows.next}</button></div>
       </div>
     </section>
-    {assigningBooking && <Modal title={c.bookings.assign.modalTitle(assigningBooking.reference || assigningBooking.id)} onClose={() => setAssigningBooking(null)}>
+    {assigningBooking && <Modal title={c.bookings.assign.modalTitle(assigningBooking.reference || 'Booking reference unavailable')} onClose={() => setAssigningBooking(null)}>
       {vendorsQuery.isLoading || vehiclesQuery.isLoading || driversQuery.isLoading
         ? <p>{c.bookings.assign.loadingOptions}</p>
         : vendorsQuery.isError || vehiclesQuery.isError || driversQuery.isError
@@ -168,12 +213,16 @@ export function AdminBookingOperationsScreen({ onNotice }: { onNotice: (message:
             <div className="admin-cancel-dialog"><p>{c.bookings.assign.hint}</p><div><button className="button button-quiet" type="button" onClick={() => setAssigningBooking(null)}>{c.bookings.assign.keepUnassigned}</button><button className="button button-primary" type="submit" disabled={!vendorId || !vehicleId || !driverId || assignOrder.isPending}>{assignOrder.isPending ? c.bookings.assign.assigning : c.bookings.assign.confirm}</button></div></div>
           </form>}
     </Modal>}
-    {selectedBooking && <Modal title={c.bookings.details.modalTitle(selectedBooking.reference || selectedBooking.id)} onClose={() => setSelectedBooking(null)}>
+    {selectedBooking && <Modal title={c.bookings.details.modalTitle(selectedBooking.reference || 'Booking reference unavailable')} onClose={() => setSelectedBooking(null)}>
       <div className="customer-booking-details">
+        {selectedBooking.order_group_size && selectedBooking.order_group_size > 1 && <section>
+          <h3>{selectedBooking.order_group_reference} · {selectedBooking.order_group_size} tasks in this order</h3>
+          <ul>{selectedTasks.map((task) => <li key={task.id}><strong>{task.reference || 'Booking reference unavailable'}</strong><span>{serviceLabel(task.service_code)} · {formatStatus(task.status)} · ₹{((task.quoted_amount_paise ?? task.amount * 100) / 100).toLocaleString('en-IN')}</span></li>)}</ul>
+        </section>}
         <div className="customer-booking-detail-grid">
           <div><span>{c.bookings.details.status}</span><strong>{formatStatus(selectedBooking.status)}</strong></div>
           <div><span>{c.bookings.details.total}</span><strong>₹{((selectedBooking.quoted_amount_paise ?? selectedBooking.amount * 100) / 100).toLocaleString('en-IN')}</strong></div>
-          <div><span>{c.bookings.details.bookingId}</span><strong>{selectedBooking.id}</strong></div>
+          <div><span>{c.bookings.details.bookingId}</span><strong>{selectedBooking.reference || c.common.notProvided}</strong></div>
           <div><span>{c.bookings.details.preferredDelivery}</span><strong>{formatDate(selectedBooking.scheduled_for)}</strong></div>
           <div><span>{c.bookings.details.paymentMethod}</span><strong>{paymentLabel(selectedBooking.payment_method)}</strong></div>
           <div><span>{c.bookings.details.customerPhone}</span><strong>{selectedBooking.customer_phone_e164 || c.common.notProvided}</strong></div>
@@ -203,7 +252,7 @@ export function AdminBookingOperationsScreen({ onNotice }: { onNotice: (message:
         <section><h3>{c.bookings.details.deliveryAccessNotes}</h3><p>{selectedBooking.access_notes || c.bookings.details.noAccessNotes}</p></section>
       </div>
     </Modal>}
-    {selected && <Modal title={c.bookings.cancel.modalTitle(selected)} onClose={() => { setSelected(null); setReason('') }}>
+    {selected && <Modal title={c.bookings.cancel.modalTitle(selectedCancelBooking?.reference || 'Booking reference unavailable')} onClose={() => { setSelected(null); setReason('') }}>
       <div className="modal-form admin-cancel-dialog">
         <p>{c.bookings.cancel.confirmText}</p>
         <label>{c.bookings.cancel.reasonLabel}<textarea value={reason} onChange={(event) => setReason(event.target.value)} rows={3} placeholder={c.bookings.cancel.reasonPlaceholder} /></label>

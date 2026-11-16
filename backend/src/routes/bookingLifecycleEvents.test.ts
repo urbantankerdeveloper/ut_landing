@@ -1,6 +1,7 @@
 import express from 'express'
 import request from 'supertest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { config } from '../config.js'
 
 const state = vi.hoisted(() => ({
   results: new Map<string, unknown[]>(),
@@ -19,6 +20,8 @@ const mocks = vi.hoisted(() => ({
   emitRealtimeToUser: vi.fn(),
   emitRealtimeToVendor: vi.fn(),
   emitRealtimeToBooking: vi.fn(),
+  getManualAssignmentModeEnabled: vi.fn(),
+  setManualAssignmentModeEnabled: vi.fn(),
 }))
 
 function nextResult(table: string) {
@@ -29,7 +32,7 @@ function nextResult(table: string) {
 function queryBuilder(table: string) {
   const result = nextResult(table)
   const builder: Record<string, unknown> = {}
-  for (const method of ['select', 'eq', 'in', 'is', 'or', 'update', 'insert', 'order', 'range', 'limit', 'upsert']) {
+  for (const method of ['select', 'eq', 'in', 'is', 'or', 'update', 'insert', 'order', 'range', 'limit', 'upsert', 'gte', 'lt', 'not']) {
     builder[method] = () => builder
   }
   builder.maybeSingle = () => Promise.resolve(result)
@@ -76,6 +79,10 @@ vi.mock('express-rate-limit', () => ({
   default: () => (_request: unknown, _response: unknown, next: () => void) => next(),
 }))
 vi.mock('../services/scaling.js', () => ({ limiterStore: () => undefined }))
+vi.mock('../services/manualAssignmentMode.js', () => ({
+  getManualAssignmentModeEnabled: mocks.getManualAssignmentModeEnabled,
+  setManualAssignmentModeEnabled: mocks.setManualAssignmentModeEnabled,
+}))
 
 import adminRouter from './adminExtended.js'
 import vendorRouter from './vendorExtended.js'
@@ -97,9 +104,125 @@ function setResults(table: string, ...results: unknown[]) {
 beforeEach(() => {
   state.results.clear()
   vi.clearAllMocks()
+  config.featureFlags.admin_dashboard_v2_enabled = false
+  config.featureFlags.area_availability_enabled = false
   mocks.transitionBooking.mockResolvedValue({ data: { id: BOOKING_ID, reference: 'UT-1', customer_id: 'cust-9', status: 'accepted' }, error: null })
   mocks.otpMatches.mockReturnValue(true)
   mocks.deliveryVerificationMethod.mockReturnValue('otp')
+  mocks.getManualAssignmentModeEnabled.mockResolvedValue(false)
+  mocks.setManualAssignmentModeEnabled.mockImplementation(async (enabled: boolean) => enabled)
+})
+
+describe('admin dispatch settings', () => {
+  it('returns the current manual assignment mode to admins', async () => {
+    mocks.getManualAssignmentModeEnabled.mockResolvedValueOnce(true)
+
+    const response = await request(buildApp())
+      .get('/api/admin/dispatch-settings')
+      .set('x-test-role', 'admin')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ manualAssignmentModeEnabled: true })
+  })
+
+  it('allows admins to persist the manual assignment mode', async () => {
+    const response = await request(buildApp())
+      .patch('/api/admin/dispatch-settings')
+      .set('x-test-role', 'admin')
+      .send({ manualAssignmentModeEnabled: true })
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({ manualAssignmentModeEnabled: true })
+    expect(mocks.setManualAssignmentModeEnabled).toHaveBeenCalledWith(true)
+  })
+
+  it('does not allow dispatchers to change global dispatch settings', async () => {
+    const response = await request(buildApp())
+      .patch('/api/admin/dispatch-settings')
+      .set('x-test-role', 'dispatcher')
+      .send({ manualAssignmentModeEnabled: true })
+
+    expect(response.status).toBe(403)
+    expect(mocks.setManualAssignmentModeEnabled).not.toHaveBeenCalled()
+  })
+})
+
+describe('admin dashboard summaries', () => {
+  it('keeps new summary endpoints disabled until their flags are enabled', async () => {
+    const dashboard = await request(buildApp())
+      .get('/api/admin/dashboard-summary')
+      .set('x-test-role', 'admin')
+    const availability = await request(buildApp())
+      .get('/api/admin/availability-by-area')
+      .set('x-test-role', 'admin')
+
+    expect(dashboard.status).toBe(404)
+    expect(availability.status).toBe(404)
+  })
+
+  it('returns captured revenue, operational counts, and two-hour stale orders', async () => {
+    config.featureFlags.admin_dashboard_v2_enabled = true
+    setResults('bookings',
+      ...[1, 2, 3, 4, 5].map((count) => ({ data: null, error: null, count })),
+      { data: null, error: null, count: 6 },
+    )
+    setResults('payments',
+      { data: [{ amount_paise: 4100 }, { amount_paise: 900 }], error: null },
+      { data: null, error: null, count: 7 },
+    )
+    setResults('partner_applications', { data: null, error: null, count: 8 })
+    setResults('vendors', { data: null, error: null, count: 9 })
+    setResults('drivers', { data: null, error: null, count: 10 })
+    setResults('dispatcher_alerts', { data: null, error: null, count: 11 })
+
+    const response = await request(buildApp())
+      .get('/api/admin/dashboard-summary')
+      .set('x-test-role', 'admin')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toMatchObject({
+      activeOrdersByStatus: {
+        pending_vendor: 1,
+        vendor_assigned: 2,
+        accepted: 3,
+        en_route: 4,
+        arrived: 5,
+      },
+      todayRevenuePaise: 5000,
+      pendingPartnerApplications: 8,
+      onlineVendors: 9,
+      activeDrivers: 10,
+      openOrderAlerts: 11,
+      failedPayments: 7,
+      stuckOrders: 6,
+    })
+  })
+
+  it('returns availability grouped by the vendors service area', async () => {
+    config.featureFlags.area_availability_enabled = true
+    setResults('vendors', {
+      data: [{
+        service_zone: 'Chennai North',
+        is_online: true,
+        verification: 'approved',
+        vehicles: [{ is_active: true, verification: 'approved' }],
+        drivers: [{ is_active: true, verification: 'approved' }],
+      }],
+      error: null,
+    })
+
+    const response = await request(buildApp())
+      .get('/api/admin/availability-by-area')
+      .set('x-test-role', 'admin')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual([{
+      area: 'Chennai North',
+      onlineVendors: 1,
+      activeVehicles: 1,
+      activeDrivers: 1,
+    }])
+  })
 })
 
 describe('vendor order lifecycle events', () => {
@@ -145,11 +268,47 @@ describe('vendor order lifecycle events', () => {
       { bookingId: BOOKING_ID, reference: 'UT-1', deliveredAt: expect.any(String) },
       'cust-9',
     )
+    expect(mocks.emitRealtimeToVendor).toHaveBeenCalledWith(
+      'vendor-1',
+      'booking.updated',
+      { bookingId: BOOKING_ID, status: 'delivered' },
+    )
   })
 })
 
 describe('admin order status events', () => {
+  it('notifies the assigned vendor so their order list refreshes immediately', async () => {
+    mocks.transitionBooking.mockResolvedValueOnce({
+      data: {
+        id: BOOKING_ID,
+        reference: 'UT-1',
+        customer_id: 'cust-9',
+        vendor_id: 'vendor-1',
+        status: 'vendor_assigned',
+      },
+      error: null,
+    })
+
+    const response = await request(buildApp())
+      .patch(`/api/admin/orders/${BOOKING_ID}/assignment`)
+      .set('x-test-role', 'admin')
+      .send({ vendorId: 'c0000000-0000-4000-8000-000000000001' })
+
+    expect(response.status).toBe(200)
+    expect(mocks.emitRealtimeToVendor).toHaveBeenCalledWith(
+      'vendor-1',
+      'booking.updated',
+      { bookingId: BOOKING_ID, status: 'vendor_assigned' },
+    )
+    expect(mocks.emitRealtime).toHaveBeenCalledWith(
+      'booking.updated',
+      { bookingId: BOOKING_ID, status: 'vendor_assigned' },
+      'cust-9',
+    )
+  })
+
   it('emits booking.delivered to the customer when an admin marks the order delivered', async () => {
+    mocks.transitionBooking.mockResolvedValueOnce({ data: { id: BOOKING_ID, reference: 'UT-1', customer_id: 'cust-9', vendor_id: 'vendor-1', status: 'delivered' }, error: null })
     const response = await request(buildApp()).patch(`/api/admin/orders/${BOOKING_ID}/status`).set('x-test-role', 'admin').send({ status: 'delivered' })
 
     expect(response.status).toBe(200)
@@ -158,6 +317,11 @@ describe('admin order status events', () => {
       'booking.delivered',
       { bookingId: BOOKING_ID, reference: 'UT-1', deliveredAt: expect.any(String) },
       'cust-9',
+    )
+    expect(mocks.emitRealtimeToVendor).toHaveBeenCalledWith(
+      'vendor-1',
+      'booking.updated',
+      { bookingId: BOOKING_ID, status: 'delivered' },
     )
   })
 

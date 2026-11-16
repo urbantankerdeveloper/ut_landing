@@ -13,7 +13,7 @@ function notificationGroupKey(notification: AdminNotification) {
   const reference = notification.payload?.reference?.trim()
   if (reference) return { key: `reference:${reference}`, label: reference }
   const bookingId = notification.payload?.bookingId?.trim()
-  if (bookingId) return { key: `booking:${bookingId}`, label: bookingId }
+  if (bookingId) return { key: `booking:${bookingId}`, label: 'Booking reference unavailable' }
   return { key: `notification:${notification.id}`, label: notification.title }
 }
 

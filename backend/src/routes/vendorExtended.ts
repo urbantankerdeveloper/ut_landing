@@ -13,6 +13,8 @@ import { logger } from '../lib/logger.js'
 import { otpMatches } from '../services/otp.js'
 import { deliveryVerificationMethod } from '../services/deliveryVerification.js'
 import { listWindow, sendList, type ListWindow } from '../lib/listParams.js'
+import { config } from '../config.js'
+import { createInvoiceIfEligible } from '../services/invoices.js'
 const exactCount = (range: ListWindow) => (range.mode === 'paged' ? { count: 'exact' as const } : undefined)
 const router = Router(); router.use(requireAuth, requireRole('vendor'))
 async function vendorId(userId: string) { const { data } = await supabase.from('vendors').select('id').eq('owner_profile_id', userId).single(); return data?.id }
@@ -110,12 +112,20 @@ async function handleVendorOrderTransition(request: Request, response: Response)
     return failure(response, message.includes('NOT_FOUND') ? 404 : 409, message.includes('NOT_FOUND') ? 'Booking not found.' : 'The booking cannot be updated in its current state.', 'vendor.transition_failed', error)
   }
   const customerId = (data as { customer_id?: string }).customer_id
+  if (requestedStatus === 'delivered') {
+    try {
+      await createInvoiceIfEligible(current.id)
+    } catch (error) {
+      logger.error('invoice.generation_failed', { bookingId: current.id, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
   if (requestedStatus === 'accepted') {
     void recordAnalyticsEvent(analyticsEventNames.vendorAccepted, { bookingId: current.id })
   }
   if (requestedStatus === 'cancelled') { const { data: vendorRecord } = await supabase.from('vendors').select('business_name').eq('id', vendor).maybeSingle(); void recordAnalyticsEvent(analyticsEventNames.rejected, { bookingId: current.id, vendorId: vendor, vendorName: vendorRecord?.business_name ?? 'Unknown vendor', reason: parsed.data.reason ?? 'Vendor rejected booking' }) }
   if (requestedStatus === 'delivered') void recordAnalyticsEvent(analyticsEventNames.delivered, { bookingId: current.id })
   emitRealtime('booking.updated', { bookingId: current.id, status: requestedStatus }, customerId)
+  if (requestedStatus === 'delivered' && config.featureFlags.vendor_earnings_realtime_enabled) emitRealtimeToVendor(vendor, 'booking.updated', { bookingId: current.id, status: requestedStatus })
   if (requestedStatus === 'accepted') emitBookingLifecycleEvent('booking.vendor_accepted', { bookingId: current.id, vendorId: vendor, reference: current.reference }, customerId)
   if (requestedStatus === 'delivered') emitBookingLifecycleEvent('booking.delivered', { bookingId: current.id, reference: current.reference, deliveredAt: new Date().toISOString() }, customerId)
   if (customerId) emitRealtimeToUser(customerId, 'notification.created', { bookingId: current.id, status: requestedStatus })
@@ -212,7 +222,13 @@ router.post('/orders/:id/delivery/verify', async (request, response) => {
   if (error || !data) {
     return failure(response, 409, 'Delivery could not be completed.', 'vendor.delivery_transition_failed', error)
   }
+  try {
+    await createInvoiceIfEligible(booking.id)
+  } catch (invoiceError) {
+    logger.error('invoice.generation_failed', { bookingId: booking.id, error: invoiceError instanceof Error ? invoiceError.message : String(invoiceError) })
+  }
   emitRealtime('booking.updated', { bookingId: booking.id, status: 'delivered' }, booking.customer_id ?? undefined)
+  if (config.featureFlags.vendor_earnings_realtime_enabled) emitRealtimeToVendor(vendor, 'booking.updated', { bookingId: booking.id, status: 'delivered' })
   emitBookingLifecycleEvent('booking.delivered', { bookingId: booking.id, reference: booking.reference, deliveredAt: new Date().toISOString() }, booking.customer_id ?? undefined)
   const { error: clearError } = await supabase
     .from('bookings')

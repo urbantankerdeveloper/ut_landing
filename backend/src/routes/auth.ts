@@ -104,6 +104,17 @@ function mailErrorCode(error: unknown) {
 }
 
 const phoneSchema = z.string().regex(/^\d{10}$/)
+const duplicatePhoneMessage = 'This mobile number is already registered. Try signing in instead.'
+
+async function findVerifiedPhoneOwner(phone: string, exceptUserId?: string) {
+  let query = supabase
+    .from('profiles')
+    .select('id')
+    .eq('phone_e164', phone)
+    .not('phone_verified_at', 'is', null)
+  if (exceptUserId) query = query.neq('id', exceptUserId)
+  return query.maybeSingle()
+}
 
 async function issueOtpChallenge(response: Response, phone: string, template: 'booking_verification_otp' | 'user_registration_otp') {
   const otp = config.USE_DEFAULT_VERIFICATION_CODE ? config.DEFAULT_VERIFICATION_CODE : crypto.randomInt(100000, 1000000).toString()
@@ -346,6 +357,28 @@ router.post('/guest/request-otp', otpRequestLimit, otpPhoneLimit, async (request
     emailOtpSent: emailCode.ok,
     expiresInSeconds: emailCodeExpiresInSeconds,
   })
+})
+
+router.post('/partner/request-otp', otpRequestLimit, otpPhoneLimit, async (request, response) => {
+  const parsed = z.object({ phone: phoneSchema }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
+  const phone = toE164IndianMobile(parsed.data.phone)
+  if (!phone) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
+  return issueOtpChallenge(response, phone, 'user_registration_otp')
+})
+
+router.post('/partner/verify-otp', phoneOtpVerifyLimit, async (request, response) => {
+  const parsed = z.object({
+    challengeId: z.string().uuid(),
+    phone: phoneSchema,
+    otp: z.string().regex(/^\d{6}$/),
+  }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Enter the verification code sent to your mobile.' })
+  const phone = toE164IndianMobile(parsed.data.phone)
+  if (!phone) return response.status(400).json({ error: 'Enter the verification code sent to your mobile.' })
+  if (!(await passesChallengeAttempt(response, parsed.data.challengeId, phone, parsed.data.otp))) return
+  if (!(await markChallengeVerified(response, parsed.data.challengeId))) return
+  response.json({ verified: true })
 })
 
 router.post('/booking/email-fallback', requireAuth, otpRequestLimit, otpPhoneLimit, async (request, response) => {
@@ -606,9 +639,17 @@ router.post('/email/verify-otp', emailOtpVerifyLimit, async (request, response) 
     email: emailSchema,
     otp: emailCodeSchema,
     name: z.string().trim().min(2).max(60).optional(),
+    phone: phoneSchema.optional(),
+    phoneChallengeId: z.string().uuid().optional(),
+    phoneOtp: emailCodeSchema.optional(),
   }).safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Enter the verification code sent to your email.' })
-  const { challengeId, email, otp, name } = parsed.data
+  const { challengeId, email, otp, name, phone, phoneChallengeId, phoneOtp } = parsed.data
+  if ((phoneChallengeId || phoneOtp) && (!phone || !phoneChallengeId || !phoneOtp)) {
+    return response.status(400).json({ error: 'Enter the verification code sent to this mobile number.' })
+  }
+  const phoneE164 = phone ? toE164IndianMobile(phone) : null
+  if (phone && !phoneE164) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
   const row = await consumeEmailChallenge(response, challengeId, email, ['sign_in', 'signup'], otp)
   if (!row) return
 
@@ -627,6 +668,29 @@ router.post('/email/verify-otp', emailOtpVerifyLimit, async (request, response) 
     if (!existing || (!['customer', 'vendor'].includes(existing.role) && !pendingApproval)) {
       return response.status(403).json({ error: 'This account cannot sign in here.' })
     }
+    if (phoneChallengeId && phoneE164 && phoneOtp) {
+      if (!(await passesChallengeAttempt(response, phoneChallengeId, phoneE164, phoneOtp))) return
+      if (config.featureFlags.duplicate_phone_check_enabled) {
+        const { data: owner, error: ownerError } = await findVerifiedPhoneOwner(phoneE164, row.user_id)
+        if (ownerError) {
+          logFailure('signup.phone_lookup_failed', response.locals.requestId, ownerError.message)
+          return response.status(500).json({ error: verificationFailedMessage })
+        }
+        if (owner) return response.status(409).json({ error: duplicatePhoneMessage })
+      }
+      if (!(await markChallengeVerified(response, phoneChallengeId))) return
+      const { error: phoneUpdateError } = await supabase
+        .from('profiles')
+        .update({ phone_e164: phoneE164, phone_verified_at: new Date().toISOString() })
+        .eq('id', row.user_id)
+      if (phoneUpdateError?.code === '23505') {
+        return response.status(409).json({ error: duplicatePhoneMessage })
+      }
+      if (phoneUpdateError) {
+        logFailure('signup.phone_update_failed', response.locals.requestId, phoneUpdateError.message)
+        return response.status(500).json({ error: verificationFailedMessage })
+      }
+    }
     if (!(await markEmailChallengeVerified(response, challengeId))) return
     const { data: confirmed, error: confirmError } = await authSupabase.auth.admin.updateUserById(row.user_id, { email_confirm: true })
     if (confirmError || !confirmed.user) {
@@ -642,6 +706,18 @@ router.post('/email/verify-otp', emailOtpVerifyLimit, async (request, response) 
   }
 
   if (!name) return response.status(400).json({ error: 'Enter your name to create a new customer account.' })
+  if (phoneChallengeId && phoneE164 && phoneOtp) {
+    if (!(await passesChallengeAttempt(response, phoneChallengeId, phoneE164, phoneOtp))) return
+    if (config.featureFlags.duplicate_phone_check_enabled) {
+      const { data: owner, error: ownerError } = await findVerifiedPhoneOwner(phoneE164)
+      if (ownerError) {
+        logFailure('signup.phone_lookup_failed', response.locals.requestId, ownerError.message)
+        return response.status(500).json({ error: verificationFailedMessage })
+      }
+      if (owner) return response.status(409).json({ error: duplicatePhoneMessage })
+    }
+    if (!(await markChallengeVerified(response, phoneChallengeId))) return
+  }
   if (!(await markEmailChallengeVerified(response, challengeId))) return
 
   const password = crypto.randomBytes(32).toString('base64url')
@@ -657,15 +733,21 @@ router.post('/email/verify-otp', emailOtpVerifyLimit, async (request, response) 
     return response.status(409).json({ error: 'The account could not be created. Try signing in again.' })
   }
   const signupPlatform = clientPlatformFromHeader(request.header('x-client-platform'))
+  const verifiedPhone = phoneChallengeId && phoneE164
+    ? { phone_e164: phoneE164, phone_verified_at: new Date().toISOString() }
+    : {}
   const { data: createdProfile, error: profileError } = await supabase
     .from('profiles')
-    .upsert({ id: created.user.id, full_name: name, username, role: 'customer', signup_platform: signupPlatform, selfie_required: false })
+    .upsert({ id: created.user.id, full_name: name, username, role: 'customer', signup_platform: signupPlatform, selfie_required: false, ...verifiedPhone })
     .select('id,role,full_name,username,phone_e164,theme_mode,selfie_required')
     .single()
   if (profileError || !createdProfile) {
     logFailure('email.profile_create_failed', response.locals.requestId, profileError?.message)
     const { error: rollbackError } = await authSupabase.auth.admin.deleteUser(created.user.id)
     if (rollbackError) logFailure('email.rollback_failed', response.locals.requestId, rollbackError.message)
+    if (profileError?.code === '23505' && phoneChallengeId) {
+      return response.status(409).json({ error: duplicatePhoneMessage })
+    }
     return response.status(500).json({ error: 'The customer account could not be created.' })
   }
   const { data: signedIn, error: signInError } = await authSupabase.auth.signInWithPassword({ email, password })
@@ -809,10 +891,13 @@ router.post('/signup', signupLimit, signupEmailLimit, async (request, response) 
   if (parsed.data.selfieJpegBase64 !== undefined && !selfie) return response.status(400).json({ error: 'Choose a JPEG photo.' })
   if (!isEmailConfigured()) return response.status(503).json({ error: 'Email confirmation is unavailable. Configure Gmail SMTP_USER, SMTP_PASSWORD, and MAIL_FROM on the backend, then try again.' })
 
+  const phone = toE164IndianMobile(parsed.data.phone)
+  if (!phone) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
+
   const signupPlatform = clientPlatformFromHeader(request.header('x-client-platform'))
   const themeMode = parsed.data.themeMode ?? 'system'
   const username = parsed.data.username?.toLowerCase() ?? parsed.data.email.split('@')[0]?.toLowerCase() ?? 'user'
-  // The phone is not stored here. It is written by the phone verify route after the OTP passes.
+  // The phone is stored only after its registration OTP passes.
   const { data: created, error } = await authSupabase.auth.admin.createUser({
     email: parsed.data.email,
     password: parsed.data.password,
@@ -857,7 +942,7 @@ router.post('/signup', signupLimit, signupEmailLimit, async (request, response) 
     const { error: vendorError } = await supabase.from('vendors').insert({
       owner_profile_id: userId,
       business_name: parsed.data.businessName,
-      phone_e164: toE164IndianMobile(parsed.data.phone),
+      phone_e164: phone,
       service_zone: parsed.data.serviceZone,
       latitude: parsed.data.latitude ?? null,
       longitude: parsed.data.longitude ?? null,
@@ -897,7 +982,7 @@ router.post('/signup', signupLimit, signupEmailLimit, async (request, response) 
     return response.status(code.status).json({ error: code.error })
   }
 
-  const phoneCode = await sendPhoneOtpBestEffort(response.locals.requestId, parsed.data.phone)
+  const phoneCode = await sendPhoneOtpBestEffort(response.locals.requestId, phone)
 
   response.status(201).json({
     requiresEmailVerification: true,

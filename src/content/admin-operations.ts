@@ -117,6 +117,17 @@ export const adminOperationsContent = {
       assignFailed: 'Vendor assignment could not be saved.',
       cancelled: 'Booking cancelled and audited.',
       cancelFailed: 'Booking could not be cancelled.',
+      dispatchModeEnabled: 'Manual assignment mode enabled.',
+      dispatchModeDisabled: 'Automatic vendor assignment restored.',
+      dispatchModeFailed: 'Assignment mode could not be updated.',
+    },
+    dispatchMode: {
+      title: 'New booking assignment',
+      manualLabel: 'Manual assignment mode',
+      manualEnabled: 'New bookings wait for an admin to assign a vendor and fleet. Vendors are not broadcast automatically.',
+      automaticEnabled: 'New bookings are automatically offered to nearby online vendors.',
+      loading: 'Loading assignment settings...',
+      unavailable: 'Assignment settings are unavailable.',
     },
   },
   operations: {

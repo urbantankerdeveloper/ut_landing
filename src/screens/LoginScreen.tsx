@@ -9,7 +9,7 @@ import { CameraUnavailableError, captureFrameAsFile, openFrontCamera } from '../
 import { authContent as c } from '../content/auth'
 import { notifyError, notifyInfo, notifySuccess } from '../utils/notify'
 
-type AuthMode = 'login' | 'signup' | 'reset' | 'set-password'
+type AuthMode = 'login' | 'signup' | 'verify-signup' | 'reset' | 'set-password'
 type SignupRole = 'customer' | 'vendor' | 'admin'
 const googleSignInEnabled = import.meta.env.VITE_ENABLE_GOOGLE_SIGN_IN === 'true'
 
@@ -84,6 +84,10 @@ export default function LoginScreen() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [recoveryAccessToken, setRecoveryAccessToken] = useState(recoveryLink?.accessToken ?? '')
   const [showPassword, setShowPassword] = useState(false)
+  const [signupEmailChallengeId, setSignupEmailChallengeId] = useState<string | null>(null)
+  const [signupPhoneChallengeId, setSignupPhoneChallengeId] = useState<string | null>(null)
+  const [signupEmailOtp, setSignupEmailOtp] = useState('')
+  const [signupPhoneOtp, setSignupPhoneOtp] = useState('')
 
   useEffect(() => {
     if (recoveryLink && !recoveryLink.accessToken) notifyError(c.messages.invalidResetLink)
@@ -170,6 +174,41 @@ export default function LoginScreen() {
     event.preventDefault()
     const normalizedUsername = username.trim().toLowerCase()
     try {
+      if (mode === 'verify-signup') {
+        if (!signupEmailChallengeId || !/^\d{6}$/.test(signupEmailOtp.trim())) {
+          notifyError('Enter the 6-digit code sent to your email.')
+          return
+        }
+        if (signupPhoneChallengeId && !/^\d{6}$/.test(signupPhoneOtp.trim())) {
+          notifyError('Enter the 6-digit code sent to your mobile number.')
+          return
+        }
+        const response = await authApi.verifySignupEmail({
+          email: normalizedUsername,
+          challengeId: signupEmailChallengeId,
+          otp: signupEmailOtp.trim(),
+          name: name.trim(),
+          ...(signupPhoneChallengeId ? {
+            phone,
+            phoneChallengeId: signupPhoneChallengeId,
+            phoneOtp: signupPhoneOtp.trim(),
+          } : {}),
+        })
+        if (response.approvalPending) {
+          notifySuccess(response.message ?? c.messages.accountCreatedAdminApproval)
+          setMode('login')
+          setPassword('')
+          return
+        }
+        if (!response.user?.role) throw new Error(c.messages.accountCreatedNoRole)
+        signIn({
+          username: response.user.username ?? response.user.email ?? normalizedUsername,
+          role: response.user.role,
+          name: response.user.name ?? name.trim(),
+        }, response.accessToken ?? response.token)
+        openWorkspace(response.user.role)
+        return
+      }
       if (mode === 'signup') {
         if (!name.trim() || !normalizedUsername || password.length < 8 || !/^\d{10}$/.test(phone)) {
           notifyError(c.messages.incompleteSignUp)
@@ -188,6 +227,23 @@ export default function LoginScreen() {
           ...(role === 'vendor' ? { businessName: businessName.trim(), serviceZone: serviceZone.trim(), ...(coordinates ?? {}) } : {}),
           selfieJpegBase64: selfieBytes ? base64FromBytes(selfieBytes) : undefined,
         })
+        if (response.requiresEmailVerification) {
+          if (!response.challengeId) throw new Error('The email verification code was not created.')
+          if (response.phoneOtpSent && !response.phoneChallengeId) {
+            throw new Error('The mobile verification code was not created.')
+          }
+          setSignupEmailChallengeId(response.challengeId)
+          setSignupPhoneChallengeId(
+            response.phoneOtpSent ? response.phoneChallengeId ?? null : null,
+          )
+          setSignupEmailOtp('')
+          setSignupPhoneOtp('')
+          setMode('verify-signup')
+          notifyInfo(response.phoneOtpSent
+            ? 'Enter the verification codes sent to your email and mobile.'
+            : 'Enter the verification code sent to your email.')
+          return
+        }
         if (!response.accessToken && !response.token) {
           notifySuccess(response.approvalPending
             ? c.messages.accountCreatedAdminApproval
@@ -234,6 +290,58 @@ export default function LoginScreen() {
   const isSignup = mode === 'signup'
   const isReset = mode === 'reset'
   const story = isSignup ? c.story.signUp : c.story.signIn
+  if (mode === 'verify-signup') {
+    return <section className="auth-screen">
+      <div className="auth-story">
+        <button className="auth-story-brand" onClick={() => navigate('home')} aria-label={c.shared.homeAriaLabel}>
+          <img className="brand-mark" src="/urban-tanker-mark.png" width={512} height={512} decoding="async" alt="" aria-hidden="true" />
+          <span>{c.shared.brandPrefix}<b>{c.shared.brandName}</b></span>
+        </button>
+        <div className="auth-story-content">
+          <p className="eyebrow">{c.shared.eyebrow}</p>
+          <h1>{c.story.signUp.titleLead}<em>{c.story.signUp.titleEmphasis}</em></h1>
+          <p>{c.story.signUp.copy}</p>
+        </div>
+        <div className="auth-orbit" aria-hidden="true" />
+      </div>
+      <div className="auth-panel">
+        <div className="auth-panel-inner">
+          <p className="eyebrow">{c.panel.eyebrow.signUp}</p>
+          <h2>Verify your account</h2>
+          <p className="auth-intro">
+            Enter the email code{signupPhoneChallengeId ? ' and mobile code' : ''} to finish creating your account.
+          </p>
+          <form className="auth-form" onSubmit={submit} noValidate>
+            <label htmlFor="signup-email-otp">Email verification code</label>
+            <input id="signup-email-otp" value={signupEmailOtp} onChange={(event) => setSignupEmailOtp(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" required />
+            {signupPhoneChallengeId && <>
+              <label htmlFor="signup-phone-otp">Mobile verification code</label>
+              <input id="signup-phone-otp" value={signupPhoneOtp} onChange={(event) => setSignupPhoneOtp(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" required />
+            </>}
+            <button className="button button-primary button-large" type="submit">Verify and continue <ArrowRight size={15} /></button>
+            <button className="button button-quiet" type="button" onClick={async () => {
+              try {
+                const result = await authApi.requestSignupEmailCode(username.trim().toLowerCase())
+                setSignupEmailChallengeId(result.challengeId)
+                notifyInfo('A new email verification code was sent.')
+              } catch (error) {
+                notifyError(error instanceof Error ? error.message : c.messages.genericFailure)
+              }
+            }}>Send a new email code</button>
+          </form>
+          <div className="auth-links">
+            <button type="button" onClick={() => {
+              setSignupEmailChallengeId(null)
+              setSignupPhoneChallengeId(null)
+              setSignupEmailOtp('')
+              setSignupPhoneOtp('')
+              setMode('login')
+            }}>{c.shared.backToLogin}</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  }
   if (mode === 'set-password') {
     return <PasswordResetForm
       onSubmit={submit}

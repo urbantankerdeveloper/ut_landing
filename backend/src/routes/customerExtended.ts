@@ -15,8 +15,16 @@ import { listWindow, sendList } from '../lib/listParams.js'
 import { cachedCatalog } from '../services/catalogCache.js'
 import { limiterStore } from '../services/scaling.js'
 import { codSwitchStatuses, notifyRevertedToCash } from '../services/codOnlineSwitch.js'
+import { loadOrderGroup } from '../services/orderGroups.js'
+import { config } from '../config.js'
 const catalogCacheControl = 'private, max-age=30, stale-while-revalidate=120'
 const router = Router(); router.use(requireAuth)
+router.use('/wallet', (_request, response, next) => {
+  if (!config.featureFlags.wallet_enabled) {
+    return response.status(403).json({ error: 'Wallet is currently disabled.' })
+  }
+  next()
+})
 const deliveryOtpLimit = rateLimit({ windowMs: 10 * 60 * 1000, limit: 3, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:customerExtended:deliveryOtp:', 'open'), passOnStoreError: true, keyGenerator: (request) => `${request.authUser!.id}:${request.params.orderId}`, message: { error: 'Too many delivery codes requested for this order. Try again later.' } })
 const statusSchema = z.object({ status: z.enum(['cancelled']) })
 router.get('/orders/:orderId/tracking', async (request, response) => { const { data: booking, error: bookingError } = await supabase.from('bookings').select('id,status,customer_id,vehicle_id,driver_id,latitude,longitude').eq('id', request.params.orderId).eq('customer_id', request.authUser!.id).maybeSingle(); if (bookingError) return databaseFailure(response, 'customerExtended.database_error', bookingError, 500); if (!booking) return response.status(404).json({ error: 'Booking not found' }); const { data: location, error } = await supabase.from('vendor_location_updates').select('latitude,longitude,accuracy_metres,recorded_at').eq('booking_id', request.params.orderId).order('recorded_at', { ascending: false }).limit(1).maybeSingle(); if (error) return databaseFailure(response, 'customerExtended.database_error', error, 500); const [vehicleResult, driverResult] = await Promise.all([booking.vehicle_id ? supabase.from('vehicles').select('registration_number').eq('id', booking.vehicle_id).maybeSingle() : Promise.resolve({ data: null, error: null }), booking.driver_id ? supabase.from('drivers').select('name').eq('id', booking.driver_id).maybeSingle() : Promise.resolve({ data: null, error: null })]); if (vehicleResult.error || driverResult.error) return failure(response, 500, 'Tracking details could not be loaded.', 'customer.tracking_lookup_failed', vehicleResult.error ?? driverResult.error); response.json({ orderId: booking.id, status: booking.status, latitude: location?.latitude ?? undefined, longitude: location?.longitude ?? undefined, accuracy: location?.accuracy_metres ?? undefined, recorded_at: location?.recorded_at, customerLatitude: booking.latitude ?? undefined, customerLongitude: booking.longitude ?? undefined, vehicle: vehicleResult.data?.registration_number, driver: driverResult.data?.name, trackingAvailable: Boolean(location) }) })
@@ -128,23 +136,28 @@ router.post('/orders/:orderId/payment-method', async (request, response) => {
   if (booking.payment_method === 'cod') return response.json({ id: booking.id, paymentMethod: 'cod' })
   if (booking.payment_method !== 'gateway') return response.status(409).json({ error: 'Payment method cannot be changed for this booking' })
   if (!codSwitchStatuses.includes(booking.status)) return response.status(409).json({ error: 'Payment method cannot be changed in the current booking state' })
-  const { data: payment, error: paymentError } = await supabase.from('payments').select('id,status').eq('booking_id', booking.id).maybeSingle()
+  const orderGroup = await loadOrderGroup(booking.id, customerId)
+  if (orderGroup.error) return databaseFailure(response, 'customerExtended.database_error', orderGroup.error, 500)
+  const bookingIds = orderGroup.data?.tasks.map((task) => task.id) ?? [booking.id]
+  if (orderGroup.data?.tasks.some((task) => !codSwitchStatuses.includes(task.status))) return response.status(409).json({ error: 'Payment method cannot be changed in the current booking state' })
+  const paymentBookingId = orderGroup.data?.leadId ?? booking.id
+  const { data: payment, error: paymentError } = await supabase.from('payments').select('id,status').eq('booking_id', paymentBookingId).maybeSingle()
   if (paymentError) return databaseFailure(response, 'customerExtended.database_error', paymentError, 500)
   if (payment?.status === 'paid') return response.status(409).json({ error: 'This booking has already been paid online' })
-  const { data: switched, error: switchError } = await supabase.from('bookings').update({ payment_method: 'cod', updated_at: new Date().toISOString() }).eq('id', booking.id).eq('customer_id', customerId).eq('payment_method', 'gateway').in('status', codSwitchStatuses).select('id').maybeSingle()
+  const { data: switched, error: switchError } = await supabase.from('bookings').update({ payment_method: 'cod', updated_at: new Date().toISOString() }).eq('customer_id', customerId).in('id', bookingIds).eq('payment_method', 'gateway').in('status', codSwitchStatuses).select('id').limit(1).maybeSingle()
   if (switchError) return databaseFailure(response, 'customerExtended.database_error', switchError, 500)
   if (!switched) return response.status(409).json({ error: 'Payment method cannot be changed in the current booking state' })
   // A Razorpay capture can land between the check above and the update; revert in that case.
-  const { data: latest } = await supabase.from('payments').select('status').eq('booking_id', booking.id).maybeSingle()
+  const { data: latest } = await supabase.from('payments').select('status').eq('booking_id', paymentBookingId).maybeSingle()
   if (latest?.status === 'paid') {
-    await supabase.from('bookings').update({ payment_method: 'gateway' }).eq('id', booking.id).eq('customer_id', customerId)
+    await supabase.from('bookings').update({ payment_method: 'gateway' }).eq('customer_id', customerId).in('id', bookingIds)
     return response.status(409).json({ error: 'This booking has already been paid online' })
   }
   if (!payment) {
-    const { error: insertError } = await supabase.from('payments').insert({ booking_id: booking.id, provider: 'cash_on_delivery', amount_paise: booking.quoted_amount_paise, currency: 'INR', status: 'pending' })
+    const { error: insertError } = await supabase.from('payments').insert({ booking_id: paymentBookingId, provider: 'cash_on_delivery', amount_paise: orderGroup.data?.totalPaise ?? booking.quoted_amount_paise, currency: 'INR', status: 'pending' })
     if (insertError) return databaseFailure(response, 'customerExtended.database_error', insertError, 500)
   }
-  await notifyRevertedToCash(booking.id)
+  await Promise.all(bookingIds.map((id) => notifyRevertedToCash(id)))
   response.json({ id: booking.id, paymentMethod: 'cod' })
 })
 router.post('/orders/:orderId/payment-method/online', async (request, response) => {
@@ -155,18 +168,24 @@ router.post('/orders/:orderId/payment-method/online', async (request, response) 
   if (!booking) return response.status(404).json({ error: 'Booking not found' })
   if (booking.payment_method === 'gateway') return response.json({ id: booking.id, paymentMethod: 'gateway' })
   if (booking.payment_method !== 'cod') return response.status(409).json({ error: 'Payment method cannot be changed for this booking' })
+  if (!config.featureFlags.online_payment_enabled) return response.status(503).json({ error: 'Online payments are currently unavailable. Please choose cash on delivery.' })
   if (!codSwitchStatuses.includes(booking.status)) return response.status(409).json({ error: 'Online payment can only be chosen before the driver starts the trip' })
-  const { data: payment, error: paymentError } = await supabase.from('payments').select('status').eq('booking_id', booking.id).maybeSingle()
+  const orderGroup = await loadOrderGroup(booking.id, customerId)
+  if (orderGroup.error) return databaseFailure(response, 'customerExtended.database_error', orderGroup.error, 500)
+  const bookingIds = orderGroup.data?.tasks.map((task) => task.id) ?? [booking.id]
+  if (orderGroup.data?.tasks.some((task) => !codSwitchStatuses.includes(task.status))) return response.status(409).json({ error: 'Online payment can only be chosen before the driver starts the trip' })
+  const paymentBookingId = orderGroup.data?.leadId ?? booking.id
+  const { data: payment, error: paymentError } = await supabase.from('payments').select('status').eq('booking_id', paymentBookingId).maybeSingle()
   if (paymentError) return databaseFailure(response, 'customerExtended.database_error', paymentError, 500)
   if (payment?.status === 'paid') return response.status(409).json({ error: 'This booking has already been paid' })
   const now = new Date().toISOString()
-  const { data: switched, error: switchError } = await supabase.from('bookings').update({ payment_method: 'gateway', payment_switched_to_online_at: now, updated_at: now }).eq('id', booking.id).eq('customer_id', customerId).eq('payment_method', 'cod').in('status', codSwitchStatuses).select('id').maybeSingle()
+  const { data: switched, error: switchError } = await supabase.from('bookings').update({ payment_method: 'gateway', payment_switched_to_online_at: now, updated_at: now }).eq('customer_id', customerId).in('id', bookingIds).eq('payment_method', 'cod').in('status', codSwitchStatuses).select('id').limit(1).maybeSingle()
   if (switchError) return databaseFailure(response, 'customerExtended.database_error', switchError, 500)
   if (!switched) return response.status(409).json({ error: 'Online payment can only be chosen before the driver starts the trip' })
   // A capture can land between the check and the update. Keep it as COD in that case so the driver does not get a conflicting instruction.
-  const { data: latest } = await supabase.from('payments').select('status').eq('booking_id', booking.id).maybeSingle()
+  const { data: latest } = await supabase.from('payments').select('status').eq('booking_id', paymentBookingId).maybeSingle()
   if (latest?.status === 'paid') {
-    await supabase.from('bookings').update({ payment_method: 'cod', payment_switched_to_online_at: null }).eq('id', booking.id).eq('customer_id', customerId)
+    await supabase.from('bookings').update({ payment_method: 'cod', payment_switched_to_online_at: null }).eq('customer_id', customerId).in('id', bookingIds)
     return response.status(409).json({ error: 'This booking has already been paid' })
   }
   response.json({ id: booking.id, paymentMethod: 'gateway' })
@@ -175,7 +194,10 @@ router.get('/payments/:bookingId', async (request, response) => {
   const { data: booking, error: bookingError } = await supabase.from('bookings').select('id').eq('id', request.params.bookingId).eq('customer_id', request.authUser!.id).maybeSingle()
   if (bookingError) return databaseFailure(response, 'customerExtended.database_error', bookingError, 500)
   if (!booking) return response.status(404).json({ error: 'Booking not found' })
-  const { data: payment, error } = await supabase.from('payments').select('status,amount_paise,currency,method,card_network,card_last4,bank,wallet,vpa,captured_at,fee_paise,tax_paise,refunded_paise').eq('booking_id', booking.id).maybeSingle()
+  const orderGroup = await loadOrderGroup(booking.id, request.authUser!.id)
+  if (orderGroup.error) return databaseFailure(response, 'customerExtended.database_error', orderGroup.error, 500)
+  const paymentBookingId = orderGroup.data?.leadId ?? booking.id
+  const { data: payment, error } = await supabase.from('payments').select('status,amount_paise,currency,method,card_network,card_last4,bank,wallet,vpa,captured_at,fee_paise,tax_paise,refunded_paise').eq('booking_id', paymentBookingId).maybeSingle()
   if (error) return databaseFailure(response, 'customerExtended.database_error', error, 500)
   if (!payment) return response.status(404).json({ error: 'Payment not found' })
   response.json({ status: payment.status, amountPaise: payment.amount_paise, currency: payment.currency, method: payment.method, cardNetwork: payment.card_network, cardLast4: payment.card_last4, bank: payment.bank, wallet: payment.wallet, vpa: payment.vpa, capturedAt: payment.captured_at, feePaise: payment.fee_paise, taxPaise: payment.tax_paise, refundedPaise: payment.refunded_paise })

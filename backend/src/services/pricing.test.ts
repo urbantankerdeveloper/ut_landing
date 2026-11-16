@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildVendorPayouts, isServiceInEffectiveWindow, sumServiceItemPrices } from './pricingMath.js'
+import { allocateServiceAmountsPaise, buildVendorPayouts, isServiceInEffectiveWindow, sumServiceItemPrices, vendorAccrualPaise } from './pricingMath.js'
 import { GST_PERCENTAGE, GST_RATE, quoteServices } from './pricing.js'
 
 const mock = vi.hoisted(() => ({ tables: new Map<string, { data: unknown; error: unknown }>(), testPricing: false }))
@@ -92,6 +92,11 @@ describe('effective pricing windows', () => {
 
 describe('vendor settlement payouts', () => {
   const period = { from: '2026-10-01', to: '2026-10-31' }
+  it('calculates accrued earnings at the default vendor share with per-booking rounding', () => {
+    expect(vendorAccrualPaise(10001)).toBe(8501)
+    expect(() => vendorAccrualPaise(Number.NaN)).toThrow('The vendor accrual amount is invalid.')
+  })
+
   it('groups delivered bookings by vendor and records the booking ids', () => {
     const payouts = buildVendorPayouts([
       { id: 'b1', vendor_id: 'v1', quoted_amount_paise: 100001 },
@@ -135,6 +140,17 @@ describe('quoteServices', () => {
       mock.testPricing = false
     }
   })
+  it('allocates test pricing as a flat amount per service regardless of catalog price', async () => {
+    mock.testPricing = true
+    try {
+      seed({ service_catalog: { data: [waterTanker, { code: 'tank_cleaning', base_price_paise: 180000, config: {} }] } })
+      const quote = await quoteServices([{ serviceId: 'water_tanker' }, { serviceId: 'tank_cleaning' }], undefined, undefined, true)
+      expect(quote.serviceAmountsPaise).toEqual([100, 100])
+      expect(quote.serviceAmountsPaise?.reduce((sum, amount) => sum + amount, 0)).toBe(quote.totalPaise)
+    } finally {
+      mock.testPricing = false
+    }
+  })
   it('still rejects unavailable services when test pricing is enabled', async () => {
     mock.testPricing = true
     try {
@@ -173,9 +189,49 @@ describe('quoteServices', () => {
       totalPaise: 507400,
     })
   })
+  it('allocates the quoted total across services without losing paise', async () => {
+    seed({ service_catalog: { data: [
+      waterTanker,
+      { code: 'tank_cleaning', base_price_paise: 180000, config: {} },
+    ] } })
+    const quote = await quoteServices([
+      { serviceId: 'water_tanker' },
+      { serviceId: 'tank_cleaning' },
+    ], undefined, undefined, true)
+    expect(quote.serviceAmountsPaise).toHaveLength(2)
+    expect(quote.serviceAmountsPaise!.reduce((sum, amount) => sum + amount, 0)).toBe(quote.totalPaise)
+  })
+  it('creates itemized snapshots whose paise totals match the quote', async () => {
+    seed({
+      service_catalog: { data: [
+        { ...waterTanker, name: 'Water tanker' },
+        { code: 'tank_cleaning', name: 'Tank cleaning', base_price_paise: 180000, config: {} },
+      ] },
+      coupons: { data: { id: 'c1', discount_type: 'flat', discount_value: 100, valid_until: null } },
+    })
+    const quote = await quoteServices([
+      { serviceId: 'water_tanker', tankerCount: '2', capacity: '5000 litres' },
+      { serviceId: 'tank_cleaning', quantity: '3' },
+    ], 'SAVE100', undefined, true, true)
+    const lines = quote.invoiceLineItems!
+    expect(lines.map((line) => [line.description, line.quantity])).toEqual([
+      ['Water tanker · 5000 litres', 2],
+      ['Tank cleaning', 3],
+    ])
+    expect(lines.reduce((sum, line) => sum + line.subtotalPaise, 0)).toBe(quote.subtotalPaise)
+    expect(lines.reduce((sum, line) => sum + line.taxPaise, 0)).toBe(quote.gstPaise)
+    expect(lines.reduce((sum, line) => sum + line.discountPaise, 0)).toBe(quote.discountPaise)
+    expect(lines.reduce((sum, line) => sum + line.totalPaise, 0)).toBe(quote.totalPaise)
+  })
   it('rejects a coupon past its expiry date', async () => {
     seed({ service_catalog: { data: [waterTanker] }, coupons: { data: { id: 'c1', discount_type: 'flat', discount_value: 100, valid_until: '2020-01-01T00:00:00Z' } } })
     await expect(quoteServices([{ serviceId: 'water_tanker' }], 'OLD')).rejects.toThrow('Coupon is not available')
+  })
+
+  describe('allocateServiceAmountsPaise', () => {
+    it('uses stable largest-remainder rounding for exact order totals', () => {
+      expect(allocateServiceAmountsPaise(10, [1, 1, 1])).toEqual([4, 3, 3])
+    })
   })
   it('rejects a second redemption of the same coupon by the same customer', async () => {
     seed({ service_catalog: { data: [waterTanker] }, coupons: { data: { id: 'c1', discount_type: 'flat', discount_value: 100, valid_until: null } }, coupon_redemptions: { data: { coupon_id: 'c1' } } })

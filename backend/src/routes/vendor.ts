@@ -1,13 +1,15 @@
-import { databaseFailure } from '../lib/httpErrors.js'
+import { databaseFailure, failure } from '../lib/httpErrors.js'
 import { Router } from 'express'
 import { requireAuth, requireRole } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 import { listWindow, sendList, type ListWindow } from '../lib/listParams.js'
 import { cachedCatalog } from '../services/catalogCache.js'
+import { config } from '../config.js'
+import { DEFAULT_VENDOR_SHARE_RATE, vendorAccrualPaise } from '../services/pricingMath.js'
 const exactCount = (range: ListWindow) => (range.mode === 'paged' ? { count: 'exact' as const } : undefined)
 const router = Router(); router.use(requireAuth, requireRole('vendor'))
 type BookingServiceDetail = { serviceId: string; capacity?: string; waterType?: string; tankerCount?: string; serviceType?: string; quantity?: string; depth?: string; grade?: string; pump?: string; pickupLocation?: string; materialType?: string; details?: string; deliveryDate?: string; preferredTime?: string; location?: string }
-type BookingRecord = { id: string; reference: string; service_code: string; service_details?: BookingServiceDetail[] | null; address_text: string; latitude?: number | null; longitude?: number | null; quoted_amount_paise?: number | null; status: string; vendor_id?: string | null; vehicle_id?: string | null; driver_id?: string | null; created_at: string; scheduled_for?: string | null }
+type BookingRecord = { id: string; reference: string; service_code: string; service_details?: BookingServiceDetail[] | null; address_text: string; latitude?: number | null; longitude?: number | null; quoted_amount_paise?: number | null; status: string; vendor_id?: string | null; vehicle_id?: string | null; driver_id?: string | null; created_at: string; scheduled_for?: string | null; order_group_reference?: string | null; order_group_size?: number | null }
 type RelatedRecord = { id: string; name?: string; registration_number?: string }
 type OrderOffer = { event_type: string; distanceKm?: number }
 const statusMap: Record<string, 'Available' | 'Assigned' | 'Accepted' | 'En route' | 'Arrived' | 'Delivered' | 'Rejected' | 'Unavailable'> = { pending_vendor: 'Available', vendor_assigned: 'Assigned', accepted: 'Accepted', en_route: 'En route', arrived: 'Arrived', delivered: 'Delivered', cancelled: 'Rejected' }
@@ -92,7 +94,25 @@ async function loadVendorOrders(vendorId: string, offset = 0, pageSize?: number)
   const services = new Map((servicesResult.data ?? []).map((service) => [service.code, service.name]))
   const vehicles = new Map((vehiclesResult.data as RelatedRecord[] ?? []).map((vehicle) => [vehicle.id, vehicle.registration_number ?? vehicle.id]))
   const drivers = new Map((driversResult.data as RelatedRecord[] ?? []).map((driver) => [driver.id, driver.name ?? driver.id]))
-  return { data: orders.map((order) => normalizeOrder(order, vendorId, offerByBooking.get(order.id), services, vehicles, drivers)), error: null, hasMore }
+  const groupMetadata = new Map<string, { reference: string | null; size: number | null }>()
+  if (config.featureFlags.multi_service_tasks_enabled && orders.length) {
+    const { data: groupedRows, error: groupError } = await supabase.from('bookings')
+      .select('id,order_group_reference,order_group_size')
+      .in('id', orders.map((order) => order.id))
+    if (groupError) return { data: null, error: groupError, hasMore: false }
+    for (const row of groupedRows ?? []) {
+      groupMetadata.set(row.id, { reference: row.order_group_reference, size: row.order_group_size })
+    }
+  }
+  return {
+    data: orders.map((order) => ({
+      ...normalizeOrder(order, vendorId, offerByBooking.get(order.id), services, vehicles, drivers),
+      orderGroupReference: groupMetadata.get(order.id)?.reference ?? undefined,
+      orderGroupSize: groupMetadata.get(order.id)?.size ?? undefined,
+    })),
+    error: null,
+    hasMore,
+  }
 }
 router.get('/dashboard', async (request, response) => { const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', request.authUser!.id).single(); if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' }); const [ordersResult, vehiclesResult, driversResult] = await Promise.all([loadVendorOrders(vendor.id, 0, 100), supabase.from('vehicles').select('id,registration_number,capacity_litres,is_active,verification').eq('vendor_id', vendor.id).order('registration_number'), supabase.from('drivers').select('id,name,mobile_e164,is_active,verification').eq('vendor_id', vendor.id).order('name')]); const queryError = ordersResult.error ?? vehiclesResult.error ?? driversResult.error; if (queryError) return databaseFailure(response, 'vendor.database_error', queryError, 500); response.json({ orders: ordersResult.data ?? [], vehicles: vehiclesResult.data ?? [], drivers: driversResult.data ?? [] }) })
 router.get('/orders', async (request, response) => {
@@ -109,4 +129,47 @@ router.get('/vehicles', async (request, response) => { const { data: vendor } = 
 router.get('/drivers', async (request, response) => { const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', request.authUser!.id).single(); if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' }); const listRange = listWindow(request.query); const { data, error, count } = await supabase.from('drivers').select('id,name,mobile_e164,is_active,verification', exactCount(listRange)).eq('vendor_id', vendor.id).order('name').range(listRange.from, listRange.to); if (error) return databaseFailure(response, 'vendor.database_error', error, 500); sendList(response, listRange, data ?? [], count) })
 router.get('/services', async (request, response) => { const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', request.authUser!.id).single(); if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' }); let services; try { services = await cachedCatalog('vendor.services.base', async () => { const { data, error } = await supabase.from('service_catalog').select('*').eq('is_active', true).order('name'); if (error) throw error; return data ?? [] }) } catch (error) { return databaseFailure(response, 'vendor.database_error', error, 500) } const { data: availability, error: availabilityError } = await supabase.from('vendor_service_availability').select('service_code,is_enabled').eq('vendor_id', vendor.id); if (availabilityError) return databaseFailure(response, 'vendor.database_error', availabilityError, 500); const enabled = new Map((availability ?? []).map((item) => [item.service_code, item.is_enabled])); response.json(services.map((service) => ({ ...service, vendor_enabled: enabled.has(service.code) ? enabled.get(service.code) : true }))) })
 router.get('/payouts', async (request, response) => { const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', request.authUser!.id).single(); if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' }); const listRange = listWindow(request.query); const { data, error, count } = await supabase.from('vendor_payouts').select('*', exactCount(listRange)).eq('vendor_id', vendor.id).order('created_at', { ascending: false }).range(listRange.from, listRange.to); if (error) return databaseFailure(response, 'vendor.database_error', error, 500); sendList(response, listRange, data ?? [], count) })
+router.get('/earnings/accrued', async (request, response) => {
+  if (!config.featureFlags.vendor_earnings_realtime_enabled) {
+    return response.status(404).json({ error: 'Unsettled delivery earnings are not enabled.' })
+  }
+  const { data: vendor, error: vendorError } = await supabase.from('vendors').select('id').eq('owner_profile_id', request.authUser!.id).single()
+  if (vendorError) return databaseFailure(response, 'vendor.earnings_vendor_lookup_failed', vendorError, 500)
+  if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' })
+
+  const bookings: Array<{ id: string; reference: string; service_code: string; quoted_amount_paise: number; updated_at: string }> = []
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await supabase.from('bookings')
+      .select('id,reference,service_code,quoted_amount_paise,updated_at')
+      .eq('vendor_id', vendor.id)
+      .eq('status', 'delivered')
+      .is('settled_payout_id', null)
+      .order('updated_at', { ascending: false })
+      .range(offset, offset + 999)
+    if (error) return databaseFailure(response, 'vendor.earnings_accrual_lookup_failed', error, 500)
+    const page = data ?? []
+    bookings.push(...page)
+    if (page.length < 1000) break
+  }
+
+  try {
+    const rows = bookings.map((booking) => ({
+      id: booking.id,
+      reference: booking.reference,
+      serviceCode: booking.service_code,
+      amountPaise: vendorAccrualPaise(Number(booking.quoted_amount_paise)),
+      deliveredAt: booking.updated_at,
+    }))
+    const totalAmountPaise = rows.reduce((total, row) => total + row.amountPaise, 0)
+    if (!Number.isSafeInteger(totalAmountPaise)) throw new Error('The vendor accrual total is invalid.')
+    response.json({
+      shareRate: DEFAULT_VENDOR_SHARE_RATE,
+      totalAmountPaise,
+      totalCount: rows.length,
+      rows: rows.slice(0, 20),
+    })
+  } catch (error) {
+    failure(response, 500, 'Unsettled delivery earnings could not be calculated.', 'vendor.earnings_accrual_invalid', error)
+  }
+})
 export default router

@@ -365,6 +365,7 @@ export const bookingContent = {
     tryAgain: 'Try again',
     payOnDelivery: 'Pay on delivery instead',
     retryConfirmation: 'Retry confirmation',
+    onlineUnavailable: 'Online payments are currently unavailable. Please choose cash on delivery.',
     confirmBooking: (amount: string) => `Confirm booking · INR ${amount}`,
     back: 'Back',
   },

@@ -3,10 +3,11 @@ import { lazyWithRetry } from '../utils/lazyWithRetry'
 import { Controller, useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { ArrowLeft, ArrowRight, Check, CreditCard, Crosshair, MapPin, Phone, Plus, Trash2, Wallet } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Banknote, Check, CreditCard, Crosshair, MapPin, Phone, Plus, Trash2, Wallet } from 'lucide-react'
 import { useAppNavigation } from '../routing/useAppNavigation'
 import { useCreateCustomerAddress, useCreateCustomerBooking, useCustomerAddresses, useCustomerOffers, useCustomerPhoneVerification, useCustomerPricing, useCustomerServices } from '../hooks/useCustomerData'
 import { useCouponValidation, useRazorpayPayment } from '../hooks/useFrontendFeatures'
+import { useFeatureFlags } from '../hooks/useFeatureFlags'
 import { CheckoutError } from '../utils/razorpayCheckout'
 import { PaymentReceiptCard } from '../components/PaymentReceiptCard'
 import { useAuthStore } from '../stores/authStore'
@@ -71,6 +72,8 @@ type BookingDraft = {
 }
 type CompletedBooking = {
   id: string | null
+  reference: string | null
+  taskCount: number
   services: BookingServiceDetails[]
   location: string
   deliveryDate: string
@@ -308,6 +311,9 @@ export default function BookingScreen() {
   const { navigate } = useAppNavigation()
   const setBookingCompleted = useNavigationStore((state) => state.setBookingCompleted)
   const createBooking = useCreateCustomerBooking()
+  const featureFlags = useFeatureFlags()
+  const walletEnabled = featureFlags.data?.wallet_enabled === true
+  const onlinePaymentEnabled = featureFlags.data?.online_payment_enabled === true
   const servicesQuery = useCustomerServices()
   const razorpay = useRazorpayPayment()
   const [paymentFailure, setPaymentFailure] = useState<CheckoutError | null>(null)
@@ -344,6 +350,13 @@ export default function BookingScreen() {
   const paymentMethod = useWatch({ control, name: 'paymentMethod' })
   const capacity = getValues('capacity') ?? '5000'
   const details = { notes: getValues('notes') ?? '' }
+  useEffect(() => {
+    const flagsResolved = featureFlags.isSuccess || featureFlags.isError
+    if (flagsResolved && ((!walletEnabled && paymentMethod === 'wallet')
+      || (!onlinePaymentEnabled && paymentMethod === 'gateway'))) {
+      setValue('paymentMethod', 'cod')
+    }
+  }, [featureFlags.isError, featureFlags.isSuccess, onlinePaymentEnabled, paymentMethod, setValue, walletEnabled])
   const couponCode = getValues('couponCode') ?? ''
   const guestName = getValues('guestName') ?? ''
   const [serviceEntries, setServiceEntries] = useState<BookingServiceEntry[]>(draft.serviceEntries ?? (draft.selectedServices ?? []).map((serviceId, index) => ({ id: `item-${index + 1}`, serviceId })))
@@ -379,6 +392,7 @@ export default function BookingScreen() {
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [bookingId, setBookingId] = useState<string | null>(draft.bookingId ?? null)
+  const [bookingReference, setBookingReference] = useState<string | null>(null)
   const [quotedTotal, setQuotedTotal] = useState<number | null>(draft.quotedTotal ?? null)
   const [successBooking, setSuccessBooking] = useState<CompletedBooking | null>(null)
   const [idempotencyKey] = useState(() => draft.idempotencyKey ?? crypto.randomUUID())
@@ -589,8 +603,8 @@ export default function BookingScreen() {
     setServiceFieldErrors((current) => { const next = { ...current }; if (next[service]) { delete next[service].location; if (!Object.keys(next[service]).length) delete next[service] }; return next })
     return true
   }
-  function updateMapLocation(_service: string, point: LatLngLiteral, approximateName?: string) {
-    if (approximateName) updateSharedLocation(approximateName.includes('Chennai') ? approximateName : `${approximateName}, Chennai`)
+  function updateMapLocation(_service: string, point: LatLngLiteral, address?: string) {
+    if (address) updateSharedLocation(address.includes('Chennai') ? address : `${address}, Chennai`)
     setSharedCoordinates(point)
     setServiceDetails((current) => ({ ...current, ...Object.fromEntries(serviceEntries.map((entry) => [entry.id, { ...emptyServiceDraft(), ...current[entry.id], latitude: point.lat, longitude: point.lng }])) }))
     setLocationEligibility((current) => ({ ...current, ...Object.fromEntries(serviceEntries.map((entry) => [entry.id, true])) }))
@@ -600,18 +614,23 @@ export default function BookingScreen() {
   async function updateDetectedLocation(service: string, point: LatLngLiteral) {
     setLocationStatus((current) => ({ ...current, [service]: c.location.findingNearbyArea }))
     try {
-      const result = await lookupDeliveryPoint(point)
+      const result = await lookupDeliveryPoint(
+        point,
+        featureFlags.data?.address_geocoding_enabled === true,
+      )
       if (!result.isInChennai) {
         setLocationStatus((current) => { const next = { ...current }; delete next[service]; return next })
         setLocationEligibility((current) => ({ ...current, [service]: false }))
         setLocationToasts((current) => ({ ...current, [service]: c.location.outsideChennai }))
         return
       }
-      updateMapLocation(service, point, result.approximateName)
+      updateMapLocation(service, point, result.address)
       setLocationStatus((current) => ({ ...current, [service]: c.location.currentLocationDetected }))
+      setLocationToasts((current) => { const next = { ...current }; delete next[service]; return next })
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return
       setLocationStatus((current) => { const next = { ...current }; delete next[service]; return next })
+      setLocationToasts((current) => ({ ...current, [service]: c.location.unavailable }))
       console.warn(JSON.stringify({ event: 'location.reverse_geocode_failed', error: error instanceof Error ? error.message : 'Unknown error' }))
     }
   }
@@ -706,9 +725,11 @@ export default function BookingScreen() {
     trackEvent('booking.created', { service: servicesForQuote.join(','), capacity: Number(capacity) || 0, paymentMethod, bookingId: createdBookingId, locationDetected: Boolean(serviceItems[0]?.latitude) })
   }
 
-  function finishBooking(createdBookingId: string | null, finalTotal: number, finalPaymentMethod = paymentMethod) {
+  function finishBooking(createdBookingId: string | null, finalTotal: number, finalPaymentMethod = paymentMethod, finalReference = bookingReference) {
     setSuccessBooking({
       id: createdBookingId,
+      reference: finalReference,
+      taskCount: featureFlags.data?.multi_service_tasks_enabled ? activeServiceEntries.length : 1,
       services: serviceItems.map((item) => ({ ...item })),
       location: sharedDeliveryAddress,
       deliveryDate: sharedDate,
@@ -748,6 +769,7 @@ export default function BookingScreen() {
     setOtpMessages({})
     setOtpPendingPhone(null)
     setBookingId(null)
+    setBookingReference(null)
     setQuotedTotal(null)
     setError(null)
     setPaymentFailure(null)
@@ -764,6 +786,11 @@ export default function BookingScreen() {
       setIsSubmitting(false)
       return
     }
+    if (paymentMethod === 'gateway' && !onlinePaymentEnabled) {
+      setError(c.payment.onlineUnavailable)
+      setIsSubmitting(false)
+      return
+    }
     try {
       const primaryService = serviceItems[0]
       if (!primaryService) throw new Error(c.errors.selectServiceBeforeConfirm)
@@ -776,6 +803,7 @@ export default function BookingScreen() {
         setSaveAddressForFuture(false)
       }
       let currentBookingId = bookingId
+      let currentBookingReference = bookingReference
       let payableTotal = quotedTotal ?? total
       if (!customerDemoDataEnabled && !currentBookingId) {
         const booking = await createBooking.mutateAsync({
@@ -795,6 +823,8 @@ export default function BookingScreen() {
           paymentMethod,
         })
         currentBookingId = booking.id
+        currentBookingReference = booking.reference ?? booking.order_group_reference ?? null
+        setBookingReference(currentBookingReference)
         payableTotal = Number(booking.quote?.totalPaise ?? booking.quoted_amount_paise ?? 0) / 100 || total
         setQuotedTotal(payableTotal)
         setBookingId(currentBookingId)
@@ -814,7 +844,7 @@ export default function BookingScreen() {
           throw paymentError
         }
       }
-      finishBooking(currentBookingId, payableTotal)
+      finishBooking(currentBookingId, payableTotal, paymentMethod, currentBookingReference)
     } catch (paymentError) {
       if (paymentError instanceof CheckoutError) setPaymentFailure(paymentError)
       else setError(paymentError instanceof Error ? paymentError.message : c.errors.bookingFailed)
@@ -871,9 +901,10 @@ export default function BookingScreen() {
           <div>
             <p className="eyebrow">{c.success.eyebrow}</p>
             <h1>{successBooking && successBooking.services.length > 1 ? c.success.combinedHeading : c.success.heading}</h1>
+            {featureFlags.data?.multi_service_tasks_enabled && successBooking && successBooking.taskCount > 1 && <p>{successBooking.taskCount} tasks in this order</p>}
             <p className="booking-success-reference">
               <span>{c.success.referenceLead}</span>
-              <strong>{successBooking?.id ?? c.success.referenceFallback}</strong>
+              <strong>{successBooking?.reference ?? c.success.referenceFallback}</strong>
               <span>{c.success.referenceTrail}</span>
             </p>
           </div>
@@ -931,9 +962,9 @@ export default function BookingScreen() {
             {couponMessage && <p className={couponDiscount ? 'coupon-success' : 'coupon-error'} role="status">{couponMessage}</p>}
             <div className="booking-price-summary"><div><span>{c.payment.services}</span><b>{c.payment.inr(subtotal.toLocaleString('en-IN'))}</b></div><div><span>{gstWaived ? c.payment.gstWaived : c.payment.gst(gstPercentage)}</span><b>{gst === undefined ? '—' : c.payment.inr(gst.toLocaleString('en-IN'))}</b></div>{couponDiscount > 0 && <div><span>{c.payment.couponDiscount}</span><b>{c.payment.couponDiscountAmount(couponDiscount.toLocaleString('en-IN'))}</b></div>}<div className="booking-price-total"><span>{c.payment.total}</span><b>{c.payment.inr(total.toLocaleString('en-IN'))}</b></div></div>
             <div className="payment-choice-list">
-              <label className={paymentMethod === 'wallet' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'wallet'} onChange={() => setValue('paymentMethod', 'wallet')} /><Wallet size={18} /><span><b>{c.payment.methods[0].title}</b><small>{c.payment.methods[0].detail}</small></span></label>
-              <label className={paymentMethod === 'gateway' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'gateway'} onChange={() => setValue('paymentMethod', 'gateway')} /><CreditCard size={18} /><span><b>{c.payment.methods[1].title}</b><small>{c.payment.methods[1].detail}</small></span></label>
-              <label className={paymentMethod === 'cod' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'cod'} onChange={() => setValue('paymentMethod', 'cod')} /><Wallet size={18} /><span><b>{c.payment.methods[2].title}</b><small>{c.payment.methods[2].detail}</small></span></label>
+              {walletEnabled && <label className={paymentMethod === 'wallet' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'wallet'} onChange={() => setValue('paymentMethod', 'wallet')} /><Wallet size={18} /><span><b>{c.payment.methods[0].title}</b><small>{c.payment.methods[0].detail}</small></span></label>}
+              {onlinePaymentEnabled && <label className={paymentMethod === 'gateway' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'gateway'} onChange={() => setValue('paymentMethod', 'gateway')} /><CreditCard size={18} /><span><b>{c.payment.methods[1].title}</b><small>{c.payment.methods[1].detail}</small></span></label>}
+              <label className={paymentMethod === 'cod' ? 'selected' : ''}><input type="radio" name="payment" checked={paymentMethod === 'cod'} onChange={() => setValue('paymentMethod', 'cod')} /><Banknote size={18} /><span><b>{c.payment.methods[2].title}</b><small>{c.payment.methods[2].detail}</small></span></label>
               {paymentFailure ? <div className="payment-recovery" role="alert">
                 <p>{paymentFailureMessage}</p>
                 <div className="action-row">
@@ -1007,6 +1038,6 @@ export default function BookingScreen() {
         <BookingSummary items={summaryItems} total={total} />
       </form>
     </div>
-    {locationModalOpen && <Suspense fallback={<div className="surface booking-map-loading" role="status">{c.location.loadingMap}</div>}><LocationPickerModal value={sharedCoordinates} onChange={(point, name) => updateMapLocation('shared', point, name)} onClose={() => setLocationModalOpen(false)} /></Suspense>}
+    {locationModalOpen && <Suspense fallback={<div className="surface booking-map-loading" role="status">{c.location.loadingMap}</div>}><LocationPickerModal value={sharedCoordinates} addressGeocodingEnabled={featureFlags.data?.address_geocoding_enabled === true} onChange={(point, address) => updateMapLocation('shared', point, address)} onClose={() => setLocationModalOpen(false)} /></Suspense>}
   </section>
 }

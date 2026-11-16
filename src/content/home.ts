@@ -43,6 +43,21 @@ export const homeContent = {
     disclosureMarker: '+',
     bookService: 'Book service',
   },
+  process: {
+    eyebrow: 'HOW IT WORKS',
+    title: 'From request to delivery, with clarity.',
+    steps: [
+      { id: 'request', title: 'Tell us what you need', copy: 'Choose a service, share your site details and pick a preferred time.' },
+      { id: 'match', title: 'Get connected', copy: 'Your request is routed to a suitable service partner for fulfilment.' },
+      { id: 'track', title: 'Follow every update', copy: 'Check the booking status and confirm delivery with a secure OTP.' },
+    ],
+  },
+  closing: {
+    eyebrow: 'READY WHEN YOU ARE',
+    title: 'Tell us what your site needs.',
+    body: 'Start a booking for water, sanitation, infrastructure or tanker services.',
+    cta: 'Start a booking',
+  },
   services: [
     {
       id: 'water',
