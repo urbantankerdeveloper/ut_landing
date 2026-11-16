@@ -89,6 +89,29 @@ until those sections pass focused validation.
 - Both Google API keys must have Geocoding API access enabled and their
   restrictions must permit the corresponding web/mobile requests.
 
+## Section 9 runtime checks
+
+- `invoice_generation_enabled` defaults to `false`. The backend stores an
+  itemized pricing snapshot in each new booking's `service_details` when the
+  flag is enabled, then `backend/src/services/invoices.ts` creates one invoice
+  per task only after delivery and payment are both confirmed. Vendor delivery
+  transitions, admin delivery transitions, Razorpay verify, and the Razorpay
+  webhook invoke the idempotent generator. COD is treated as cash-confirmed at
+  delivery, as agreed; wallet bookings are treated as paid when their booking
+  debit succeeds. Customer invoice history retries missing invoices if a
+  completion/payment event could not persist one. Refund updates synchronize
+  the invoice payment status.
+- For multi-task orders, each invoice contains that task's allocated quote;
+  the shared Razorpay payment is checked against the sum of all task quotes.
+  Existing bookings without a quote-time snapshot are not backfilled because
+  the original service price/tax/discount breakdown is unavailable.
+- Apply `backend/supabase/003_invoice_generation.sql` before enabling the
+  flag. The React invoice normalizer and PDF in `src/utils/customerData.ts` and
+  `src/utils/pdf.ts`, and the Flutter invoice list/detail in
+  `urban_tanker_app/lib/models/account.dart` and
+  `urban_tanker_app/lib/screens/invoice_detail_screen.dart`, render itemized
+  line amounts and totals.
+
 ## Planned flags
 
 “Target default” is applied only once the related section passes its focused
@@ -108,7 +131,7 @@ tests and any required end-to-end checks.
 | `area_availability_enabled` | `true` | `true` | Show availability grouped by service area. |
 | `partner_application_otp_enabled` | `true` | `true` | Require phone OTP before collecting/submitting partner applications and allow verified applicants to upload documents without login. |
 | `address_geocoding_enabled` | `true` | `true` | Resolve selected/current coordinates to a full formatted address. |
-| `invoice_generation_enabled` | `false` | `false` until trigger and invoice contents are agreed and verified | Generate and reconcile invoice records. |
+| `invoice_generation_enabled` | `false` | `false` until migration and end-to-end invoice checks are complete | Generate one itemized invoice per task after delivery and payment confirmation. |
 | `wallet_enabled` | `false` | `false` | Keep wallet code/routes available but hide wallet UI and reject wallet operations. |
 
 `vendor_earnings_realtime_enabled` is checked by the backend

@@ -7,7 +7,8 @@ import { requireAuth } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 import { logger } from '../lib/logger.js'
 import { bookingSchema } from '../lib/schemas.js'
-import { customerHasGstWaiver, GST_PERCENTAGE, GST_RATE, quoteServices, testPricingPerServicePaise } from '../services/pricing.js'
+import { customerHasGstWaiver, GST_PERCENTAGE, GST_RATE, quoteServices, testPricingPerServicePaise, type InvoiceLineSnapshot } from '../services/pricing.js'
+import { generateMissingCustomerInvoices } from '../services/invoices.js'
 import { emitRealtimeToUser, emitRealtimeToVendor } from '../services/realtime.js'
 import { sendPushNotification } from '../services/pushNotifications.js'
 import { isJpeg, selfieBucket, selfieMaxBytes, selfieObjectPath } from '../services/selfie.js'
@@ -235,16 +236,17 @@ async function validateServicePhoneVerification(data: z.infer<typeof bookingSche
   }
   return null
 }
-function bookingInsert(data: z.infer<typeof bookingSchema>, services: ReturnType<typeof getBookingServices>, vendorId: string | null, quotedAmountPaise: number) {
+function bookingInsert(data: z.infer<typeof bookingSchema>, services: ReturnType<typeof getBookingServices>, vendorId: string | null, quotedAmountPaise: number, invoiceLineItems?: InvoiceLineSnapshot[]) {
   const primaryService = services[0]
   if (!primaryService) throw new Error('At least one service is required')
   const capacityText = primaryService.capacity || (!data.services?.length ? data.capacity : '') || ''
   const capacityMatch = capacityText.match(/^([\d,]+)\s*(?:litres?|l)?$/i)
   const isTankerService = ['water_tanker', 'sewage_tanker'].includes(primaryService.serviceId)
-  const serviceDetails = services.map((service) => {
+  const serviceDetails = services.map((service, index) => {
     const persisted = { ...service }
     delete persisted.phoneVerificationChallengeId
-    return persisted
+    const invoiceLine = invoiceLineItems?.[index]
+    return invoiceLine ? { ...persisted, invoice_line: invoiceLine } : persisted
   })
   return {
     customer_phone_e164: toE164IndianMobile(data.phone ?? primaryService.phone ?? ''),
@@ -298,11 +300,18 @@ async function createMultiServiceBookings(input: {
   services: ReturnType<typeof getBookingServices>
   data: z.infer<typeof bookingSchema>
   taskAmountsPaise: number[]
+  invoiceLineItems?: InvoiceLineSnapshot[]
   vendors: Awaited<ReturnType<typeof findNearbyVendors>>
   payment?: { provider: string; amount_paise: number; currency: string; status: string }
 }): Promise<{ booking: CreatedBooking; bookings: CreatedBooking[]; created: boolean }> {
   const bookings = input.services.map((service, index) => ({
-    ...bookingInsert(input.data, [service], null, input.taskAmountsPaise[index]!),
+    ...bookingInsert(
+      input.data,
+      [service],
+      null,
+      input.taskAmountsPaise[index]!,
+      input.invoiceLineItems ? [input.invoiceLineItems[index]!] : undefined,
+    ),
     reference: `${input.groupReference}-${String(index + 1).padStart(2, '0')}`,
     customer_id: input.customerId,
     idempotency_key: index === 0 ? input.idempotencyKey ?? null : null,
@@ -491,7 +500,14 @@ async function placeQuotedBooking(request: Request, response: Response, includeQ
   if (verificationError) return response.status(verificationError.status).json({ error: verificationError.message })
   let quote: Awaited<ReturnType<typeof quoteServices>>
   try {
-    quote = await quoteServices(services, parsed.data.couponCode, customerId, config.featureFlags.multi_service_tasks_enabled && services.length > 1)
+    const needsInvoiceSnapshot = config.featureFlags.invoice_generation_enabled
+    quote = await quoteServices(
+      services,
+      parsed.data.couponCode,
+      customerId,
+      (config.featureFlags.multi_service_tasks_enabled && services.length > 1) || needsInvoiceSnapshot,
+      needsInvoiceSnapshot,
+    )
   } catch (error) {
     return quoteFailure(response, error)
   }
@@ -561,7 +577,10 @@ async function placeQuotedBooking(request: Request, response: Response, includeQ
         idempotencyKey: parsed.data.idempotencyKey,
         services,
         data: parsed.data,
-        taskAmountsPaise: quote.serviceAmountsPaise!,
+        taskAmountsPaise: quote.invoiceLineItems
+          ? quote.invoiceLineItems.map((item) => item.totalPaise)
+          : quote.serviceAmountsPaise!,
+        invoiceLineItems: quote.invoiceLineItems,
         vendors,
         payment: method === 'cod' ? { provider: 'cash_on_delivery', amount_paise: quote.totalPaise, currency: 'INR', status: 'pending' } : undefined,
       })
@@ -570,7 +589,13 @@ async function placeQuotedBooking(request: Request, response: Response, includeQ
         customerId,
         reference: bookingReference(),
         idempotencyKey: parsed.data.idempotencyKey,
-        booking: bookingInsert(parsed.data, services, null, quote.totalPaise),
+        booking: bookingInsert(
+          parsed.data,
+          services,
+          null,
+          quote.totalPaise,
+          quote.invoiceLineItems,
+        ),
         vendors,
         payment: method === 'cod' ? { provider: 'cash_on_delivery', amount_paise: quote.totalPaise, currency: 'INR', status: 'pending' } : undefined,
       })
@@ -679,6 +704,11 @@ router.post('/orders/quote-preview', quoteLimit, async (request, response) => {
 })
 router.get('/invoices', async (request, response) => {
   const list = listWindow(request.query)
+  try {
+    await generateMissingCustomerInvoices(request.authUser!.id)
+  } catch (error) {
+    return databaseFailure(response, 'customer.invoice_generation_failed', error, 500)
+  }
   const { data, error, count } = await supabase.from('invoices').select('*', { count: list.mode === 'paged' ? 'exact' : undefined }).eq('customer_id', request.authUser!.id).order('issued_at', { ascending: false }).range(list.from, list.to)
   if (error) return databaseFailure(response, 'customer.database_error', error, 500)
   sendList(response, list, data ?? [], count)

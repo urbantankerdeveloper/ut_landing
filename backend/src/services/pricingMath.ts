@@ -12,7 +12,7 @@ export type PriceableServiceItem = string | {
   materialType?: string
 }
 
-export type ServicePrice = { code: string; base_price_paise: number; config?: { optionSurchargesPaise?: OptionSurchargesPaise | null } | null }
+export type ServicePrice = { code: string; name?: string; base_price_paise: number; config?: { optionSurchargesPaise?: OptionSurchargesPaise | null } | null }
 
 const tankerServices = new Set(['water_tanker', 'sewage_tanker', 'emergency_water', 'empty_tanker'])
 const quantityServices = new Set(['drinking_water', 'tank_cleaning', 'rmc_mix'])

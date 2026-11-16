@@ -201,6 +201,28 @@ describe('quoteServices', () => {
     expect(quote.serviceAmountsPaise).toHaveLength(2)
     expect(quote.serviceAmountsPaise!.reduce((sum, amount) => sum + amount, 0)).toBe(quote.totalPaise)
   })
+  it('creates itemized snapshots whose paise totals match the quote', async () => {
+    seed({
+      service_catalog: { data: [
+        { ...waterTanker, name: 'Water tanker' },
+        { code: 'tank_cleaning', name: 'Tank cleaning', base_price_paise: 180000, config: {} },
+      ] },
+      coupons: { data: { id: 'c1', discount_type: 'flat', discount_value: 100, valid_until: null } },
+    })
+    const quote = await quoteServices([
+      { serviceId: 'water_tanker', tankerCount: '2', capacity: '5000 litres' },
+      { serviceId: 'tank_cleaning', quantity: '3' },
+    ], 'SAVE100', undefined, true, true)
+    const lines = quote.invoiceLineItems!
+    expect(lines.map((line) => [line.description, line.quantity])).toEqual([
+      ['Water tanker · 5000 litres', 2],
+      ['Tank cleaning', 3],
+    ])
+    expect(lines.reduce((sum, line) => sum + line.subtotalPaise, 0)).toBe(quote.subtotalPaise)
+    expect(lines.reduce((sum, line) => sum + line.taxPaise, 0)).toBe(quote.gstPaise)
+    expect(lines.reduce((sum, line) => sum + line.discountPaise, 0)).toBe(quote.discountPaise)
+    expect(lines.reduce((sum, line) => sum + line.totalPaise, 0)).toBe(quote.totalPaise)
+  })
   it('rejects a coupon past its expiry date', async () => {
     seed({ service_catalog: { data: [waterTanker] }, coupons: { data: { id: 'c1', discount_type: 'flat', discount_value: 100, valid_until: '2020-01-01T00:00:00Z' } } })
     await expect(quoteServices([{ serviceId: 'water_tanker' }], 'OLD')).rejects.toThrow('Coupon is not available')
