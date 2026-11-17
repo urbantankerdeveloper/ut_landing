@@ -56,9 +56,10 @@ until those sections pass focused validation.
   `backend/src/routes/customer.ts` for task creation, customer order reads, and
   order payment/cancellation paths; by `backend/src/routes/payments.ts` for
   grouped checkout; and by `backend/src/routes/vendor.ts` for vendor task
-  metadata. The grouped insert/cancel RPCs and additive schema are in
-  `backend/supabase/002_multi_service_tasks.sql`. Apply and verify that
-  migration before enabling the flag in any environment.
+  metadata. The grouped insert/cancel RPCs and schema are included in
+  `backend/supabase/001_initial.sql` for fresh installs. That script resets the
+  `public` schema; existing databases need a separate, reviewed upgrade before
+  enabling the flag.
 - Web reads the cached public flags through `src/hooks/useFeatureFlags.ts`.
   The task-count confirmation is checked in `src/screens/BookingScreen.tsx`;
   grouped customer tasks/progress in `CustomerBookingsTable.tsx`;
@@ -105,8 +106,10 @@ until those sections pass focused validation.
   the shared Razorpay payment is checked against the sum of all task quotes.
   Existing bookings without a quote-time snapshot are not backfilled because
   the original service price/tax/discount breakdown is unavailable.
-- Apply `backend/supabase/003_invoice_generation.sql` before enabling the
-  flag. The React invoice normalizer and PDF in `src/utils/customerData.ts` and
+- The invoice schema is included in `backend/supabase/001_initial.sql` for
+  fresh installs. That script resets the `public` schema; existing databases
+  need a separate, reviewed upgrade before enabling the flag. The React invoice
+  normalizer and PDF in `src/utils/customerData.ts` and
   `src/utils/pdf.ts`, and the Flutter invoice list/detail in
   `urban_tanker_app/lib/models/account.dart` and
   `urban_tanker_app/lib/screens/invoice_detail_screen.dart`, render itemized
