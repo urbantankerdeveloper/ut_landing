@@ -1,4 +1,4 @@
-import { cpSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { cpSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { execFileSync, execSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve, sep } from 'node:path'
@@ -55,7 +55,14 @@ const temporaryArchivePath = join(temporaryDirectory, 'hostinger-upload.zip')
 
 try {
   mkdirSync(stageDirectory)
-  copyFileSync(packageJsonPath, join(stageDirectory, 'package.json'))
+  const hostingerPackageJson = {
+    ...packageJson,
+    scripts: {
+      ...packageJson.scripts,
+      build: "node -e \"require('node:fs').accessSync('dist/server.js')\"",
+    },
+  }
+  writeFileSync(join(stageDirectory, 'package.json'), `${JSON.stringify(hostingerPackageJson, null, 2)}\n`)
   copyFileSync(packageLockPath, join(stageDirectory, 'package-lock.json'))
   cpSync(distDirectory, join(stageDirectory, 'dist'), { recursive: true, filter: shouldIncludeDistPath })
   assertNoExcludedFiles(stageDirectory)
