@@ -10,6 +10,13 @@ describe('resolveFeatureFlags', () => {
     })
   })
 
+  it('lets WALLET_ENABLED override the JSON flag for both clients', () => {
+    expect(resolveFeatureFlags('{}', true).wallet_enabled).toBe(true)
+    expect(
+      resolveFeatureFlags('{"wallet_enabled":true}', false).wallet_enabled,
+    ).toBe(false)
+  })
+
   it('rejects malformed, unknown, and non-boolean overrides', () => {
     expect(() => resolveFeatureFlags('{')).toThrow('valid JSON')
     expect(() => resolveFeatureFlags('{"unknown_flag":true}')).toThrow('unknown flag')

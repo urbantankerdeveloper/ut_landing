@@ -12,6 +12,10 @@ until those sections pass focused validation.
   Invalid JSON, unknown names, or non-boolean values prevent startup rather
   than silently ignoring an operator's setting. For example:
   `FEATURE_FLAGS_JSON={"duplicate_phone_check_enabled":false}`.
+- `WALLET_ENABLED` is an optional strict `true`/`false` override for
+  `wallet_enabled`. When set, it takes precedence over
+  `FEATURE_FLAGS_JSON.wallet_enabled`; when omitted, the JSON value or the
+  default applies. The resulting shared flag controls both web and Flutter.
 - Web loads the map through the shared React Query cache (60 seconds) and
   refreshes when the window regains focus. Flutter loads it at startup and
   foreground, with a 60-second HTTP cache. A failed refresh does not change
@@ -153,7 +157,8 @@ off until checkout is verified end to end on both platforms. COD remains
 available, and payment verification/webhook handling stays enabled for
 payments already in flight.
 
-`wallet_enabled` defaults to `false`. The backend gates customer wallet reads and
+`wallet_enabled` defaults to `false` and can be toggled for both clients with
+the backend `WALLET_ENABLED` environment variable. The backend gates customer wallet reads and
 top-up routes in `backend/src/routes/customerExtended.ts` and rejects wallet
 booking debits in `backend/src/routes/customer.ts`. The web workspace navigation,
 wallet panel, and booking selector check the public flag; Flutter's customer

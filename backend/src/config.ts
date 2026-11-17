@@ -66,6 +66,7 @@ const schema = z.object({
   APPLIED_GST_PERCENTAGE: z.coerce.number({ error: 'APPLIED_GST_PERCENTAGE must be a number from 0 to 100 (see backend/.env.example)' }).min(0).max(100).default(18),
   TEST_PRICING_ENABLED: z.preprocess((value) => value === undefined ? undefined : value === 'true', z.boolean().default(false)),
   FEATURE_FLAGS_JSON: z.string().default('{}'),
+  WALLET_ENABLED: z.enum(['true', 'false']).optional(),
 })
 // Blank values (for example SUPABASE_SECRET_KEY= in .env.example) mean "not set".
 const environment = Object.fromEntries(Object.entries(process.env).map(([key, value]) => [key, value === '' ? undefined : value]))
@@ -75,7 +76,12 @@ if (!result.success) {
   throw new Error(`Invalid backend configuration (${problems}). Copy backend/.env.example to backend/.env and fill in the values, or set them in the host environment.`)
 }
 const parsed = result.data
-const featureFlags = resolveFeatureFlags(parsed.FEATURE_FLAGS_JSON)
+const featureFlags = resolveFeatureFlags(
+  parsed.FEATURE_FLAGS_JSON,
+  parsed.WALLET_ENABLED === undefined
+    ? undefined
+    : parsed.WALLET_ENABLED === 'true',
+)
 const serviceRoleKey = parsed.SUPABASE_SERVICE_ROLE_KEY ?? parsed.SUPABASE_SECRET_KEY
 if (!serviceRoleKey) throw new Error('SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SECRET_KEY is required. Copy backend/.env.example to backend/.env and fill in the values.')
 if (parsed.NODE_ENV === 'production' && !parsed.FRONTEND_ORIGIN.startsWith('https://')) {

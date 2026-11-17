@@ -36,7 +36,10 @@ const overridesSchema = z.object({
 
 export type FeatureFlags = Record<keyof typeof defaultFeatureFlags, boolean>
 
-export function resolveFeatureFlags(raw = '{}'): FeatureFlags {
+export function resolveFeatureFlags(
+  raw = '{}',
+  walletEnabledOverride?: boolean,
+): FeatureFlags {
   let decoded: unknown
   try {
     decoded = JSON.parse(raw)
@@ -47,5 +50,11 @@ export function resolveFeatureFlags(raw = '{}'): FeatureFlags {
   if (!parsed.success) {
     throw new Error('FEATURE_FLAGS_JSON contains an unknown flag or non-boolean value.')
   }
-  return { ...defaultFeatureFlags, ...parsed.data }
+  return {
+    ...defaultFeatureFlags,
+    ...parsed.data,
+    ...(walletEnabledOverride === undefined
+      ? {}
+      : { wallet_enabled: walletEnabledOverride }),
+  }
 }
