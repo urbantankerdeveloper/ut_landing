@@ -1,5 +1,7 @@
 /* Shared fixed header behavior for public and role workspace shells. */
-.site-header {
+.site-header,
+.booking-page-header,
+.public-tracking-header {
     position: sticky;
     top: 0;
     z-index: 50;
