@@ -65,6 +65,7 @@ try {
   writeFileSync(join(stageDirectory, 'package.json'), `${JSON.stringify(hostingerPackageJson, null, 2)}\n`)
   copyFileSync(packageLockPath, join(stageDirectory, 'package-lock.json'))
   cpSync(distDirectory, join(stageDirectory, 'dist'), { recursive: true, filter: shouldIncludeDistPath })
+  writeFileSync(join(stageDirectory, 'server.js'), "import './dist/server.js'\n")
   assertNoExcludedFiles(stageDirectory)
 
   if (process.platform === 'win32') {
@@ -90,7 +91,7 @@ try {
       stdio: 'inherit',
     })
   } else {
-    execFileSync('zip', ['-q', '-r', temporaryArchivePath, 'package.json', 'package-lock.json', 'dist'], {
+    execFileSync('zip', ['-q', '-r', temporaryArchivePath, 'package.json', 'package-lock.json', 'server.js', 'dist'], {
       cwd: stageDirectory,
       stdio: 'inherit',
     })
@@ -101,7 +102,7 @@ try {
   }
   copyFileSync(temporaryArchivePath, archivePath)
   console.log(`Hostinger package created: ${archivePath}`)
-  console.log('Archive root: package.json, package-lock.json, dist/')
+  console.log('Archive root: package.json, package-lock.json, server.js, dist/')
 } finally {
   rmSync(temporaryDirectory, { recursive: true, force: true })
 }
