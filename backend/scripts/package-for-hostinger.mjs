@@ -70,8 +70,15 @@ try {
   if (process.platform === 'win32') {
     const powershellCommand = [
       '$ErrorActionPreference = "Stop"',
-      '$paths = @("package.json", "package-lock.json", "dist") | ForEach-Object { Join-Path $env:HOSTINGER_STAGE_DIR $_ }',
-      'Compress-Archive -Path $paths -DestinationPath $env:HOSTINGER_ARCHIVE -CompressionLevel Optimal -Force',
+      'Add-Type -AssemblyName System.IO.Compression',
+      'Add-Type -AssemblyName System.IO.Compression.FileSystem',
+      '$archive = [System.IO.Compression.ZipFile]::Open($env:HOSTINGER_ARCHIVE, [System.IO.Compression.ZipArchiveMode]::Create)',
+      'try {',
+      '  Get-ChildItem -LiteralPath $env:HOSTINGER_STAGE_DIR -File -Recurse | ForEach-Object {',
+      '    $entryName = $_.FullName.Substring($env:HOSTINGER_STAGE_DIR.Length + 1).Replace([char]92, [char]47)',
+      '    [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $_.FullName, $entryName, [System.IO.Compression.CompressionLevel]::Optimal)',
+      '  }',
+      '} finally { $archive.Dispose() }',
     ].join('; ')
     execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', powershellCommand], {
       cwd: backendDirectory,

@@ -4,6 +4,7 @@
 
 - The backend uses Express, declared directly in `backend/package.json`.
 - `npm run build` runs `tsc -p tsconfig.build.json`; TypeScript emits `backend/dist/server.js`.
+- The Hostinger ZIP overrides `build` to verify its prebuilt `dist/server.js`, since the archive intentionally excludes the TypeScript compiler configuration.
 - `npm start` runs the compiled database check and then starts `node dist/server.js`.
 - The existing `engines.node` range is `>=22`; select Node.js 22 in hPanel.
 - The server reads `PORT` from the environment, with its existing default if the host does not supply one.
@@ -17,12 +18,12 @@ Use Business Web Hosting or a Cloud Startup, Professional, or Enterprise plan. N
 |---|---|
 | Application type | `express` |
 | Node.js version | `22` |
-| Build script | Leave blank; the ZIP contains the prebuilt `dist/` output |
+| Build script | `npm run build` (verifies the prebuilt `dist/server.js`) |
 | Output directory | `dist` |
-| Entry file | `dist/server.js` |
+| Entry file | `server.js` (relative to the `dist` output directory) |
 | Start command, if requested | `npm start` |
 
-The ZIP has `package.json` at its root, with `express` listed directly under `dependencies`. Upload the ZIP itself, not a ZIP containing an extra enclosing project folder. Hostinger can install dependencies from the included `package.json` and `package-lock.json`; `node_modules` is intentionally excluded.
+The compiled file is stored in the archive as `dist/server.js`. With `dist` configured as the output directory, hPanel resolves the entry file relative to that directory, so use `server.js` (not `dist/server.js`, which would resolve as `dist/dist/server.js`). The ZIP has `package.json` at its root, with `express` listed directly under `dependencies`. Upload the ZIP itself, not a ZIP containing an extra enclosing project folder. Hostinger can install dependencies from the included `package.json` and `package-lock.json`; `node_modules` is intentionally excluded.
 
 ## Build and upload
 

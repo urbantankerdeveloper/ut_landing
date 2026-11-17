@@ -122,8 +122,7 @@ export default function PartnerApplicationScreen() {
         {p.hero.highlights.map((item) => <span key={item.value}><b>{item.value}</b><small>{item.label}</small></span>)}
       </div>
     </section>
-    <div className="partner-application-shell">
-      <form className="partner-application" onChange={() => { if (!submitted) setPartnerFormDirty(true) }} onSubmit={submit} noValidate>
+    <form className="partner-application" onChange={() => { if (!submitted) setPartnerFormDirty(true) }} onSubmit={submit} noValidate>
         <div className="partner-form-intro">
           <div><p className="eyebrow">{p.intro.eyebrow}</p><h2>{p.intro.title}</h2><p>{p.intro.copy}</p></div>
           <span>{p.intro.badge}</span>
@@ -233,18 +232,17 @@ export default function PartnerApplicationScreen() {
           <button className="button button-primary partner-submit" type="submit">{p.actions.submit} <ArrowRight size={15} /></button>
           {submitted && <button className="button button-quiet partner-login-action" type="button" onClick={openVendorWorkspace}>{p.actions.continueToVendorLogin}</button>}
         </>}
-      </form>
-      <aside className="partner-side-card">
-        <p className="eyebrow">{p.nextSteps.eyebrow}</p>
-        <h2>{p.nextSteps.title}</h2>
-        <ol>{p.nextSteps.steps.map((step, index) => <li key={step.title}><span>{index + 1}</span><div><b>{step.title}</b><small>{step.copy}</small></div></li>)}</ol>
-        <div className="partner-help">
-          <b>{p.help.title}</b>
-          <p>{p.help.copy}</p>
-          <button className="button button-quiet" type="button" onClick={openVendorWorkspace}>{user ? p.actions.openWorkspace : p.actions.goToVendorLogin}</button>
-        </div>
-      </aside>
-    </div>
+    </form>
+    <aside className="partner-side-card">
+      <p className="eyebrow">{p.nextSteps.eyebrow}</p>
+      <h2>{p.nextSteps.title}</h2>
+      <ol>{p.nextSteps.steps.map((step, index) => <li key={step.title}><span>{index + 1}</span><div><b>{step.title}</b><small>{step.copy}</small></div></li>)}</ol>
+      <div className="partner-help">
+        <b>{p.help.title}</b>
+        <p>{p.help.copy}</p>
+        <button className="button button-quiet" type="button" onClick={openVendorWorkspace}>{user ? p.actions.openWorkspace : p.actions.goToVendorLogin}</button>
+      </div>
+    </aside>
   </div>
 }
 
