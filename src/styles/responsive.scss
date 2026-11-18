@@ -119,3 +119,36 @@
         padding: 0 10px;
     }
 }
+
+@media (max-width: 760px) {
+    .site-header {
+        gap: 12px;
+    }
+
+    .site-header .brand {
+        padding: 0;
+    }
+
+    .site-header .brand-wordmark {
+        width: clamp(96px, 30vw, 150px);
+        height: auto;
+    }
+
+    .site-header .header-actions {
+        gap: 6px;
+    }
+
+    .site-header .header-actions .button {
+        padding: 0 10px;
+    }
+}
+
+@media (max-width: 400px) {
+    body {
+        min-width: 0;
+    }
+
+    .site-header {
+        gap: 4px;
+    }
+}

@@ -6,6 +6,9 @@ const mocks = vi.hoisted(() => ({
   respond: vi.fn<(table: string, ops: Array<{ name: string; args: unknown[] }>) => unknown>(),
   createSignedUploadUrl: vi.fn(),
   registeredDocuments: [] as Array<{ object_key: string; document_type: string }>,
+  existingApplication: null as { id: string } | null,
+  notificationError: false,
+  admins: [{ id: 'admin-1' }],
   featureFlags: { partner_application_otp_enabled: true },
 }))
 
@@ -68,6 +71,9 @@ beforeEach(() => {
   mocks.createSignedUploadUrl.mockReset()
   mocks.createSignedUploadUrl.mockResolvedValue({ data: { token: 'upload-token', signedUrl: 'https://storage.example/upload' }, error: null })
   mocks.registeredDocuments = []
+  mocks.existingApplication = null
+  mocks.notificationError = false
+  mocks.admins = [{ id: 'admin-1' }]
   mocks.respond.mockImplementation((table, ops) => {
     if (table === 'guest_otp_challenges') return { data: { id: CHALLENGE }, error: null }
     if (table === 'documents') {
@@ -76,7 +82,12 @@ beforeEach(() => {
       if (ops.some((operation) => operation.name === 'select')) return { data: mocks.registeredDocuments, error: null }
       return { data: null, error: null }
     }
-    if (table === 'partner_applications') return { data: { id: APPLICATION_ID, reference: 'PA-12345678', status: 'submitted' }, error: null }
+    if (table === 'partner_applications') {
+      if (ops.some((operation) => operation.name === 'insert')) return { data: { id: APPLICATION_ID, reference: 'PA-12345678', status: 'submitted' }, error: null }
+      return { data: mocks.existingApplication, error: null }
+    }
+    if (table === 'profiles') return { data: mocks.admins, error: null }
+    if (table === 'notifications') return { data: null, error: mocks.notificationError ? { code: 'NOTIFY_FAILED' } : null }
     return { data: null, error: null }
   })
 })
@@ -142,6 +153,19 @@ describe('POST /applications', () => {
     expect(mocks.respond).not.toHaveBeenCalled()
   })
 
+  it('rejects a second active application for the same mobile number', async () => {
+    mocks.existingApplication = { id: APPLICATION_ID }
+    const response = await request(buildApp()).post('/applications').send({
+      ...application,
+      phoneChallengeId: CHALLENGE,
+    })
+    expect(response.status).toBe(409)
+    expect(response.body.error).toContain('active application already exists')
+    expect(mocks.respond.mock.calls.some(([table, ops]) =>
+      table === 'partner_applications' && ops.some((operation) => operation.name === 'insert'),
+    )).toBe(false)
+  })
+
   it('accepts a recently verified challenge matching the application phone', async () => {
     const response = await request(buildApp()).post('/applications').send({
       ...application,
@@ -156,6 +180,95 @@ describe('POST /applications', () => {
       { name: 'not', args: ['verified_at', 'is', null] },
     ]))
     expect(mocks.respond.mock.calls.some(([table]) => table === 'partner_applications')).toBe(true)
+  })
+
+  it('stores the supplied details and documents for each vehicle', async () => {
+    const vehicles = [{
+      registrationNumber: 'TN 09 AB 1234',
+      vehicleType: 'Water tanker',
+      serviceCategory: 'Water tanker',
+      capacity: '6 KL',
+      availability: 'Available for new orders',
+      documents: [],
+    }]
+    const response = await request(buildApp()).post('/applications').send({
+      ...application,
+      phoneChallengeId: CHALLENGE,
+      vehicles,
+    })
+    expect(response.status).toBe(201)
+    const insert = mocks.respond.mock.calls.find(([table, ops]) =>
+      table === 'partner_applications' && ops.some((operation) => operation.name === 'insert'),
+    )
+    expect(insert?.[1].find((operation) => operation.name === 'insert')?.args[0]).toMatchObject({
+      vehicle_count: 1,
+      vehicle_details: vehicles,
+    })
+  })
+
+  it('creates an internal admin notification after saving the application', async () => {
+    const response = await request(buildApp()).post('/applications').send({
+      ...application,
+      phoneChallengeId: CHALLENGE,
+    })
+    expect(response.status).toBe(201)
+    expect(response.body.notificationStatus).toBe('created')
+    const notification = mocks.respond.mock.calls.find(([table, ops]) =>
+      table === 'notifications' && ops.some((operation) => operation.name === 'insert'),
+    )
+    expect(notification?.[1].find((operation) => operation.name === 'insert')?.args[0]).toMatchObject([
+      {
+        recipient_id: 'admin-1',
+        event_type: 'partner.application_submitted',
+        payload: { applicationId: APPLICATION_ID, status: 'submitted' },
+      },
+    ])
+  })
+
+  it('keeps the application when admin notification creation fails', async () => {
+    mocks.notificationError = true
+    const response = await request(buildApp()).post('/applications').send({
+      ...application,
+      phoneChallengeId: CHALLENGE,
+    })
+    expect(response.status).toBe(201)
+    expect(response.body).toMatchObject({
+      ok: true,
+      reference: 'PA-12345678',
+      notificationStatus: 'unavailable',
+    })
+    expect(mocks.respond.mock.calls.some(([table, ops]) =>
+      table === 'partner_applications' && ops.some((operation) => operation.name === 'insert'),
+    )).toBe(true)
+  })
+
+  it('rejects incomplete or duplicate per-vehicle registrations', async () => {
+    const vehicle = {
+      registrationNumber: 'TN 09 AB 1234',
+      vehicleType: 'Water tanker',
+      serviceCategory: 'Water tanker',
+      capacity: '6 KL',
+      availability: 'Available for new orders',
+      documents: [],
+    }
+    const incomplete = await request(buildApp()).post('/applications').send({
+      ...application,
+      phoneChallengeId: CHALLENGE,
+      vehicleCount: 2,
+      vehicles: [vehicle],
+    })
+    expect(incomplete.status).toBe(400)
+
+    const duplicate = await request(buildApp()).post('/applications').send({
+      ...application,
+      phoneChallengeId: CHALLENGE,
+      vehicleCount: 2,
+      vehicles: [vehicle, { ...vehicle, registrationNumber: 'TN09AB1234' }],
+    })
+    expect(duplicate.status).toBe(400)
+    expect(mocks.respond.mock.calls.some(([table, ops]) =>
+      table === 'partner_applications' && ops.some((operation) => operation.name === 'insert'),
+    )).toBe(false)
   })
 
   it('attaches only documents uploaded for this application batch', async () => {
@@ -188,7 +301,8 @@ describe('POST /applications', () => {
     mocks.featureFlags.partner_application_otp_enabled = false
     const response = await request(buildApp()).post('/applications').send(application)
     expect(response.status).toBe(201)
-    expect(mocks.respond).toHaveBeenCalledTimes(1)
-    expect(mocks.respond.mock.calls[0]?.[0]).toBe('partner_applications')
+    expect(mocks.respond.mock.calls.some(([table, ops]) =>
+      table === 'partner_applications' && ops.some((operation) => operation.name === 'insert'),
+    )).toBe(true)
   })
 })

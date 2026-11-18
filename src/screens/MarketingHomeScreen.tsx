@@ -1,6 +1,8 @@
 import { ArrowRight, Check, Construction, Droplets, LocateFixed, ShieldCheck, Truck, Waves, type LucideIcon } from 'lucide-react'
 import { useAppNavigation } from '../routing/useAppNavigation'
 import { DeliveryLocationChip } from '../components/DeliveryLocationChip'
+import { useAuthStore } from '../stores/authStore'
+import { shouldShowBookingButton } from '../constants/publicFeatures'
 import { homeContent as c } from '../content/home'
 
 type ServiceId = (typeof c.services)[number]['id']
@@ -31,6 +33,8 @@ const processIcons: Record<(typeof c.process.steps)[number]['id'], LucideIcon> =
 
 export default function MarketingHomeScreen() {
   const { navigate } = useAppNavigation()
+  const user = useAuthStore((state) => state.user)
+  const showBookingButton = shouldShowBookingButton(user?.role)
 
   return (
     <div className="marketing-home">
@@ -44,9 +48,9 @@ export default function MarketingHomeScreen() {
             <h1>{c.hero.titleLead} <em>{c.hero.titleEmphasis}</em></h1>
             <p className="marketing-hero-lede">{c.hero.lede}</p>
             <div className="marketing-actions">
-              <button className="button button-primary" onClick={() => navigate('booking')}>
+              {showBookingButton && <button className="button button-primary" onClick={() => navigate('booking')}>
                 {c.hero.primaryCta} <ArrowRight size={16} />
-              </button>
+              </button>}
               <button className="button marketing-button-light" onClick={() => navigate('services')}>
                 {c.hero.secondaryCta}
               </button>
@@ -153,9 +157,9 @@ export default function MarketingHomeScreen() {
           <h2>{c.closing.title}</h2>
           <p>{c.closing.body}</p>
         </div>
-        <button className="button button-primary" onClick={() => navigate('booking')}>
+        {showBookingButton && <button className="button button-primary" onClick={() => navigate('booking')}>
           {c.closing.cta} <ArrowRight size={15} />
-        </button>
+        </button>}
       </section>
     </div>
   )

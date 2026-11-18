@@ -117,11 +117,13 @@ async function verifyCheckoutPayment(response: Response, customerId: string, ord
   if (!checkout) return response.status(404).json({ error: 'Payment order not found' })
   if (checkout.customer_id !== customerId) return response.status(403).json({ error: 'Payment is not owned by this customer' })
   const entity = await fetchRazorpayPayment(paymentId, keys)
-  if (entity && ((entity.order_id && entity.order_id !== orderId) || (typeof entity.amount === 'number' && entity.amount !== Number(checkout.quoted_amount_paise)))) {
+  if (!entity) return response.status(503).json({ error: 'Payment status could not be confirmed. Retry confirmation; do not make another payment.' })
+  if (entity.id !== paymentId || entity.order_id !== orderId || entity.amount !== Number(checkout.quoted_amount_paise)) {
     logger.error('payment.amount_mismatch', { providerOrderId: orderId, capturedPaise: entity.amount, expectedPaise: checkout.quoted_amount_paise })
     return response.status(409).json({ error: 'Payment amount does not match this booking. Contact support.' })
   }
-  const details = entity ? { ...extractPaymentDetails(entity), captured_at: entity.status === 'captured' ? new Date().toISOString() : null } : {}
+  if (entity.status !== 'captured') return response.status(409).json({ error: 'Payment is still processing. Retry confirmation shortly; do not make another payment.' })
+  const details = { ...extractPaymentDetails(entity), captured_at: new Date().toISOString() }
   try {
     const outcome = await settleBookingCheckout(checkout as CheckoutRow, 'gateway', { provider_payment_id: paymentId, status: 'paid', ...details })
     if (outcome.status !== 'booked') return response.status(409).json({ error: 'This booking is already being processed. Refresh and try again.' })
@@ -153,12 +155,13 @@ router.post('/razorpay/verify', requireAuth, async (request, response) => {
     return response.json({ verified: true, orderId: payment.booking_id })
   }
   const entity = await fetchRazorpayPayment(parsed.data.paymentId, keys)
-  if (entity && ((entity.order_id && entity.order_id !== parsed.data.orderId) || (typeof entity.amount === 'number' && entity.amount !== payment.amount_paise))) {
+  if (!entity) return response.status(503).json({ error: 'Payment status could not be confirmed. Retry confirmation; do not make another payment.' })
+  if (entity.id !== parsed.data.paymentId || entity.order_id !== parsed.data.orderId || entity.amount !== payment.amount_paise) {
     logger.error('payment.amount_mismatch', { providerOrderId: parsed.data.orderId, capturedPaise: entity.amount, expectedPaise: payment.amount_paise })
     return response.status(409).json({ error: 'Payment amount does not match this booking. Contact support.' })
   }
-  // Detail is written only when the fetch succeeded; otherwise the webhook fills it in later.
-  const details = entity ? { ...extractPaymentDetails(entity), captured_at: entity.status === 'captured' ? new Date().toISOString() : null } : {}
+  if (entity.status !== 'captured') return response.status(409).json({ error: 'Payment is still processing. Retry confirmation shortly; do not make another payment.' })
+  const details = { ...extractPaymentDetails(entity), captured_at: new Date().toISOString() }
   const { data: settled, error } = await supabase.from('payments').update({ provider_payment_id: parsed.data.paymentId, status: 'paid', ...details, updated_at: new Date().toISOString() }).eq('id', payment.id).in('status', ['pending', 'failed']).select('id').maybeSingle()
   if (error) return databaseFailure(response, 'payments.verify_failed', error, 400)
   if (!settled) return response.status(409).json({ error: 'This payment has already been processed.' })

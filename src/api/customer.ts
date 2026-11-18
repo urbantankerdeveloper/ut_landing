@@ -24,6 +24,14 @@ export type CreateBookingPayload = { idempotencyKey: string; serviceId: string; 
 export type GuestOtpChallenge = { challengeId: string; expiresInSeconds: number }
 export type GuestSession = { accessToken: string; user: { username: string; name: string; role: 'customer' } }
 export type CreateSupportRequestPayload = { subject: string; message: string; orderId?: string; priority?: string }
+type ServiceEnquiryContact = { customerName: string; mobile: string; email?: string; location: string; requiredDate: string }
+export type ServiceEnquiryCategory = 'empty_tanker' | 'rmc' | 'borewell'
+export type CreateServiceEnquiryPayload = ServiceEnquiryContact & (
+  | { serviceCategory: 'empty_tanker'; details: { capacityLitres: number; requirements: string } }
+  | { serviceCategory: 'rmc'; details: { grade: string; quantityCubicMetres: number; pumpRequired: boolean; requirements?: string } }
+  | { serviceCategory: 'borewell'; details: { proposedDepthMetres: number; siteRequirements: string } }
+)
+export type CreateServiceEnquiryResult = { id: string; subject: string; status: string; createdAt: string; notificationStatus: 'created' | 'unavailable' }
 export type WalletTransaction = { id: string; amount: number; type: string; status: string; createdAt?: string }
 export type CustomerContract = { id: string; property_type: string; service_plan: Record<string, unknown>; address: string; estimate: number; status: string; created_at: string }
 export type CustomerOffer = { id: string; code: string; title: string; discount_type: string; discount_value: number; valid_until?: string }
@@ -171,6 +179,7 @@ export const customerApi = {
   support: () => apiFetch<SupportRequest[]>('/support/requests'),
   usage: () => apiFetch<CustomerUsage>('/customer/usage'),
   createSupportRequest: (payload: CreateSupportRequestPayload) => apiFetch<SupportRequest>('/support/requests', { method: 'POST', body: JSON.stringify(payload) }),
+  createServiceEnquiry: (payload: CreateServiceEnquiryPayload) => apiFetch<CreateServiceEnquiryResult>('/service-enquiries', { method: 'POST', silent: true, body: JSON.stringify(payload) }),
   profile: () => apiFetch<CustomerProfile>('/customer/profile'),
   updateProfile: (payload: CustomerProfileUpdate) => apiFetch<CustomerProfile>('/customer/profile', { method: 'PATCH', body: JSON.stringify(payload) }),
   wallet: () => apiFetch<WalletTransaction[]>('/customer/wallet'),

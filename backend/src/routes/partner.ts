@@ -45,6 +45,34 @@ const applicationSchema = z.object({
   notes: z.string().trim().max(2000).optional(),
   documentNames: z.array(z.string().trim().min(1).max(180)).max(10).default([]),
   documents: z.array(z.object({ path: partnerDocumentPath, type: z.string().trim().min(1).max(100) })).max(10).optional(),
+  vehicles: z.array(z.object({
+    registrationNumber: z.string().trim().min(3).max(40),
+    vehicleType: z.string().trim().min(2).max(60),
+    serviceCategory: allowedServices,
+    capacity: z.string().trim().min(2).max(40),
+    availability: z.string().trim().min(2).max(80),
+    documents: z.array(z.object({ path: partnerDocumentPath, type: z.string().trim().min(1).max(100) })).max(10).default([]),
+  })).min(1).max(250).optional(),
+}).superRefine((value, context) => {
+  if (!value.vehicles) return
+  if (value.vehicles.length !== value.vehicleCount) {
+    context.addIssue({ code: 'custom', path: ['vehicles'], message: 'Provide details for every registered vehicle.' })
+  }
+  const registrations = new Set<string>()
+  value.vehicles.forEach((vehicle, index) => {
+    const registration = vehicle.registrationNumber.toUpperCase().replace(/[^A-Z0-9]/g, '')
+    if (registrations.has(registration)) {
+      context.addIssue({ code: 'custom', path: ['vehicles', index, 'registrationNumber'], message: 'Vehicle registrations must be unique.' })
+    }
+    registrations.add(registration)
+    if (!value.serviceCodes.includes(vehicle.serviceCategory)) {
+      context.addIssue({ code: 'custom', path: ['vehicles', index, 'serviceCategory'], message: 'Vehicle services must be selected for the application.' })
+    }
+    const applicationDocuments = new Set((value.documents ?? []).map((document) => document.path))
+    if (vehicle.documents.some((document) => !applicationDocuments.has(document.path))) {
+      context.addIssue({ code: 'custom', path: ['vehicles', index, 'documents'], message: 'Vehicle documents must be included with the application.' })
+    }
+  })
 })
 
 function reference() { return `PA-${crypto.randomUUID().slice(0, 8).toUpperCase()}` }
@@ -122,6 +150,19 @@ router.post('/applications', partnerApplicationLimit, async (request, response) 
     if (phoneVerified === null) return
     if (!phoneVerified) return response.status(400).json({ error: 'Verify your mobile number before submitting the application.' })
   }
+  const { data: activeApplication, error: duplicateCheckError } = await supabase
+    .from('partner_applications')
+    .select('id')
+    .eq('phone_e164', input.phone)
+    .in('status', ['submitted', 'under_review', 'additional_info_required', 'approved'])
+    .maybeSingle()
+  if (duplicateCheckError) {
+    logger.error('partner.application_duplicate_check_failed', { requestId: response.locals.requestId, error: duplicateCheckError.message })
+    return response.status(500).json({ error: 'The application could not be checked for an existing registration. Please try again.' })
+  }
+  if (activeApplication) {
+    return response.status(409).json({ error: 'An active application already exists for this mobile number. Contact support if you need to update it.' })
+  }
   const documents = input.documents ?? []
   if (config.featureFlags.partner_application_otp_enabled && documents.length > 0) {
     if (!input.uploadBatchId || documents.some((document) => !document.path.startsWith(`${partnerDocumentPrefix}${input.uploadBatchId}/`))) {
@@ -142,7 +183,7 @@ router.post('/applications', partnerApplicationLimit, async (request, response) 
       return response.status(400).json({ error: 'The uploaded documents could not be matched to this application.' })
     }
   }
-  const { data, error } = await supabase.from('partner_applications').insert({ reference: reference(), business_name: input.businessName, partner_type: input.partnerType, phone_e164: input.phone, whatsapp_e164: input.whatsapp || null, email: input.email, service_zone: input.zone, business_address: input.address, service_codes: input.serviceCodes, vehicle_count: input.vehicleCount, primary_registration: input.registration, vehicle_capacity: input.capacity, years_in_operation: input.experience ?? null, availability: input.availability, notes: input.notes || null, document_names: [...input.documentNames, ...documents.map((document) => partnerDocumentName(document.path))] }).select('id,reference,status,created_at').single()
+  const { data, error } = await supabase.from('partner_applications').insert({ reference: reference(), business_name: input.businessName, partner_type: input.partnerType, phone_e164: input.phone, whatsapp_e164: input.whatsapp || null, email: input.email, service_zone: input.zone, business_address: input.address, service_codes: input.serviceCodes, vehicle_count: input.vehicleCount, primary_registration: input.registration, vehicle_capacity: input.capacity, vehicle_details: input.vehicles ?? [], years_in_operation: input.experience ?? null, availability: input.availability, notes: input.notes || null, document_names: [...input.documentNames, ...documents.map((document) => partnerDocumentName(document.path))] }).select('id,reference,status,created_at').single()
   if (error) return response.status(500).json({ error: 'The partner application could not be saved.' })
   if (config.featureFlags.partner_application_otp_enabled && input.uploadBatchId && documents.length > 0) {
     const { error: attachError } = await supabase
@@ -158,7 +199,42 @@ router.post('/applications', partnerApplicationLimit, async (request, response) 
       return response.status(500).json({ error: 'The application documents could not be attached. Please try again.' })
     }
   }
-  response.status(201).json({ ok: true, reference: data.reference, status: data.status, message: 'Your partnership request was received for review.' })
+  const { data: admins, error: adminsError } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('role', 'admin')
+  let notificationStatus: 'created' | 'unavailable' = 'unavailable'
+  if (!adminsError && admins?.length) {
+    const { error: notificationError } = await supabase.from('notifications').insert(
+      admins.map((admin) => ({
+        recipient_id: admin.id,
+        event_type: 'partner.application_submitted',
+        title: 'New partner application',
+        payload: {
+          applicationId: data.id,
+          reference: data.reference,
+          status: data.status,
+        },
+      })),
+    )
+    if (!notificationError) {
+      notificationStatus = 'created'
+    } else {
+      logger.error('partner.application_notification_failed', {
+        requestId: response.locals.requestId,
+        applicationId: data.id,
+        databaseErrorCode: notificationError.code,
+      })
+    }
+  } else {
+    logger.error('partner.application_admin_lookup_failed', {
+      requestId: response.locals.requestId,
+      applicationId: data.id,
+      reason: adminsError ? 'admin_lookup_failed' : 'no_admin_recipients',
+      databaseErrorCode: adminsError?.code,
+    })
+  }
+  response.status(201).json({ ok: true, reference: data.reference, status: data.status, notificationStatus, message: 'Your partnership request was received for review.' })
 })
 
 export default router

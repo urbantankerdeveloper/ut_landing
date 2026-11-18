@@ -64,16 +64,23 @@ export const partnerContent = {
       placeholder: 'Door number, street, locality and city',
     },
     vehicleCount: {
-      label: 'Number of vehicles',
-      placeholder: '1',
+      label: 'Registered vehicles',
     },
     registration: {
-      label: 'Primary vehicle registration',
+      label: 'Vehicle registration',
       placeholder: 'TN 09 AB 1234',
     },
     capacity: {
       label: 'Vehicle capacity',
       placeholder: 'e.g. 6 KL or 7 m³',
+    },
+    vehicleType: {
+      label: 'Vehicle type',
+      placeholder: 'Choose vehicle type',
+    },
+    serviceCategory: {
+      label: 'Service category',
+      placeholder: 'Choose service category',
     },
     experience: {
       label: 'Years in operation',
@@ -83,8 +90,8 @@ export const partnerContent = {
       label: 'Current availability',
     },
     documents: {
-      label: 'Verification documents',
-      hint: 'Upload RC, insurance, permits, or business proof.',
+      label: 'Vehicle documents',
+      hint: 'Upload this vehicle’s RC, insurance, permits, or related documents.',
     },
     notes: {
       label: 'Anything else we should know?',
@@ -112,6 +119,13 @@ export const partnerContent = {
       { label: 'Available for new orders' },
       { label: 'Available on selected days' },
       { label: 'Onboarding for future orders' },
+    ],
+    vehicleTypes: [
+      { label: 'Water tanker' },
+      { label: 'Sewage tanker' },
+      { label: 'Concrete mixer truck' },
+      { label: 'Borewell rig' },
+      { label: 'Other service vehicle' },
     ],
   },
   declaration: 'I confirm that the information is accurate and required verification documents can be provided.',

@@ -6,7 +6,7 @@ export const defaultFeatureFlags = {
   multi_service_tasks_enabled: false,
   order_tracking_board_enabled: true,
   vendor_earnings_realtime_enabled: true,
-  online_payment_enabled: false,
+  online_payment_enabled: true,
   manual_assignment_mode_enabled: false,
   admin_availability_toggle_enabled: true,
   admin_dashboard_v2_enabled: true,

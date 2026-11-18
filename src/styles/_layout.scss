@@ -32,10 +32,13 @@
   padding-left: var(--app-screen-gutter);
 }
 
-.site-header,
 .site-footer,
 .benefit-strip,
 .feature-strip { padding-right: var(--app-screen-gutter); padding-left: var(--app-screen-gutter); }
+
+@media (min-width: 761px) {
+  .site-header { padding-right: var(--app-screen-gutter); padding-left: var(--app-screen-gutter); }
+}
 
 .workspace-screen { padding-right: var(--app-screen-gutter); padding-left: var(--app-screen-gutter); }
 .workspace-topbar-new { width: auto; max-width: none; margin: 0; padding-right: var(--app-screen-gutter); padding-left: var(--app-screen-gutter); }

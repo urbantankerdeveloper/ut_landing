@@ -59,7 +59,6 @@ function PasswordResetForm({ onSubmit, onBack, password, setPassword, confirmPas
 
 export default function LoginScreen() {
   const { navigate } = useAppNavigation()
-  const { openWorkspace } = useAppNavigation()
   const signIn = useAuthStore((state) => state.signIn)
   const [recoveryLink] = useState(() => {
     const recovery = new URLSearchParams(window.location.hash.slice(1))
@@ -206,7 +205,7 @@ export default function LoginScreen() {
           role: response.user.role,
           name: response.user.name ?? name.trim(),
         }, response.accessToken ?? response.token)
-        openWorkspace(response.user.role)
+        navigate('home', { replace: true })
         return
       }
       if (mode === 'signup') {
@@ -256,7 +255,7 @@ export default function LoginScreen() {
         }
         if (!response.user?.role) throw new Error(c.messages.accountCreatedNoRole)
         signIn({ username: response.user.username ?? response.user.email ?? normalizedUsername, role: response.user.role, name: response.user.name ?? name.trim() }, response.accessToken ?? response.token)
-        openWorkspace(response.user.role)
+        navigate('home', { replace: true })
         return
       }
       if (mode === 'reset') {
@@ -281,7 +280,7 @@ export default function LoginScreen() {
       if (!response.user.role) throw new Error(c.messages.noWorkspaceRole)
       signIn({ username: response.user.username ?? response.user.email ?? normalizedUsername, role: response.user.role, name: response.user.name ?? normalizedUsername }, response.accessToken ?? response.token)
       trackEvent('auth.login', { role: response.user.role, sessionId: sessionStorage.getItem('urban-tanker-analytics-session') ?? '' })
-      openWorkspace(response.user.role)
+      navigate('home', { replace: true })
     } catch (submissionError) {
       notifyError(submissionError instanceof Error ? submissionError.message : c.messages.genericFailure)
     }

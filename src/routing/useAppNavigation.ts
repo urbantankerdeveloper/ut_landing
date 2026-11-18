@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router'
-import { BOOKING_DRAFT_KEY, REPEAT_BOOKING_KEY } from '../constants/bookingDraft'
+import { BOOKING_DRAFT_KEY } from '../constants/bookingDraft'
 import { useNavigationStore, type ScreenId, type WorkspaceRole } from '../stores/navigationStore'
 import { roleFromPath, screenFromPath, screenPath, workspaceScreen } from './paths'
 
@@ -17,7 +17,6 @@ export function needsLeaveConfirmation(fromPathname: string, toPathname: string)
 export function prepareScreenChange(pathname: string) {
   const screen = screenFromPath(pathname)
   window.sessionStorage.removeItem(BOOKING_DRAFT_KEY)
-  if (screen === 'booking') window.sessionStorage.removeItem(REPEAT_BOOKING_KEY)
   const { setMobileMenuOpen, setPartnerFormDirty } = useNavigationStore.getState()
   setMobileMenuOpen(false)
   if (screen !== 'partner') setPartnerFormDirty(false)

@@ -174,5 +174,13 @@ IMPLEMENTATION_BACKLOG.md
 !docs/api_consumers.md
 !docs/performance_baseline.md
 !docs/hostinger_deploy.md
+!docs/ARCHITECTURE_REVIEW.md
+!docs/IMPLEMENTATION_PLAN.md
+!docs/DESIGN_SYSTEM.md
+!docs/API_CHANGES.md
+!docs/DATABASE_CHANGES.md
+!docs/INTEGRATION_STATUS.md
+!docs/TESTING_REPORT.md
+!docs/DEPLOYMENT_NOTES.md
 !backend/scripts/bench/README.md
 /backend/hostinger-upload.zip
