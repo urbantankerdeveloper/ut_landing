@@ -16,14 +16,29 @@ export type PartnerApplicationInput = {
   capacity: string
   experience?: number
   availability: string
+  vehicles?: PartnerVehicleInput[]
   notes?: string
   documents?: PartnerDocument[]
 }
 
 export type PartnerDocument = { path: string; type: string }
+export type PartnerVehicleInput = {
+  registrationNumber: string
+  vehicleType: string
+  serviceCategory: string
+  capacity: string
+  availability: string
+  documents: PartnerDocument[]
+}
 type PartnerSignedUpload = { path: string; signedUrl: string; token: string; contentType: string; maxBytes: number }
 
-export type PartnerApplicationResponse = { ok: true; reference: string; status: string; message: string }
+export type PartnerApplicationResponse = {
+  ok: true
+  reference: string
+  status: string
+  notificationStatus: 'created' | 'unavailable'
+  message: string
+}
 
 const partnerDocumentTypes: Record<string, string> = {
   pdf: 'application/pdf',

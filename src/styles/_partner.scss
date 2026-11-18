@@ -25,6 +25,13 @@
 .partner-field input, .partner-field select, .partner-field textarea { padding: 14px; background: colors.$white; border: 1px solid colors.$teal-100; border-radius: 13px; }
 .partner-field input:focus, .partner-field select:focus, .partner-field textarea:focus { border-color: colors.$teal-400; box-shadow: 0 0 0 3px colors.$teal-50; }
 .partner-field small { color: colors.$muted; font-size: 10px; font-weight: 500; }
+.partner-vehicle-list { display: grid; gap: 16px; }
+.partner-vehicle-list-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.partner-vehicle-list-heading p { margin: 0; color: colors.$muted; font-size: 12px; }
+.partner-vehicle-list-heading .button, .partner-vehicle-remove { display: inline-flex; align-items: center; gap: 7px; }
+.partner-vehicle-card { position: relative; min-width: 0; padding: 20px; border: 1px solid colors.$line; border-radius: 16px; }
+.partner-vehicle-card legend { padding: 0 8px; color: colors.$ink; font-size: 13px; font-weight: 800; }
+.partner-vehicle-remove { position: absolute; top: 8px; right: 10px; min-height: 34px; }
 .partner-otp-actions { display: flex; flex-wrap: wrap; gap: 12px; }
 .partner-phone-verified { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 36px; color: colors.$teal-700; background: colors.$teal-50; font-size: 12px; font-weight: 700; }
 .partner-phone-verified span { display: inline-flex; align-items: center; gap: 8px; }

@@ -45,7 +45,7 @@ vi.mock('../middleware/auth.js', () => ({
 vi.mock('express-rate-limit', () => ({
   default: () => (_request: unknown, _response: unknown, next: () => void) => next(),
 }))
-vi.mock('../services/scaling.js', () => ({ limiterStore: () => undefined }))
+vi.mock('../services/scaling.js', () => ({ limiterStore: () => undefined, getRedisPair: () => undefined }))
 vi.mock('../lib/logger.js', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }))
 vi.mock('../services/sms.js', () => ({ sendTemplateSms: vi.fn() }))
 vi.mock('../services/customerNotifications.js', () => ({ notifyCustomer: vi.fn() }))
@@ -268,7 +268,7 @@ describe('razorpay verify payment details', () => {
     expect(updatePayloads('payments')[0]).toMatchObject({ status: 'paid', method: 'upi', vpa: 'payer@okaxis', fee_paise: null, captured_at: expect.any(String) })
   })
 
-  it('still verifies an in-flight payment while new online payments are disabled', async () => {
+  it('does not mark an in-flight payment paid when Razorpay status is unavailable', async () => {
     config.featureFlags.online_payment_enabled = false
     setResults('payments', { data: verifyPaymentRow, error: null }, { data: { id: 'row-1' }, error: null })
     setResults('bookings', { data: { id: 'booking-1' }, error: null })
@@ -276,12 +276,22 @@ describe('razorpay verify payment details', () => {
 
     const response = await signedVerify('order_1', 'pay_1')
 
-    expect(response.status).toBe(200)
-    expect(response.body).toEqual({ verified: true, orderId: 'booking-1' })
-    const [payload] = updatePayloads('payments')
-    expect(payload).toMatchObject({ status: 'paid', provider_payment_id: 'pay_1' })
-    expect(payload).not.toHaveProperty('method')
+    expect(response.status).toBe(503)
+    expect(response.body.error).toContain('do not make another payment')
+    expect(updatePayloads('payments')).toHaveLength(0)
     expect(logger.warn).toHaveBeenCalledWith('payment.details_fetch_failed', expect.any(Object))
+  })
+
+  it('does not mark an authorized payment paid before it is captured', async () => {
+    setResults('payments', { data: verifyPaymentRow, error: null })
+    setResults('bookings', { data: { id: 'booking-1' }, error: null })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...entity, status: 'authorized' }), { status: 200 })))
+
+    const response = await signedVerify('order_1', 'pay_1')
+
+    expect(response.status).toBe(409)
+    expect(response.body.error).toContain('still processing')
+    expect(updatePayloads('payments')).toHaveLength(0)
   })
 
   it('rejects with 409 and does not mark paid when the fetched amount differs', async () => {
@@ -445,6 +455,35 @@ describe('checkout payments before a booking exists', () => {
     expect(state.calls.some((call) => call.table === 'bookings')).toBe(false)
     expect(state.calls.some((call) => call.table === 'payments' && call.method === 'insert')).toBe(false)
   })
+
+  it('does not create a checkout booking when Razorpay status is unavailable', async () => {
+    setResults('payments', { data: null, error: null })
+    setResults('booking_checkouts', { data: { ...checkout, provider_order_id: 'order_9' }, error: null })
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')))
+
+    const response = await signedVerify('order_9', 'pay_9')
+
+    expect(response.status).toBe(503)
+    expect(response.body.error).toContain('do not make another payment')
+    expect(state.calls.some((call) => call.table === 'bookings')).toBe(false)
+  })
+
+  it('does not create a checkout booking for an authorized but uncaptured payment', async () => {
+    setResults('payments', { data: null, error: null })
+    setResults('booking_checkouts', { data: { ...checkout, provider_order_id: 'order_9' }, error: null })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: 'pay_9',
+      order_id: 'order_9',
+      amount: 50000,
+      status: 'authorized',
+    }), { status: 200 })))
+
+    const response = await signedVerify('order_9', 'pay_9')
+
+    expect(response.status).toBe(409)
+    expect(response.body.error).toContain('still processing')
+    expect(state.calls.some((call) => call.table === 'bookings')).toBe(false)
+  })
 })
 
 describe('admin payment detail', () => {
@@ -461,7 +500,100 @@ describe('admin payment detail', () => {
   })
 })
 
+describe('admin service pricing history', () => {
+  const serviceId = 'c0000000-0000-4000-8000-000000000001'
+
+  it('returns pricing snapshots with the administrator name', async () => {
+    setResults('service_pricing_history', {
+      data: [{
+        id: 'history-1',
+        service_id: serviceId,
+        service_code: 'water_tanker',
+        changed_by: 'admin-1',
+        action: 'updated',
+        old_base_price_paise: 10000,
+        new_base_price_paise: 12000,
+        old_config: {},
+        new_config: { effectiveFrom: '2026-11-18' },
+        created_at: '2026-11-18T10:00:00.000Z',
+      }],
+      error: null,
+    })
+    setResults('profiles', { data: [{ id: 'admin-1', full_name: 'Service Admin' }], error: null })
+
+    const response = await request(buildApp())
+      .get(`/api/admin/services/${serviceId}/pricing-history`)
+      .set('x-test-role', 'admin')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual([expect.objectContaining({
+      action: 'updated',
+      old_base_price_paise: 10000,
+      new_base_price_paise: 12000,
+      changed_by_name: 'Service Admin',
+    })])
+  })
+
+  it('rejects invalid service identifiers before reading history', async () => {
+    const response = await request(buildApp())
+      .get('/api/admin/services/not-a-uuid/pricing-history')
+      .set('x-test-role', 'admin')
+
+    expect(response.status).toBe(400)
+    expect(state.calls).toHaveLength(0)
+  })
+
+  it('keeps pricing history restricted to administrators', async () => {
+    const response = await request(buildApp())
+      .get(`/api/admin/services/${serviceId}/pricing-history`)
+      .set('x-test-role', 'vendor')
+
+    expect(response.status).toBe(403)
+    expect(state.calls).toHaveLength(0)
+  })
+
+  it('attributes pricing changes to the authenticated administrator', async () => {
+    setResults('service_catalog', { data: { config: { capacityOptions: ['5000 litres'] } }, error: null })
+    setResults('service_catalog', { data: { id: serviceId, base_price_paise: 12000 }, error: null })
+
+    const response = await request(buildApp())
+      .patch(`/api/admin/services/${serviceId}/pricing`)
+      .set('x-test-role', 'admin')
+      .send({ basePricePaise: 12000 })
+
+    expect(response.status).toBe(200)
+    const update = state.calls.find((call) => call.table === 'service_catalog' && call.method === 'update')
+    expect(update?.args[0]).toMatchObject({
+      base_price_paise: 12000,
+      updated_by: 'cust-1',
+    })
+  })
+})
+
 describe('vendor services and accrued earnings', () => {
+  it('does not expose internal pricing editor IDs in the service catalog', async () => {
+    setResults('vendors', { data: { id: 'vendor-1' }, error: null })
+    setResults('service_catalog', {
+      data: [{
+        id: 'service-1',
+        code: 'water_tanker',
+        name: 'Water tanker',
+        description: null,
+        base_price_paise: 10000,
+        is_active: true,
+        config: {},
+      }],
+      error: null,
+    })
+    setResults('vendor_service_availability', { data: [], error: null })
+
+    const response = await request(buildApp()).get('/api/vendor/services').set('x-test-role', 'vendor')
+
+    expect(response.status).toBe(200)
+    const catalogSelect = state.calls.find((call) => call.table === 'service_catalog' && call.method === 'select')
+    expect(catalogSelect?.args[0]).not.toContain('updated_by')
+  })
+
   it('keeps vendor service creation forbidden regardless of client controls', async () => {
     const response = await request(buildApp())
       .post('/api/vendor/services')

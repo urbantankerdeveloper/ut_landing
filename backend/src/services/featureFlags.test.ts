@@ -10,6 +10,12 @@ describe('resolveFeatureFlags', () => {
     })
   })
 
+  it('keeps online checkout enabled by default when the wallet is disabled', () => {
+    const flags = resolveFeatureFlags('{}', false)
+    expect(flags.online_payment_enabled).toBe(true)
+    expect(flags.wallet_enabled).toBe(false)
+  })
+
   it('lets WALLET_ENABLED override the JSON flag for both clients', () => {
     expect(resolveFeatureFlags('{}', true).wallet_enabled).toBe(true)
     expect(

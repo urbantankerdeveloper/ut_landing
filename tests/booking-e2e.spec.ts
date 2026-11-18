@@ -18,6 +18,22 @@ function futureDateInputValue(days = 1) {
 async function mockBookingApi(page: Page, verifiedPhone = false) {
   const fulfill = (body: unknown, status = 200) => (route: Route) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
   const bookingPayloads: Record<string, unknown>[] = []
+  await page.route('**/api/config/flags', fulfill({
+    duplicate_phone_check_enabled: true,
+    mpin_cooldown_enabled: true,
+    multi_service_tasks_enabled: false,
+    order_tracking_board_enabled: true,
+    vendor_earnings_realtime_enabled: true,
+    online_payment_enabled: true,
+    manual_assignment_mode_enabled: false,
+    admin_availability_toggle_enabled: true,
+    admin_dashboard_v2_enabled: true,
+    area_availability_enabled: true,
+    partner_application_otp_enabled: true,
+    address_geocoding_enabled: true,
+    invoice_generation_enabled: false,
+    wallet_enabled: false,
+  }))
   await page.route('https://nominatim.openstreetmap.org/reverse*', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -42,6 +58,16 @@ async function mockBookingApi(page: Page, verifiedPhone = false) {
   return bookingPayloads
 }
 
+test('checkout keeps Card or UPI and cash available while Wallet is disabled', async ({ page }) => {
+  await mockBookingApi(page)
+  await page.goto('/')
+  await completeBookingDetails(page)
+
+  await expect(page.getByRole('radio', { name: /Card or UPI/ })).toBeVisible()
+  await expect(page.getByRole('radio', { name: /Cash on delivery/ })).toBeVisible()
+  await expect(page.getByRole('radio', { name: /Wallet/ })).toHaveCount(0)
+})
+
 async function completeBookingDetails(page: Page, applyCoupon = false) {
   await page.getByRole('button', { name: /Book now|Start a new booking/ }).first().click()
   await page.locator('.booking-line').first().getByLabel('Water type').selectOption('Construction water')
@@ -60,6 +86,72 @@ async function completeBookingDetails(page: Page, applyCoupon = false) {
   await page.getByRole('checkbox', { name: /I confirm these requirements/ }).check()
   await page.getByRole('button', { name: /Continue to payment/ }).click()
 }
+
+test('homepage fits a narrow mobile viewport without horizontal scrolling', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 900 })
+  await page.goto('/')
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+
+  const widths = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    document: document.documentElement.scrollWidth,
+  }))
+  expect(widths.document).toBeLessThanOrEqual(widths.viewport)
+  await expect(page.getByRole('button', { name: 'Book now', exact: true }).first()).toBeVisible()
+})
+
+test('public service page submits a structured RMC enquiry on mobile', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  let submittedEnquiry: Record<string, unknown> | undefined
+  await page.route('**/api/service-enquiries', async route => {
+    submittedEnquiry = route.request().postDataJSON() as Record<string, unknown>
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: 'enquiry-1',
+        subject: 'RMC concrete mixer enquiry',
+        status: 'new',
+        createdAt: new Date().toISOString(),
+        notificationStatus: 'unavailable',
+      }),
+    })
+  })
+
+  await page.goto('/services')
+  const rmcCard = page.locator('.marketing-service-card-detail').filter({ hasText: 'RMC mixer trucks' })
+  await rmcCard.getByRole('button', { name: 'Request service' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Request RMC Concrete Mixer' })
+  await dialog.getByLabel('Customer name').fill('Ananya Rao')
+  await dialog.getByLabel('Mobile number').fill('9876543210')
+  await dialog.getByLabel('Email (optional)').fill('ananya@example.com')
+  await dialog.getByLabel('Site location').fill('12 Lake View Road, Chennai')
+  await dialog.getByLabel('Required date').fill(futureDateInputValue(1))
+  await dialog.getByLabel('Concrete grade').fill('M25')
+  await dialog.getByLabel('Quantity (cubic metres)').fill('12.5')
+  await dialog.getByLabel('Concrete pump required').check()
+  await dialog.getByLabel('Additional requirements (optional)').fill('Deliver before the site crew starts.')
+  await dialog.getByRole('button', { name: 'Submit enquiry' }).click()
+
+  await expect(dialog.getByRole('status')).toContainText('Your enquiry has been saved.')
+  await expect(dialog.getByText('The enquiry is saved, but the admin alert could not be created.')).toBeVisible()
+  await expect.poll(() => submittedEnquiry).toMatchObject({
+    customerName: 'Ananya Rao',
+    mobile: '9876543210',
+    serviceCategory: 'rmc',
+    details: {
+      grade: 'M25',
+      quantityCubicMetres: 12.5,
+      pumpRequired: true,
+      requirements: 'Deliver before the site crew starts.',
+    },
+  })
+  const widths = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    document: document.documentElement.scrollWidth,
+  }))
+  expect(widths.document).toBeLessThanOrEqual(widths.viewport)
+})
 
 test('guest can verify mocked OTP and complete COD booking without leaving payment', async ({ page }) => {
   await mockBookingApi(page)
@@ -204,7 +296,7 @@ test('customer can remove every service item and explicitly add another later', 
   await expect(page.locator('.booking-line')).toHaveCount(0)
   await expect(page.getByText('Select at least one service to enter delivery and contact details.')).toBeVisible()
 
-  await page.getByRole('button', { name: 'Add another service' }).click()
+  await page.getByRole('button', { name: 'Add service', exact: true }).click()
   await expect(page.locator('.booking-line')).toHaveCount(1)
 })
 
@@ -299,8 +391,8 @@ test('multiple services retain separate details in one booking request', async (
 
   await expect(page.getByRole('heading', { name: 'Your combined booking is ready.' })).toBeVisible()
   await expect(page.getByText('Services booked')).toBeVisible()
-  await expect(page.getByRole('banner').getByRole('button', { name: 'My Account', exact: true })).toBeVisible()
-  await page.getByRole('banner').getByRole('button', { name: 'My Account', exact: true }).click()
+  await expect(page.getByRole('banner').getByRole('button', { name: 'My account', exact: true })).toBeVisible()
+  await page.getByRole('banner').getByRole('button', { name: 'My account', exact: true }).click()
   await expect(page.getByRole('dialog', { name: 'Leave booking?' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'My Bookings' })).toBeVisible()
   expect(bookingPayloads).toHaveLength(1)
@@ -355,6 +447,7 @@ test('customer profile loads saved name, email, and phone values', async ({ page
   }))
 
   await page.goto('/')
+  await page.getByRole('banner').getByRole('button', { name: 'My account', exact: true }).click()
   await page.getByRole('button', { name: 'My profile' }).click()
   await expect(page.getByRole('textbox', { name: 'Full name' })).toHaveValue('Test Customer')
   await expect(page.getByRole('textbox', { name: 'Email address' })).toHaveValue('customer@example.com')
@@ -392,6 +485,7 @@ test('customer profile submits changed values to the profile update API', async 
   })
 
   await page.goto('/')
+  await page.getByRole('banner').getByRole('button', { name: 'My account', exact: true }).click()
   await page.getByRole('button', { name: 'My profile' }).click()
   await page.getByRole('textbox', { name: 'Full name' }).fill('Jane Doe')
   await page.getByRole('button', { name: 'Save profile' }).click()
@@ -407,6 +501,7 @@ test('customer profile submits changed values to the profile update API', async 
 test('customer can view booking details and repeat a multi-service booking', async ({ page }) => {
   const booking = {
     id: 'booking-42',
+    reference: 'UT-BOOKING42',
     service_code: 'water_tanker',
     service_details: [
       { serviceId: 'water_tanker', capacity: '5,000 litres', details: 'Potable water for the building', deliveryDate: '2026-11-20', location: 'MG Road, Chennai' },
@@ -416,7 +511,7 @@ test('customer can view booking details and repeat a multi-service booking', asy
     customer_phone_e164: '9876543210',
     access_notes: 'Use the north entrance',
     payment_method: 'cod',
-    status: 'pending_vendor',
+    status: 'delivered',
     quoted_amount_paise: 430000,
     scheduled_for: '2026-11-20',
   }
@@ -434,33 +529,30 @@ test('customer can view booking details and repeat a multi-service booking', asy
   await page.getByLabel('Username or email').fill('customer@example.com')
   await page.locator('#login-password').fill('password123')
   await page.getByRole('button', { name: 'Log in' }).last().click()
-  await expect(page.getByRole('banner').getByRole('button', { name: 'Book now', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+  await expect(page.getByRole('banner').getByRole('button', { name: 'Book now', exact: true })).toBeVisible()
+  await page.getByRole('banner').getByRole('button', { name: 'My account', exact: true }).click()
   await page.getByRole('button', { name: 'My Bookings' }).click()
   await expect(page.getByRole('button', { name: 'New booking', exact: true })).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'One booking. Every service you need.' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Book now', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'One booking. Every service you need.' })).toBeVisible()
-  await page.getByRole('banner').getByRole('button', { name: 'My Account', exact: true }).click()
+  await page.getByRole('banner').getByRole('button', { name: 'My account', exact: true }).click()
   await page.getByRole('dialog', { name: 'Leave booking?' }).getByRole('button', { name: 'Leave booking' }).click()
   await page.getByRole('button', { name: 'My Bookings' }).click()
 
-  await page.getByRole('button', { name: 'Actions for booking booking-42' }).click()
-  const bookingActions = page.getByRole('menu')
-  await expect(bookingActions).toHaveCSS('position', 'fixed')
-  expect(await bookingActions.evaluate((menu) => menu.parentElement === document.body)).toBe(true)
-  await expect(bookingActions.getByRole('menuitem', { name: 'Book again' })).toBeVisible()
-  await expect(bookingActions.getByRole('menuitem', { name: 'View' })).toBeVisible()
-  await bookingActions.getByRole('menuitem', { name: 'View' }).click()
-  const detailsDialog = page.getByRole('dialog', { name: 'Booking booking-42' })
+  await page.getByRole('button', { name: 'UT-BOOKING42', exact: true }).click()
+  const detailsDialog = page.getByRole('dialog', { name: 'Booking UT-BOOKING42' })
   await expect(detailsDialog).toContainText('Potable water for the building')
   await expect(detailsDialog).toContainText('Clean the rooftop tanks')
   await expect(detailsDialog).toContainText('Preferred date:')
   await expect(detailsDialog).toContainText('Use the north entrance')
   await expect(detailsDialog).toContainText('9876543210')
+  await expect(detailsDialog.getByRole('button', { name: 'Book again' })).toBeVisible()
   await page.getByRole('button', { name: 'Close dialog' }).click()
 
-  await page.getByRole('button', { name: 'Actions for booking booking-42' }).click()
-  await page.getByRole('menuitem', { name: 'Book again' }).click()
+  await page.getByRole('button', { name: 'UT-BOOKING42', exact: true }).click()
+  await page.getByRole('dialog', { name: 'Booking UT-BOOKING42' }).getByRole('button', { name: 'Book again' }).click()
   await expect(page.getByRole('heading', { name: 'One booking. Every service you need.' })).toBeVisible()
   await expect(page.locator('.booking-line')).toHaveCount(2)
   await expect(page.getByRole('textbox', { name: 'Full address' })).toHaveValue('MG Road, Chennai')
@@ -481,6 +573,7 @@ test('signed-in customer stays on booking and confirms before leaving selected s
   await mockBookingApi(page)
 
   await page.goto('/')
+  await page.getByRole('banner').getByRole('button', { name: 'My account', exact: true }).click()
   await page.getByRole('button', { name: 'My Bookings' }).click()
   await page.getByRole('button', { name: 'Book now', exact: true }).click()
 
@@ -509,6 +602,7 @@ test('signed-in customer is asked before leaving or refreshing the initial booki
   await mockBookingApi(page)
 
   await page.goto('/')
+  await page.getByRole('banner').getByRole('button', { name: 'My account', exact: true }).click()
   await page.getByRole('button', { name: 'My Bookings' }).click()
   await page.getByRole('button', { name: 'Book now', exact: true }).click()
   await expect(page.locator('.booking-line')).toHaveCount(1)
@@ -528,11 +622,18 @@ test('signed-in customer is asked before leaving or refreshing the initial booki
   expect(refreshPrompt).toBe('beforeunload')
 })
 
-test('customer signup confirms that an email was sent', async ({ page }) => {
+test('customer signup requires email verification before completing registration', async ({ page }) => {
   await page.route('**/api/auth/signup', route => route.fulfill({
     status: 201,
     contentType: 'application/json',
-    body: JSON.stringify({ requiresEmailVerification: true, emailSent: true, userId: 'customer-1' }),
+    body: JSON.stringify({
+      requiresEmailVerification: true,
+      emailSent: true,
+      challengeId: '00000000-0000-4000-8000-000000000001',
+      phoneOtpSent: false,
+      userId: 'customer-1',
+      role: 'customer',
+    }),
   }))
   await page.goto('/')
   await page.getByRole('button', { name: 'Log in' }).click()
@@ -542,7 +643,9 @@ test('customer signup confirms that an email was sent', async ({ page }) => {
   await page.getByLabel('Email').fill('customer@example.com')
   await page.locator('#login-password').fill('password123')
   await page.getByRole('button', { name: 'Create account' }).click()
-  await expect(page.getByRole('status')).toHaveText('Account created. Check your email and confirm your address before signing in.')
+  await expect(page.getByRole('heading', { name: 'Verify your account' })).toBeVisible()
+  await expect(page.getByLabel('Email verification code')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Verify and continue' })).toBeVisible()
 })
 
 test('customer signup displays SMTP configuration errors', async ({ page }) => {
@@ -559,7 +662,7 @@ test('customer signup displays SMTP configuration errors', async ({ page }) => {
   await page.getByLabel('Email').fill('customer@example.com')
   await page.locator('#login-password').fill('password123')
   await page.getByRole('button', { name: 'Create account' }).click()
-  await expect(page.getByRole('alert')).toContainText('Email confirmation is unavailable')
+  await expect(page.getByRole('alert').filter({ hasText: 'Email confirmation is unavailable' })).toBeVisible()
 })
 
 test('password reset request is sent through the backend email flow', async ({ page }) => {
@@ -573,7 +676,7 @@ test('password reset request is sent through the backend email flow', async ({ p
   await page.getByRole('button', { name: 'Forgot password?' }).click()
   await page.getByLabel('Email').fill('customer@example.com')
   await page.getByRole('button', { name: 'Send reset instructions' }).click()
-  await expect(page.getByRole('status')).toHaveText('If that account exists, reset instructions will be sent shortly.')
+  await expect(page.getByRole('status').filter({ hasText: 'If that account exists, reset instructions will be sent shortly.' })).toBeVisible()
   expect(resetPayload).toEqual({ email: 'customer@example.com' })
 })
 
@@ -583,11 +686,10 @@ test('password recovery link can update the password', async ({ page }) => {
     updatePayload = route.request().postDataJSON() as Record<string, unknown>
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ updated: true }) })
   })
-  await page.goto('/#access_token=mock-recovery-access-token&type=recovery')
-  await page.getByRole('button', { name: 'Log in' }).click()
+  await page.goto('/login#access_token=mock-recovery-access-token&type=recovery')
   await page.getByLabel('New password', { exact: true }).fill('new-password-123')
   await page.getByLabel('Confirm new password').fill('new-password-123')
   await page.getByRole('button', { name: 'Update password' }).click()
-  await expect(page.getByRole('status')).toHaveText('Your password has been updated. You can now sign in.')
+  await expect(page.getByRole('status').filter({ hasText: 'Your password has been updated. You can now sign in.' })).toBeVisible()
   expect(updatePayload).toEqual({ accessToken: 'mock-recovery-access-token', password: 'new-password-123' })
 })

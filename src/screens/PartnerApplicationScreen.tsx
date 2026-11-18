@@ -1,9 +1,9 @@
-import { useState, type FormEvent } from 'react'
-import { ArrowRight, Check } from 'lucide-react'
+import { useRef, useState, type FormEvent } from 'react'
+import { ArrowRight, Check, Plus, Trash2 } from 'lucide-react'
 import { useNavigationStore } from '../stores/navigationStore'
 import { useAppNavigation } from '../routing/useAppNavigation'
 import { useAuthStore } from '../stores/authStore'
-import { partnerApi, type PartnerDocument } from '../api/partner'
+import { partnerApi, type PartnerDocument, type PartnerVehicleInput } from '../api/partner'
 import { useFileUpload } from '../hooks/useFrontendFeatures'
 import { useFeatureFlags } from '../hooks/useFeatureFlags'
 import { partnerContent as p } from '../content/partner'
@@ -24,7 +24,17 @@ export default function PartnerApplicationScreen() {
   const [phoneChallengeId, setPhoneChallengeId] = useState<string | null>(null)
   const [phoneVerified, setPhoneVerified] = useState(false)
   const [otpBusy, setOtpBusy] = useState(false)
+  const [vehicles, setVehicles] = useState([{ id: 1 }])
+  const nextVehicleId = useRef(2)
   const toggleService = (service: string) => setSelectedServices((current) => current.includes(service) ? current.filter((item) => item !== service) : [...current, service])
+  const addVehicle = () => {
+    setVehicles((current) => current.length >= 250 ? current : [...current, { id: nextVehicleId.current++ }])
+    setPartnerFormDirty(true)
+  }
+  const removeVehicle = (id: number) => {
+    setVehicles((current) => current.length <= 1 ? current : current.filter((vehicle) => vehicle.id !== id))
+    setPartnerFormDirty(true)
+  }
 
   async function requestPhoneOtp() {
     setOtpBusy(true)
@@ -69,19 +79,42 @@ export default function PartnerApplicationScreen() {
     }
     if (selectedServices.length === 0) { notifyError(p.messages.chooseService); return }
     const data = new FormData(event.currentTarget)
-    const files = data.getAll('documents').filter((file): file is File => file instanceof File && file.name.length > 0)
+    const vehicleForms = vehicles.map((_, index) => ({
+      registrationNumber: String(data.get(`vehicleRegistration-${index}`) ?? ''),
+      vehicleType: String(data.get(`vehicleType-${index}`) ?? ''),
+      serviceCategory: String(data.get(`vehicleService-${index}`) ?? ''),
+      capacity: String(data.get(`vehicleCapacity-${index}`) ?? ''),
+      availability: String(data.get(`vehicleAvailability-${index}`) ?? ''),
+      files: data.getAll(`vehicleDocuments-${index}`).filter((file): file is File => file instanceof File && file.name.length > 0),
+    }))
+    const files = vehicleForms.flatMap((vehicle) => vehicle.files)
     if (files.length > 10) { notifyError(p.messages.tooManyDocuments); return }
     try {
       const applicationId = crypto.randomUUID()
       const documents: PartnerDocument[] = []
-      for (const file of files) {
-        if (otpEnabled) {
-          if (!phoneChallengeId) throw new Error(p.messages.otpVerifyFailed)
-          documents.push(await partnerApi.uploadDocument(file, applicationId, phoneChallengeId, phone))
-        } else {
-          const signed = await fileUpload.upload(file, 'partner-applications', applicationId)
-          documents.push({ path: signed.path, type: file.type || 'application/octet-stream' })
+      const submittedVehicles: PartnerVehicleInput[] = []
+      for (const vehicle of vehicleForms) {
+        const vehicleDocuments: PartnerDocument[] = []
+        for (const file of vehicle.files) {
+          let document: PartnerDocument
+          if (otpEnabled) {
+            if (!phoneChallengeId) throw new Error(p.messages.otpVerifyFailed)
+            document = await partnerApi.uploadDocument(file, applicationId, phoneChallengeId, phone)
+          } else {
+            const signed = await fileUpload.upload(file, 'partner-applications', applicationId)
+            document = { path: signed.path, type: file.type || 'application/octet-stream' }
+          }
+          documents.push(document)
+          vehicleDocuments.push(document)
         }
+        submittedVehicles.push({
+          registrationNumber: vehicle.registrationNumber,
+          vehicleType: vehicle.vehicleType,
+          serviceCategory: vehicle.serviceCategory,
+          capacity: vehicle.capacity,
+          availability: vehicle.availability,
+          documents: vehicleDocuments,
+        })
       }
       const result = await partnerApi.apply({
         businessName: String(data.get('name') ?? ''),
@@ -94,9 +127,10 @@ export default function PartnerApplicationScreen() {
         zone: String(data.get('zone') ?? ''),
         address: String(data.get('address') ?? ''),
         serviceCodes: selectedServices,
-        vehicleCount: Number(data.get('vehicleCount') ?? 0),
-        registration: String(data.get('registration') ?? ''),
-        capacity: String(data.get('capacity') ?? ''),
+        vehicleCount: submittedVehicles.length,
+        registration: submittedVehicles[0]?.registrationNumber ?? '',
+        capacity: submittedVehicles[0]?.capacity ?? '',
+        vehicles: submittedVehicles,
         experience: data.get('experience') ? Number(data.get('experience')) : undefined,
         availability: String(data.get('availability') ?? ''),
         notes: String(data.get('notes') ?? ''),
@@ -218,13 +252,27 @@ export default function PartnerApplicationScreen() {
           </section>
           <section className="partner-form-section">
             <Step number={p.sections.fleet.number} title={p.sections.fleet.title} copy={p.sections.fleet.copy} />
+            <div className="partner-vehicle-list">
+              <div className="partner-vehicle-list-heading">
+                <p>{p.fields.vehicleCount.label}: <strong>{vehicles.length}</strong></p>
+                <button className="button button-quiet" type="button" onClick={addVehicle} disabled={vehicles.length >= 250}><Plus size={15} /> Add vehicle</button>
+              </div>
+              {vehicles.map((vehicle, index) => <fieldset className="partner-vehicle-card" key={vehicle.id}>
+                <legend>Vehicle {index + 1}</legend>
+                {vehicles.length > 1 && <button className="button button-quiet partner-vehicle-remove" type="button" onClick={() => removeVehicle(vehicle.id)} aria-label={`Remove vehicle ${index + 1}`}><Trash2 size={15} /></button>}
+                <div className="partner-field-grid">
+                  <Field label={p.fields.registration.label} name={`vehicleRegistration-${index}`} placeholder={p.fields.registration.placeholder} required />
+                  <label className="partner-field">{p.fields.vehicleType.label}<select name={`vehicleType-${index}`} required defaultValue=""><option value="" disabled>{p.fields.vehicleType.placeholder}</option>{p.options.vehicleTypes.map((option) => <option key={option.label}>{option.label}</option>)}</select></label>
+                  <label className="partner-field">{p.fields.serviceCategory.label}<select name={`vehicleService-${index}`} required defaultValue=""><option value="" disabled>{p.fields.serviceCategory.placeholder}</option>{selectedServices.map((service) => <option key={service}>{service}</option>)}</select></label>
+                  <Field label={p.fields.capacity.label} name={`vehicleCapacity-${index}`} placeholder={p.fields.capacity.placeholder} required />
+                  <label className="partner-field">{p.fields.availability.label}<select name={`vehicleAvailability-${index}`} defaultValue={p.options.availability[0].label}>{p.options.availability.map((option) => <option key={option.label}>{option.label}</option>)}</select></label>
+                  <label className="partner-field">{p.fields.documents.label}<input name={`vehicleDocuments-${index}`} type="file" multiple accept="image/jpeg,image/png,image/webp,.pdf,.doc,.docx" /><small>{p.fields.documents.hint}</small></label>
+                </div>
+              </fieldset>)}
+            </div>
             <div className="partner-field-grid">
-              <Field label={p.fields.vehicleCount.label} name="vehicleCount" type="number" placeholder={p.fields.vehicleCount.placeholder} required />
-              <Field label={p.fields.registration.label} name="registration" placeholder={p.fields.registration.placeholder} required />
-              <Field label={p.fields.capacity.label} name="capacity" placeholder={p.fields.capacity.placeholder} required />
               <Field label={p.fields.experience.label} name="experience" type="number" placeholder={p.fields.experience.placeholder} />
               <label className="partner-field">{p.fields.availability.label}<select name="availability" defaultValue={p.options.availability[0].label}>{p.options.availability.map((option) => <option key={option.label}>{option.label}</option>)}</select></label>
-              <label className="partner-field">{p.fields.documents.label}<input name="documents" type="file" multiple accept="image/jpeg,image/png,image/webp,.pdf,.doc,.docx" /><small>{p.fields.documents.hint}</small></label>
             </div>
             <label className="partner-field">{p.fields.notes.label}<textarea name="notes" rows={3} placeholder={p.fields.notes.placeholder} /></label>
           </section>

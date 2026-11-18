@@ -5,11 +5,21 @@ export type AdminDispatchSettings = { manualAssignmentModeEnabled: boolean }
 export type AdminVendor = { id: string; business_name?: string; name?: string; status?: string; verification?: string; is_online?: boolean; phone_e164?: string | null; service_zone?: string | null; rating?: number; email?: string; owner_profile_id?: string; account_only?: boolean }
 export type AdminResource = { id: string; name?: string; status?: string; verification?: string }
 export type AdminCustomer = { id: string; full_name: string; phone_e164?: string; role: string; created_at: string }
-export type AdminReportRequest = { type: string; from: string; to: string; status?: string; service?: string; customerType?: 'registered' | 'guest' }
-export type AdminReportResponse = { rows: unknown[]; generatedAt: string; total: number }
+export type AdminReportRequest = { type: 'orders' | 'vendors' | 'revenue'; from: string; to: string; status?: string; service?: string; customerType?: 'registered' | 'guest' }
+export type AdminReportResponse = { type: AdminReportRequest['type']; rows: unknown[]; generatedAt: string; total: number }
 export type AdminCoupon = { id: string; code: string; label: string; discount: string; expires: string; active: boolean }
 export type AdminService = { id: string; code: string; name: string; description?: string; base_price_paise: number; is_active: boolean; config?: { effectiveFrom?: string; effectiveTo?: string; capacityOptions?: string[]; detailOptions?: string[]; waterTypeOptions?: string[]; tankerCountOptions?: string[]; optionSurchargesPaise?: Record<string, Record<string, number>> } }
+export type AdminServicePricingHistory = { id: string; service_id: string; service_code: string; changed_by: string | null; changed_by_name: string | null; action: 'created' | 'updated'; old_base_price_paise: number | null; new_base_price_paise: number; old_config: Record<string, unknown> | null; new_config: Record<string, unknown>; created_at: string }
 export type AdminProgramRecord = { id: string; status: string; created_at: string; [key: string]: unknown }
+export type AdminEnquiryHistoryRecord = {
+  id: string
+  action: 'submitted' | 'updated'
+  actor_type: string
+  old_status: string | null
+  new_status: string | null
+  response: string | null
+  created_at: string
+}
 export type AdminSystemHealth = { ok: boolean; migrations: Array<{ table: string; applied: boolean; error?: string }>; configuration: Record<string, boolean>; checkedAt: string }
 export type AdminNotification = { id: string; title: string; event_type: string; payload?: { detail?: string; bookingId?: string; reference?: string; status?: string }; read_at?: string; created_at: string }
 export type AdminSmsTemplate = { templateKey: string; body: string; variables: string[]; isActive: boolean; msg91TemplateId: string | null; updatedAt: string; isBuiltIn: boolean; allowedVariables: string[] | null }
@@ -79,13 +89,15 @@ export const adminApi = {
   dispatchSettings: () => apiFetch<AdminDispatchSettings>('/admin/dispatch-settings'),
   updateDispatchSettings: (payload: AdminDispatchSettings) => apiFetch<AdminDispatchSettings>('/admin/dispatch-settings', { method: 'PATCH', body: JSON.stringify(payload) }),
   services: () => apiFetch<AdminService[]>('/admin/services'),
+  servicePricingHistory: (id: string) => apiFetch<AdminServicePricingHistory[]>(`/admin/services/${id}/pricing-history`),
   saveService: async (payload: { code?: string; name: string; description?: string; basePricePaise: number; isActive: boolean; effectiveFrom?: string; effectiveTo?: string; capacityOptions?: string[]; detailOptions?: string[]; waterTypeOptions?: string[]; tankerCountOptions?: string[]; optionSurchargesPaise?: Record<string, Record<string, number>> }, id?: string) => id && (payload.effectiveFrom || payload.effectiveTo) ? apiFetch<AdminService>(`/admin/services/${id}/pricing`, { method: 'PATCH', body: JSON.stringify(payload) }) : apiFetch<AdminService>(id ? `/admin/services/${id}` : '/admin/services', { method: id ? 'PATCH' : 'POST', body: JSON.stringify(payload) }),
   subscriptions: () => apiFetch<AdminProgramRecord[]>('/admin/subscriptions'),
   updateSubscription: (id: string, status: string) => apiFetch<AdminProgramRecord>(`/admin/subscriptions/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   contracts: () => apiFetch<AdminProgramRecord[]>('/admin/contracts'),
   updateContract: (id: string, status: string) => apiFetch<AdminProgramRecord>(`/admin/contracts/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   enquiries: async () => (await apiFetch<{ rows: AdminProgramRecord[] }>('/admin/enquiries')).rows,
-  updateEnquiry: (id: string, status: string, responseNote: string) => apiFetch<AdminProgramRecord>(`/admin/enquiries/${id}`, { method: 'PATCH', body: JSON.stringify({ status, response: responseNote }) }),
+  enquiryHistory: (id: string) => apiFetch<AdminEnquiryHistoryRecord[]>(`/admin/enquiries/${id}/history`),
+  updateEnquiry: (id: string, status: string, responseNote?: string) => apiFetch<AdminProgramRecord>(`/admin/enquiries/${id}`, { method: 'PATCH', body: JSON.stringify({ status, ...(responseNote === undefined ? {} : { response: responseNote }) }) }),
   payments: async () => (await apiFetch<{ rows: unknown[] }>('/admin/payments')).rows,
   payouts: async () => (await apiFetch<{ rows: unknown[] }>('/admin/payouts')).rows,
   settlePayouts: (payload: { from: string; to: string; vendorShareRate?: number }) => apiFetch<{ payouts: unknown[] }>('/admin/payouts/settle', { method: 'POST', body: JSON.stringify(payload) }),

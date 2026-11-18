@@ -1,0 +1,33 @@
+# Database changes
+
+**Status:** Migrations 002–004 applied and schema-verified on the configured development PostgreSQL database only; production application remains unverified.
+**Updated:** 2026-11-18
+
+## Current database
+
+- Supabase PostgreSQL is the system of record; Supabase Auth manages identities. The Express service uses the server-side Supabase service role and a PostgreSQL pool.
+- The canonical schema is `backend/supabase/001_initial.sql`. It includes profiles/roles, vendors, vehicles/drivers, catalog and prices, bookings/grouped services, lifecycle/audit history, payments, invoices, addresses, notifications, location, documents, partner applications, enquiries, payouts and analytics.
+- RLS protects selected customer-owned tables and service-role access is restricted at the application/API boundary. Preserve both database and route-level authorization.
+- The canonical SQL file drops and recreates the public schema and is explicitly for fresh/test installation; it is not an incremental production migration. No incremental migration command/runner is currently exposed in `backend/package.json`.
+
+## Change log
+
+| Date | Change | Migration / data safety |
+| --- | --- | --- |
+| 2026-11-18 | Applied migrations 002–004 sequentially to the configured development PostgreSQL database and verified expected schema objects, RLS, triggers, and indexes; `npm run db:check` passed afterward. | Development only; no production database was accessed. Migration 003 preflight found no duplicate active-phone groups or unsupported partner statuses. The SQL was applied through the existing `pg` connection pool because `psql` and the Supabase CLI were unavailable. |
+| 2026-11-18 | Added `backend/supabase/002_service_enquiries.sql`: structured contact/service/date fields on existing enquiries, an indexed append-only `enquiry_history` table, and a trigger that records submissions and admin status/response changes. | Additive/idempotent; applied and verified on development only. Existing enquiries are not backfilled, and history begins after migration. |
+| 2026-11-18 | Added `backend/supabase/003_partner_vehicle_details.sql`: per-vehicle JSONB details, a partial unique index for active applications by mobile number, append-only application review history, and the `additional_info_required` status. | Additive/transactional; applied and verified on development only. Existing rows retain legacy fields and receive an empty vehicle array; history starts with post-migration activity. Incomplete historic vehicle data is not fabricated. |
+| 2026-11-18 | Added `backend/supabase/004_service_pricing_history.sql`: an `updated_by` reference on `service_catalog`, an append-only `service_pricing_history` table, and insert/price-or-config-update triggers that snapshot old/new prices and config. | Additive/transactional; applied and verified on development only. Existing catalog prices are not backfilled; history begins after migration. RLS is enabled and no client-role access is granted. |
+
+## Requirements for any later schema change
+
+1. Add a reviewed additive migration for existing installations; never run the canonical reset against production or user data.
+2. Preserve confirmed booking pricing snapshots, payment/invoice history, audit records, ownership and existing API contracts.
+3. Use constraints/indexes that match query and idempotency patterns; apply RLS/revokes/grants and test least-privilege access.
+4. Preserve historical price snapshots; never rewrite confirmed booking prices when catalog prices change. Pricing audit history is not a substitute for effective-dated rate schedules or a financial ledger.
+5. Use transactions for multi-record lifecycle changes and define a rollback/forward-recovery plan.
+6. Validate against an isolated disposable database first. Record migration order, backfill, lock/downtime considerations, deploy sequence, and verification.
+
+## Unverified items
+
+Production schema version, production backups/restore, production RLS policy coverage, and whether a deployment-specific incremental migration exists outside these repositories were not checked. Do not assume the production database has migrations 002–004.

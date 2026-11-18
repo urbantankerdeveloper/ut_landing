@@ -3,7 +3,7 @@ import { chromeContent as c } from '../content/chrome'
 import type { ScreenId } from '../stores/navigationStore'
 import { publicScreens, screenFromPath, screenPath } from './paths'
 
-const SITE_ORIGIN = 'https://urbantanker.com'
+const SITE_ORIGIN = 'https://www.urbantanker.in'
 const INDEXABLE_ROBOTS = 'index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1'
 
 const titles: Record<ScreenId, string> = {

@@ -57,4 +57,31 @@ describe('customerApi requests', () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/customer/orders/booking_1/delivery-otp')
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'POST' })
   })
+
+  it('submits structured service enquiries and reports the admin notification result', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      id: 'enquiry-1',
+      subject: 'Borewell services enquiry',
+      status: 'new',
+      createdAt: '2026-11-18T03:00:00.000Z',
+      notificationStatus: 'created',
+    }, 201))
+    vi.stubGlobal('fetch', fetchMock)
+    const payload = {
+      customerName: 'Ananya Rao',
+      mobile: '9876543210',
+      location: '12 Lake View Road, Chennai',
+      requiredDate: '2026-12-01',
+      serviceCategory: 'borewell' as const,
+      details: { proposedDepthMetres: 45, siteRequirements: 'Clear access for the drilling rig.' },
+    }
+
+    await expect(customerApi.createServiceEnquiry(payload)).resolves.toMatchObject({
+      id: 'enquiry-1',
+      notificationStatus: 'created',
+    })
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/service-enquiries')
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'POST' })
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual(payload)
+  })
 })

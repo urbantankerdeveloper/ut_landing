@@ -15,7 +15,7 @@ import { useDocumentMeta } from '../routing/useDocumentMeta'
 
 export function AppShell() {
 	useFormGuards()
-	const { activeScreen, openWorkspace } = useAppNavigation()
+	const { activeScreen, navigate } = useAppNavigation()
 	const { pathname } = useLocation()
 	const isPublicTracking = /^\/track\/[A-Za-z0-9_-]+$/.test(pathname)
 	const partnerFormDirty = useNavigationStore((state) => state.partnerFormDirty)
@@ -24,8 +24,8 @@ export function AppShell() {
 	const hasHydrated = useAuthStore((state) => state.hasHydrated)
 	const blocker = useBlocker(({ currentLocation, nextLocation }) => currentLocation.pathname !== nextLocation.pathname && needsLeaveConfirmation(currentLocation.pathname, nextLocation.pathname))
 	useEffect(() => {
-		if (user && (activeScreen === 'home' || activeScreen === 'login' || activeScreen === 'account')) openWorkspace(user.role, { replace: true })
-	}, [activeScreen, openWorkspace, user])
+		if (user && (activeScreen === 'login' || activeScreen === 'account')) navigate('home', { replace: true })
+	}, [activeScreen, navigate, user])
 	const isBookingScreen = activeScreen === 'booking' && !bookingCompleted
 	const isPartnerDraft = activeScreen === 'partner' && partnerFormDirty
 	useEffect(() => {

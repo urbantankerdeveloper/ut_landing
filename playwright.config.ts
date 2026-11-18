@@ -9,7 +9,7 @@ export default defineConfig({
     ...devices['Desktop Chrome'],
   },
   webServer: [
-    { command: 'npm run dev', port: 5173, reuseExistingServer: true },
+    { command: 'npm run dev', port: 5173, reuseExistingServer: true, env: { VITE_SHOW_BOOKING_BUTTON: 'true' } },
     { command: 'npm run dev --prefix backend', port: 8080, reuseExistingServer: true },
   ],
 })
