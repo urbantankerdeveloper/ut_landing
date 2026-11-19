@@ -47,7 +47,7 @@ vi.mock('express-rate-limit', () => ({
 }))
 vi.mock('../services/scaling.js', () => ({ limiterStore: () => undefined, getRedisPair: () => undefined }))
 vi.mock('../lib/logger.js', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }))
-vi.mock('../services/sms.js', () => ({ sendTemplateSms: vi.fn() }))
+vi.mock('../services/whatsapp.js', () => ({ sendTemplateWhatsApp: vi.fn() }))
 vi.mock('../services/customerNotifications.js', () => ({ notifyCustomer: vi.fn() }))
 
 import { logger } from '../lib/logger.js'

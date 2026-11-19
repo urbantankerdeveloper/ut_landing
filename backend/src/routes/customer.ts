@@ -12,7 +12,7 @@ import { generateMissingCustomerInvoices } from '../services/invoices.js'
 import { emitRealtimeToUser, emitRealtimeToVendor } from '../services/realtime.js'
 import { sendPushNotification } from '../services/pushNotifications.js'
 import { isJpeg, selfieBucket, selfieMaxBytes, selfieObjectPath } from '../services/selfie.js'
-import { notifyCustomerSms } from '../services/bookingNotifications.js'
+import { notifyCustomerWhatsApp } from '../services/bookingNotifications.js'
 import { config } from '../config.js'
 import { getManualAssignmentModeEnabled } from '../services/manualAssignmentMode.js'
 import { toE164IndianMobile } from '../lib/phone.js'
@@ -288,7 +288,7 @@ async function createBookingAndNotifications(input: {
   const result = data as { booking: CreatedBooking; created: boolean }
   if (result?.booking?.id) notifyNearbyVendors(input.vendors, result.booking, result.created)
   if (result?.created && input.booking.customer_phone_e164) {
-    void notifyCustomerSms(input.booking.customer_phone_e164, 'guest_booking_confirmation', { reference: input.reference })
+    void notifyCustomerWhatsApp(input.booking.customer_phone_e164, 'guest_booking_confirmation', { reference: input.reference })
   }
   return result
 }
@@ -332,7 +332,7 @@ async function createMultiServiceBookings(input: {
   for (const booking of result.bookings) notifyNearbyVendors(input.vendors, booking, result.created)
   const customerPhone = input.data.phone ? toE164IndianMobile(input.data.phone) : null
   if (result.created && customerPhone) {
-    void notifyCustomerSms(customerPhone, 'guest_booking_confirmation', { reference: input.groupReference })
+    void notifyCustomerWhatsApp(customerPhone, 'guest_booking_confirmation', { reference: input.groupReference })
   }
   return { booking: result.bookings[0]!, bookings: result.bookings, created: result.created }
 }

@@ -3,7 +3,7 @@ import { logger } from '../lib/logger.js'
 import { supabase } from '../supabase.js'
 import { notifyCustomer } from './customerNotifications.js'
 import { notifyUser } from './providers.js'
-import { sendTemplateSms, type SmsTemplateKey } from './sms.js'
+import { sendTemplateWhatsApp, type SmsTemplateKey } from './whatsapp.js'
 import { getOrCreateTrackingToken } from './trackingTokens.js'
 
 type AssignedBooking = {
@@ -35,7 +35,7 @@ export async function notifyCustomerOfAssignment(booking: AssignedBooking) {
     ? `https://www.google.com/maps/search/?api=1&query=${booking.latitude},${booking.longitude}`
     : null
   const detail = `Fleet assigned: ${vehicle}. Driver: ${driver}. Open your booking to follow live tracking.`
-  // The tracking link is sent by email and SMS only. It is not stored in notifications or push payloads.
+  // The tracking link is sent by email and WhatsApp only. It is not stored in notifications or push payloads.
   const payload = { vehicle, driver, customerMapUrl, latitude: booking.latitude ?? null, longitude: booking.longitude ?? null }
 
   await notifyCustomer({
@@ -49,30 +49,30 @@ export async function notifyCustomerOfAssignment(booking: AssignedBooking) {
 
   const message = `Urban Tanker ${booking.reference ?? booking.id}: ${detail} Live tracking: ${trackingUrl}${customerMapUrl ? ` Delivery location: ${customerMapUrl}` : ''}`
   const providerResults = await notifyUser({ email: authUser.user.email ?? undefined }, 'Your Urban Tanker fleet is assigned', message)
-  const sms = await notifyCustomerSms(profileResult.data?.phone_e164, 'vendor_acceptance', {
+  const whatsapp = await notifyCustomerWhatsApp(profileResult.data?.phone_e164, 'vendor_acceptance', {
     reference: booking.reference ?? booking.id,
     vehicle,
     driver,
     trackingUrl,
   })
-  return { vehicle, driver, trackingUrl, providerResults, sms }
+  return { vehicle, driver, trackingUrl, providerResults, whatsapp }
 }
 
-export async function notifyCustomerSms(phoneE164: string | null | undefined, key: SmsTemplateKey, vars: Record<string, string>) {
+export async function notifyCustomerWhatsApp(phoneE164: string | null | undefined, key: SmsTemplateKey, vars: Record<string, string>) {
   if (!phoneE164) return { queued: false, reason: 'No phone' }
   try {
-    return await sendTemplateSms(key, phoneE164, vars)
+    return await sendTemplateWhatsApp(key, phoneE164, vars)
   } catch (error) {
-    logger.warn('sms_failed', { template: key, error: error instanceof Error ? error.message : 'unknown' })
-    return { queued: false, reason: 'SMS failed' }
+    logger.warn('whatsapp_failed', { template: key, error: error instanceof Error ? error.message : 'unknown' })
+    return { queued: false, reason: 'WhatsApp failed' }
   }
 }
 
-export async function notifyCustomerSmsById(customerId: string, key: SmsTemplateKey, vars: Record<string, string>) {
+export async function notifyCustomerWhatsAppById(customerId: string, key: SmsTemplateKey, vars: Record<string, string>) {
   const { data, error } = await supabase.from('profiles').select('phone_e164').eq('id', customerId).maybeSingle()
   if (error) {
-    logger.warn('sms_lookup_failed', { template: key, error: error.message })
+    logger.warn('whatsapp_lookup_failed', { template: key, error: error.message })
     return { queued: false, reason: 'Profile lookup failed' }
   }
-  return notifyCustomerSms(data?.phone_e164, key, vars)
+  return notifyCustomerWhatsApp(data?.phone_e164, key, vars)
 }

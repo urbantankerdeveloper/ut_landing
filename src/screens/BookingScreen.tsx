@@ -398,7 +398,12 @@ export default function BookingScreen() {
   const [idempotencyKey] = useState(() => draft.idempotencyKey ?? crypto.randomUUID())
   const selectedServices = useMemo(() => serviceEntries.map((entry) => entry.serviceId), [serviceEntries])
   const activeServiceEntries = useMemo(() => serviceEntries.filter((entry) => options.some((option) => option.code === entry.serviceId)), [serviceEntries, options])
-  const availableServiceOptions = useMemo(() => options.filter((option) => !activeServiceEntries.some((entry) => entry.serviceId === option.code)), [activeServiceEntries, options])
+  const availableServiceOptions = useMemo(() => options.sort((a, b) => {
+      if (a.code === 'water_tanker') return -1
+      if (b.code === 'water_tanker') return 1
+      return 0
+    })
+    .filter((option) => !activeServiceEntries.some((entry) => entry.serviceId === option.code)), [activeServiceEntries, options])
   const addServiceLabel = activeServiceEntries.length ? c.selectServices.addAnotherService : c.selectServices.addService
   const selectedServiceToAdd = availableServiceOptions.some((option) => option.code === serviceToAdd)
     ? serviceToAdd

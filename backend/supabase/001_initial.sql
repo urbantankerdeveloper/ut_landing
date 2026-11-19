@@ -1528,3 +1528,291 @@ create unique index if not exists invoices_booking_id_unique_idx
 notify pgrst, 'reload schema';
 
 commit;
+
+-- Additive migration for structured public service enquiries and an append-only status history.
+begin;
+
+alter table public.enquiries
+  add column if not exists customer_name text,
+  add column if not exists mobile_e164 text,
+  add column if not exists email text,
+  add column if not exists location text,
+  add column if not exists service_category text,
+  add column if not exists required_date date,
+  add column if not exists service_details jsonb not null default '{}'::jsonb,
+  add column if not exists updated_by uuid references public.profiles(id) on delete set null;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'enquiries_service_category_check'
+      and conrelid = 'public.enquiries'::regclass
+  ) then
+    alter table public.enquiries
+      add constraint enquiries_service_category_check
+      check (service_category is null or service_category in ('empty_tanker', 'rmc', 'borewell'));
+  end if;
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'enquiries_mobile_e164_check'
+      and conrelid = 'public.enquiries'::regclass
+  ) then
+    alter table public.enquiries
+      add constraint enquiries_mobile_e164_check
+      check (mobile_e164 is null or mobile_e164 ~ '^\+91[6-9][0-9]{9}$');
+  end if;
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'enquiries_service_details_object_check'
+      and conrelid = 'public.enquiries'::regclass
+  ) then
+    alter table public.enquiries
+      add constraint enquiries_service_details_object_check
+      check (jsonb_typeof(service_details) = 'object');
+  end if;
+end;
+$$;
+
+create index if not exists enquiries_category_status_created_idx
+  on public.enquiries(service_category, status, created_at desc);
+
+create table if not exists public.enquiry_history (
+  id uuid primary key default gen_random_uuid(),
+  enquiry_id uuid not null references public.enquiries(id),
+  actor_id uuid references public.profiles(id) on delete set null,
+  actor_type text not null check (actor_type in ('public', 'customer', 'admin', 'system')),
+  action text not null check (action in ('submitted', 'updated')),
+  old_status text,
+  new_status text,
+  response text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists enquiry_history_enquiry_created_idx
+  on public.enquiry_history(enquiry_id, created_at);
+
+alter table public.enquiry_history enable row level security;
+revoke all on public.enquiry_history from public, anon, authenticated;
+grant select, insert on public.enquiry_history to service_role;
+
+create or replace function public.record_enquiry_history()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  if tg_op = 'INSERT' then
+    insert into public.enquiry_history (
+      enquiry_id, actor_id, actor_type, action, new_status, response
+    ) values (
+      new.id,
+      new.customer_id,
+      case when new.customer_id is null then 'public' else 'customer' end,
+      'submitted',
+      new.status,
+      new.response
+    );
+  elsif old.status is distinct from new.status
+     or old.response is distinct from new.response then
+    insert into public.enquiry_history (
+      enquiry_id, actor_id, actor_type, action, old_status, new_status, response
+    ) values (
+      new.id,
+      new.updated_by,
+      case when new.updated_by is null then 'system' else 'admin' end,
+      'updated',
+      old.status,
+      new.status,
+      new.response
+    );
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function public.record_enquiry_history() from public, anon, authenticated;
+
+drop trigger if exists enquiries_history on public.enquiries;
+create trigger enquiries_history
+  after insert or update of status, response on public.enquiries
+  for each row execute function public.record_enquiry_history();
+
+commit;
+
+-- Store each vehicle's onboarding details without rewriting existing application records.
+begin;
+
+alter table public.partner_applications
+  add column if not exists vehicle_details jsonb not null default '[]'::jsonb;
+
+do $$
+begin
+  if exists (
+    select phone_e164
+    from public.partner_applications
+    where status in ('submitted', 'under_review', 'additional_info_required', 'approved')
+    group by phone_e164
+    having count(*) > 1
+  ) then
+    raise exception 'Duplicate active partner applications exist; resolve them before applying the active-phone constraint.';
+  end if;
+end $$;
+
+create unique index if not exists partner_applications_active_phone_uidx
+  on public.partner_applications(phone_e164)
+  where status in ('submitted', 'under_review', 'additional_info_required', 'approved');
+
+alter table public.partner_applications
+  drop constraint if exists partner_applications_status_check;
+
+alter table public.partner_applications
+  add constraint partner_applications_status_check
+  check (status in ('submitted', 'under_review', 'additional_info_required', 'approved', 'rejected'));
+
+create table if not exists public.partner_application_history (
+  id uuid primary key default gen_random_uuid(),
+  application_id uuid not null references public.partner_applications(id) on delete cascade,
+  actor_id uuid references public.profiles(id) on delete set null,
+  actor_type text not null check (actor_type in ('public', 'admin', 'system')),
+  action text not null check (action in ('submitted', 'reviewed')),
+  old_status text,
+  new_status text not null,
+  review_note text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists partner_application_history_created_idx
+  on public.partner_application_history(application_id, created_at);
+
+alter table public.partner_application_history enable row level security;
+revoke all on public.partner_application_history from public, anon, authenticated;
+grant select, insert on public.partner_application_history to service_role;
+
+create or replace function public.record_partner_application_history()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  if tg_op = 'INSERT' then
+    insert into public.partner_application_history (
+      application_id, actor_type, action, new_status, review_note
+    ) values (
+      new.id, 'public', 'submitted', new.status, new.review_note
+    );
+  elsif old.status is distinct from new.status
+     or old.review_note is distinct from new.review_note then
+    insert into public.partner_application_history (
+      application_id, actor_id, actor_type, action, old_status, new_status, review_note
+    ) values (
+      new.id,
+      new.reviewed_by,
+      case when new.reviewed_by is null then 'system' else 'admin' end,
+      'reviewed',
+      old.status,
+      new.status,
+      new.review_note
+    );
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function public.record_partner_application_history() from public, anon, authenticated;
+
+drop trigger if exists partner_applications_history on public.partner_applications;
+create trigger partner_applications_history
+  after insert or update of status, review_note on public.partner_applications
+  for each row execute function public.record_partner_application_history();
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'partner_applications_vehicle_details_array_check'
+      and conrelid = 'public.partner_applications'::regclass
+  ) then
+    alter table public.partner_applications
+      add constraint partner_applications_vehicle_details_array_check
+      check (jsonb_typeof(vehicle_details) = 'array');
+  end if;
+end $$;
+
+commit;
+
+begin;
+
+alter table public.service_catalog
+  add column if not exists updated_by uuid references public.profiles(id) on delete set null;
+
+create table if not exists public.service_pricing_history (
+  id uuid primary key default gen_random_uuid(),
+  service_id uuid not null references public.service_catalog(id) on delete restrict,
+  service_code text not null,
+  changed_by uuid references public.profiles(id) on delete set null,
+  action text not null check (action in ('created', 'updated')),
+  old_base_price_paise integer,
+  new_base_price_paise integer not null check (new_base_price_paise >= 0),
+  old_config jsonb,
+  new_config jsonb not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists service_pricing_history_service_created_idx
+  on public.service_pricing_history(service_id, created_at desc);
+
+alter table public.service_pricing_history enable row level security;
+revoke all on public.service_pricing_history from public, anon, authenticated;
+grant select on public.service_pricing_history to service_role;
+
+create or replace function public.record_service_pricing_history()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  if tg_op = 'INSERT' then
+    insert into public.service_pricing_history (
+      service_id, service_code, changed_by, action,
+      new_base_price_paise, new_config
+    ) values (
+      new.id, new.code, new.updated_by, 'created',
+      new.base_price_paise, coalesce(new.config, '{}'::jsonb)
+    );
+  else
+    insert into public.service_pricing_history (
+      service_id, service_code, changed_by, action,
+      old_base_price_paise, new_base_price_paise, old_config, new_config
+    ) values (
+      new.id, new.code, new.updated_by, 'updated',
+      old.base_price_paise, new.base_price_paise,
+      coalesce(old.config, '{}'::jsonb), coalesce(new.config, '{}'::jsonb)
+    );
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function public.record_service_pricing_history() from public, anon, authenticated;
+
+drop trigger if exists service_catalog_pricing_history_insert on public.service_catalog;
+create trigger service_catalog_pricing_history_insert
+  after insert on public.service_catalog
+  for each row execute function public.record_service_pricing_history();
+
+drop trigger if exists service_catalog_pricing_history_update on public.service_catalog;
+create trigger service_catalog_pricing_history_update
+  after update of base_price_paise, config on public.service_catalog
+  for each row
+  when (
+    old.base_price_paise is distinct from new.base_price_paise
+    or old.config is distinct from new.config
+  )
+  execute function public.record_service_pricing_history();
+
+commit;
+

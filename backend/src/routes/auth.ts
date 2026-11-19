@@ -8,7 +8,7 @@ import { toE164IndianMobile } from '../lib/phone.js'
 import { clientPlatformFromHeader, credentialsSchema, themeModeSchema } from '../lib/schemas.js'
 import { decodeSelfieJpeg, selfieBucket, selfieObjectPath } from '../services/selfie.js'
 import { isEmailConfigured, sendEmail } from '../services/providers.js'
-import { sendTemplateSms } from '../services/sms.js'
+import { sendTemplateWhatsApp } from '../services/whatsapp.js'
 import { emailCodeEmail, passwordResetEmail } from '../services/signupEmail.js'
 import { hashOtp, otpMatches } from '../services/otp.js'
 import { config } from '../config.js'
@@ -129,7 +129,7 @@ async function issueOtpChallenge(response: Response, phone: string, template: 'b
   }
   if (!config.USE_DEFAULT_VERIFICATION_CODE) {
     try {
-      const delivery = await sendTemplateSms(template, phone, { otp })
+      const delivery = await sendTemplateWhatsApp(template, phone, { otp })
       if (!delivery.queued) {
         await supabase.from('guest_otp_challenges').delete().eq('id', challenge.id)
         return response.status(503).json({ error: 'Mobile verification is not configured yet.' })
@@ -143,7 +143,7 @@ async function issueOtpChallenge(response: Response, phone: string, template: 'b
   return response.status(202).json({ challengeId: challenge.id, expiresInSeconds: 600, resendAfterSeconds: emailCodeResendAfterSeconds })
 }
 
-// Signup never fails because of SMS. When SMS is not configured the phone leg is reported as not sent and the email flow continues.
+// Signup never fails because of WhatsApp. When WhatsApp is not configured the phone leg is reported as not sent and the email flow continues.
 async function sendPhoneOtpBestEffort(requestId: unknown, phone: string, template: 'booking_verification_otp' | 'user_registration_otp' = 'user_registration_otp'): Promise<{ sent: boolean; challengeId: string | null }> {
   const otp = config.USE_DEFAULT_VERIFICATION_CODE ? config.DEFAULT_VERIFICATION_CODE : crypto.randomInt(100000, 1000000).toString()
   const { data: challenge, error } = await supabase
@@ -157,7 +157,7 @@ async function sendPhoneOtpBestEffort(requestId: unknown, phone: string, templat
   }
   if (config.USE_DEFAULT_VERIFICATION_CODE) return { sent: true, challengeId: challenge.id }
   try {
-    const delivery = await sendTemplateSms(template, phone, { otp })
+    const delivery = await sendTemplateWhatsApp(template, phone, { otp })
     if (delivery.queued) return { sent: true, challengeId: challenge.id }
     logFailure('signup.phone_not_sent', requestId, 'reason' in delivery ? delivery.reason : undefined)
   } catch (deliveryError) {
@@ -237,7 +237,7 @@ async function issueEmailCode(requestId: unknown, email: string, purpose: EmailC
     logFailure('email.challenge_create_failed', requestId, error?.message)
     return { ok: false, status: 500, error: 'The verification code could not be created.' }
   }
-  // Same as SMS: the default-code mode skips real delivery (local and test only, enforced in config).
+  // Same as WhatsApp: the default-code mode skips real delivery (local and test only, enforced in config).
   if (config.USE_DEFAULT_VERIFICATION_CODE) return { ok: true, challengeId: challenge.id }
   const template = emailCodeEmail(otp, purpose)
   try {
@@ -344,7 +344,7 @@ router.post('/guest/request-otp', otpRequestLimit, otpPhoneLimit, async (request
   if (!phone) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
   if (!parsed.data.email) return issueOtpChallenge(response, phone, 'booking_verification_otp')
 
-  // With an email, the code goes to both channels. When SMS is off, the email code alone verifies the booking.
+  // With an email, the code goes to both channels. When WhatsApp is off, the email code alone verifies the booking.
   const phoneCode = await sendPhoneOtpBestEffort(response.locals.requestId, phone, 'booking_verification_otp')
   const emailCode = await issueEmailCode(response.locals.requestId, parsed.data.email, 'booking', null)
   if (!phoneCode.sent && !emailCode.ok) {

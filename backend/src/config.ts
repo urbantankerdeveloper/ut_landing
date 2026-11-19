@@ -34,7 +34,24 @@ const schema = z.object({
   TWILIO_AUTH_TOKEN: optionalSecret,
   TWILIO_FROM_NUMBER: optionalSecret,
   SMS_PROVIDER: z.enum(['msg91', 'twilio']).default('msg91'),
+  // Combirds WABA campaign API. Campaign names must match active API campaigns in the Combirds dashboard.
+  COMBIRDS_WABA_API_KEY: optionalSecret,
+  COMBIRDS_WABA_CAMPAIGN_NAME: optionalSecret,
+  COMBIRDS_WABA_SOURCE: z.string().default('urban-tanker-backend'),
+  COMBIRDS_WABA_ENDPOINT: z.url().default('https://backend.api-wa.co/campaign/combirds/api/v2'),
+  COMBIRDS_WABA_BUTTONS_JSON: z.string().default('[]'),
 
+  // Optional Combirds button parameters, e.g. [{"type":"button","sub_type":"url","index":0,"parameters":[{"type":"text","text":"{{otp}}"}]}].
+  COMBIRDS_CAMPAIGN_USER_NAME: optionalSecret,
+  COMBIRDS_CAMPAIGN_USER_REGISTRATION_OTP: optionalSecret,
+  COMBIRDS_CAMPAIGN_BOOKING_VERIFICATION_OTP: optionalSecret,
+  COMBIRDS_CAMPAIGN_GUEST_BOOKING_CONFIRMATION: optionalSecret,
+  COMBIRDS_CAMPAIGN_VENDOR_ACCEPTANCE: optionalSecret,
+  COMBIRDS_CAMPAIGN_DELIVERY_CONFIRMATION: optionalSecret,
+  COMBIRDS_CAMPAIGN_DELIVERY_OTP: optionalSecret,
+  COMBIRDS_CAMPAIGN_COD_SWITCHED_TO_ONLINE: optionalSecret,
+  COMBIRDS_CAMPAIGN_COD_REVERTED_TO_CASH: optionalSecret,
+  
   MSG91_AUTH_KEY: optionalSecret,
   MSG91_TEMPLATE_ID_USER_REGISTRATION_OTP: optionalSecret,
   MSG91_TEMPLATE_ID_BOOKING_VERIFICATION_OTP: optionalSecret,

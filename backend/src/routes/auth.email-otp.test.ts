@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   signInWithPassword: vi.fn(),
   isEmailConfigured: vi.fn(() => true),
   sendEmail: vi.fn(),
-  sendTemplateSms: vi.fn(),
+  sendTemplateWhatsApp: vi.fn(),
   authUser: {
     id: 'user-1',
     email: 'guest@example.com',
@@ -66,7 +66,7 @@ vi.mock('../services/providers.js', () => ({
   isEmailConfigured: () => mocks.isEmailConfigured(),
   sendEmail: (...args: unknown[]) => mocks.sendEmail(...args),
 }))
-vi.mock('../services/sms.js', () => ({ sendTemplateSms: (...args: unknown[]) => mocks.sendTemplateSms(...args) }))
+vi.mock('../services/whatsapp.js', () => ({ sendTemplateWhatsApp: (...args: unknown[]) => mocks.sendTemplateWhatsApp(...args) }))
 
 import authRouter from './auth.js'
 import { hashOtp } from '../services/otp.js'
@@ -111,8 +111,8 @@ beforeEach(() => {
   mocks.isEmailConfigured.mockReturnValue(true)
   mocks.sendEmail.mockReset()
   mocks.sendEmail.mockResolvedValue({ queued: true })
-  mocks.sendTemplateSms.mockReset()
-  mocks.sendTemplateSms.mockResolvedValue({ queued: false, reason: 'SMS is not configured' })
+  mocks.sendTemplateWhatsApp.mockReset()
+  mocks.sendTemplateWhatsApp.mockResolvedValue({ queued: false, reason: 'Combirds WhatsApp is not configured' })
   mocks.authUser.id = 'user-1'
   mocks.authUser.email = 'guest@example.com'
   mocks.authUser.email_confirmed_at = '2026-01-01T00:00:00.000Z'
@@ -127,16 +127,16 @@ describe('POST /signup', () => {
     expect(response.body).toMatchObject({ requiresEmailVerification: true, emailSent: true, phoneOtpSent: false, phoneChallengeId: null, challengeId: EMAIL_CHALLENGE })
     expect(mocks.createUser).toHaveBeenCalledWith(expect.objectContaining({ email: 'new@example.com', email_confirm: false }))
     expect(mocks.sendEmail).toHaveBeenCalledWith('new@example.com', expect.any(String), expect.stringContaining('verification code'))
-    expect(mocks.sendTemplateSms).toHaveBeenCalledWith('user_registration_otp', expect.any(String), expect.any(Object))
+    expect(mocks.sendTemplateWhatsApp).toHaveBeenCalledWith('user_registration_otp', expect.any(String), expect.any(Object))
     expect(mocks.deleteUser).not.toHaveBeenCalled()
   })
 
   it('also returns a phone challenge when SMS is delivered', async () => {
-    mocks.sendTemplateSms.mockResolvedValue({ queued: true, provider: 'msg91', requestId: 'req-1' })
+    mocks.sendTemplateWhatsApp.mockResolvedValue({ queued: true, provider: 'combirds-whatsapp', requestId: 'req-1' })
     const response = await request(buildApp()).post('/signup').send(body)
     expect(response.status).toBe(201)
     expect(response.body).toMatchObject({ phoneOtpSent: true, phoneChallengeId: CHALLENGE })
-    expect(mocks.sendTemplateSms).toHaveBeenCalledWith(
+    expect(mocks.sendTemplateWhatsApp).toHaveBeenCalledWith(
       'user_registration_otp',
       '+919876543210',
       expect.any(Object),
@@ -144,7 +144,7 @@ describe('POST /signup', () => {
   })
 
   it('still creates the account when the SMS provider throws', async () => {
-    mocks.sendTemplateSms.mockRejectedValue(new Error('gateway down'))
+    mocks.sendTemplateWhatsApp.mockRejectedValue(new Error('gateway down'))
     const response = await request(buildApp()).post('/signup').send(body)
     expect(response.status).toBe(201)
     expect(response.body.phoneOtpSent).toBe(false)
@@ -153,11 +153,11 @@ describe('POST /signup', () => {
 
 describe('partner phone OTP', () => {
   it('issues a public registration OTP challenge for the partner phone', async () => {
-    mocks.sendTemplateSms.mockResolvedValue({ queued: true, provider: 'msg91', requestId: 'req-1' })
+    mocks.sendTemplateWhatsApp.mockResolvedValue({ queued: true, provider: 'combirds-whatsapp', requestId: 'req-1' })
     const response = await request(buildApp()).post('/partner/request-otp').send({ phone: PHONE })
     expect(response.status).toBe(202)
     expect(response.body).toMatchObject({ challengeId: CHALLENGE, expiresInSeconds: 600 })
-    expect(mocks.sendTemplateSms).toHaveBeenCalledWith(
+    expect(mocks.sendTemplateWhatsApp).toHaveBeenCalledWith(
       'user_registration_otp',
       '+919876543210',
       expect.any(Object),
@@ -360,10 +360,18 @@ describe('POST /email/verify-otp signup phone verification', () => {
 })
 
 describe('POST /guest/request-otp', () => {
-  it('keeps the phone-only behaviour: 503 when SMS is off and no email is given', async () => {
+  it('creates a guest challenge and queues the OTP through Combirds WhatsApp', async () => {
+    mocks.sendTemplateWhatsApp.mockResolvedValue({ queued: true, provider: 'combirds-whatsapp', requestId: 'guest-otp-1' })
+    const response = await request(buildApp()).post('/guest/request-otp').send({ phone: PHONE })
+    expect(response.status).toBe(202)
+    expect(response.body).toMatchObject({ challengeId: CHALLENGE, expiresInSeconds: 600 })
+    expect(mocks.sendTemplateWhatsApp).toHaveBeenCalledWith('booking_verification_otp', '+919876543210', expect.objectContaining({ otp: expect.any(String) }))
+  })
+
+  it('keeps the phone-only behaviour: 503 when WhatsApp is not configured and no email is given', async () => {
     const response = await request(buildApp()).post('/guest/request-otp').send({ phone: PHONE })
     expect(response.status).toBe(503)
-    expect(response.body.error).toBe('Mobile verification is not configured yet.')
+    expect(response.body.error).toBe('WhatsApp OTP is not configured correctly.')
     expect(mocks.sendEmail).not.toHaveBeenCalled()
   })
 
@@ -375,7 +383,7 @@ describe('POST /guest/request-otp', () => {
   })
 
   it('returns both challenges when SMS and email both go out', async () => {
-    mocks.sendTemplateSms.mockResolvedValue({ queued: true, provider: 'msg91', requestId: 'req-2' })
+    mocks.sendTemplateWhatsApp.mockResolvedValue({ queued: true, provider: 'combirds-whatsapp', requestId: 'req-2' })
     const response = await request(buildApp()).post('/guest/request-otp').send({ phone: PHONE, email: 'guest@example.com' })
     expect(response.status).toBe(202)
     expect(response.body).toMatchObject({ challengeId: CHALLENGE, phoneOtpSent: true, emailChallengeId: EMAIL_CHALLENGE, emailOtpSent: true })
