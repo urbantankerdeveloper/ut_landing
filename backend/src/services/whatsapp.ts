@@ -187,10 +187,10 @@ function resolveCampaignName(key: SmsTemplateKey) {
   console.log('Resolving Combirds campaign name for template key:', key)
   const campaignNames: Record<SmsTemplateKey, string | undefined> = {
     user_registration_otp:
-      config.COMBIRDS_CAMPAIGN_USER_REGISTRATION_OTP,
+      config.COMBIRDS_WABA_CAMPAIGN_NAME,
 
     booking_verification_otp:
-      config.COMBIRDS_CAMPAIGN_BOOKING_VERIFICATION_OTP,
+      config.COMBIRDS_WABA_CAMPAIGN_NAME,
 
     guest_booking_confirmation:
       config.COMBIRDS_CAMPAIGN_GUEST_BOOKING_CONFIRMATION,
