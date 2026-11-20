@@ -9,6 +9,7 @@ export { ApiError }
 // silent: true skips the toast for calls whose failure the screen handles itself (for example, a session check).
 // successMessage overrides the default saved text for a write that succeeds.
 export type ApiRequestInit = RequestInit & { silent?: boolean; successMessage?: string }
+type PhoneVerificationHandler = () => Promise<boolean>
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api'
 const REQUEST_TIMEOUT_MS = 12_000
@@ -18,6 +19,14 @@ const RETRY_BASE_DELAY_MS = 800
 // A request still pending after this long shows the "waking up the server" notice.
 const SLOW_REQUEST_MS = 3_000
 let refreshInFlight: Promise<string | null> | null = null
+let phoneVerificationHandler: PhoneVerificationHandler | null = null
+
+export function registerPhoneVerificationHandler(handler: PhoneVerificationHandler) {
+  phoneVerificationHandler = handler
+  return () => {
+    if (phoneVerificationHandler === handler) phoneVerificationHandler = null
+  }
+}
 
 function authHeaders() {
   const token = useAuthStore.getState().accessToken
@@ -88,7 +97,15 @@ export async function apiFetch<T>(path: string, init: ApiRequestInit = {}, retry
   const method = (requestInit.method ?? 'GET').toUpperCase()
   const write = method !== 'GET' ? resolveWriteMessage(method, path) : undefined
   try {
-    const result = await requestWithRetries<T>(path, requestInit, retry)
+    let result: T
+    try {
+      result = await requestWithRetries<T>(path, requestInit, retry)
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.code !== 'PHONE_NOT_VERIFIED' || path.startsWith('/auth/') || !phoneVerificationHandler) throw error
+      const verified = await phoneVerificationHandler()
+      if (!verified) throw error
+      result = await requestWithRetries<T>(path, requestInit, retry)
+    }
     // Successful writes confirm to the user for every role. Reads stay quiet.
     if (write && !write.silent && !silent) notifySuccess(successMessage ?? write.message)
     return result
@@ -141,16 +158,31 @@ async function apiFetchOnce<T>(path: string, init: RequestInit, retry: boolean):
     if (!response.ok) {
       let message = `Request failed: ${response.status}`
       let serverMessage: string | undefined
+      let code: string | undefined
+      let retryAfterSeconds: number | undefined
       try {
-        const body = await response.json() as { error?: unknown }
+        const body = await response.json() as { error?: unknown; code?: unknown; retryAfter?: unknown; retryAfterSeconds?: unknown }
         if (typeof body.error === 'string' && body.error.trim()) {
           message = body.error
           serverMessage = body.error
         }
+        if (typeof body.code === 'string') code = body.code
+        const bodyRetryAfter = body.retryAfterSeconds ?? body.retryAfter
+        if (typeof bodyRetryAfter === 'number' && Number.isFinite(bodyRetryAfter)) retryAfterSeconds = bodyRetryAfter
+        else if (typeof bodyRetryAfter === 'string' && /^\d+$/.test(bodyRetryAfter)) retryAfterSeconds = Number(bodyRetryAfter)
       } catch {
         // Keep the HTTP status message when the server did not return JSON.
       }
-      throw new ApiError(message, response.status, serverMessage)
+      const retryAfterHeader = response.headers.get('Retry-After')
+      if (retryAfterSeconds === undefined && retryAfterHeader) {
+        const seconds = Number(retryAfterHeader)
+        if (Number.isFinite(seconds)) retryAfterSeconds = Math.max(0, seconds)
+        else {
+          const date = Date.parse(retryAfterHeader)
+          if (Number.isFinite(date)) retryAfterSeconds = Math.max(0, Math.ceil((date - Date.now()) / 1000))
+        }
+      }
+      throw new ApiError(message, response.status, serverMessage, code, retryAfterSeconds)
     }
     if (response.status === 204) return undefined as T
     return response.json() as Promise<T>

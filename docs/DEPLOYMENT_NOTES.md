@@ -1,6 +1,6 @@
 # Deployment notes
 
-**Updated:** 2026-11-18  
+**Updated:** 2026-11-20
 **Status:** Discovery only; no deployment or external configuration changed.
 
 ## Existing topology
@@ -10,11 +10,11 @@
 - **Mobile:** `urban_tanker_app` builds native Android/iOS applications and uses `API_BASE_URL`/`SOCKET_URL` build configuration. Release signing credentials must remain outside source control. iOS release work requires macOS/Xcode.
 - **Database:** Supabase Auth, Postgres and private document storage. `backend/supabase/001_initial.sql` is destructive and must only be used for fresh/disposable installs.
 - **Web export dependencies:** Excel workbooks use a lazily loaded ExcelJS bundle; the web build requires development dependencies (including Vite and Sass). The ExcelJS UUID dependency is pinned to a patched compatible release.
-- **Incremental schema:** `backend/supabase/002_service_enquiries.sql` adds structured service enquiry fields/history; `003_partner_vehicle_details.sql` adds per-vehicle partner application data; `004_service_pricing_history.sql` adds administrator attribution and append-only price/config history. No migration runner is exposed in the repository; have an authorized operator review and apply the migrations in order to a disposable database first, then the target database before deploying dependent API code.
+- **Incremental schema:** `backend/supabase/002_service_enquiries.sql` adds structured service enquiry fields/history; `003_partner_vehicle_details.sql` adds per-vehicle partner application data; `004_service_pricing_history.sql` adds administrator attribution and append-only price/config history; `006_phone_verification_hardening.sql` adds persistent account phone-verification lockouts. No migration runner is exposed in the repository; have an authorized operator review and apply the migrations in order to a disposable database first, then the target database before deploying dependent API code.
 
 ## Configuration and operational dependencies
 
-Hosting/provider environments (not source files) supply Supabase URL/service key/database URL/CA, frontend CORS origins, Razorpay keys/secrets, SMS provider/templates, SMTP, push/OneSignal, OTP HMAC secret, optional Redis, Maps keys, and platform signing. See `.env.example`, `backend/.env.example`, `render.yaml`, and `hostinger_deploy.md` for current repository configuration details. Never copy real values into this document or a tracked file.
+Hosting/provider environments (not source files) supply Supabase URL/service key/database URL/CA, frontend CORS origins, Razorpay keys/secrets, SMS provider/templates, SMTP, push/OneSignal, OTP HMAC secret, optional Redis, Maps keys, and platform signing. `PHONE_VERIFY_REQUIRED_AFTER` is an optional ISO-8601 account phone verification deadline; leave it unset to keep account verification optional. See `.env.example`, `backend/.env.example`, `render.yaml`, and `hostinger_deploy.md` for current repository configuration details. Never copy real values into this document or a tracked file.
 
 ## Safe release sequence
 

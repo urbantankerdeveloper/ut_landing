@@ -7,6 +7,8 @@ import { limiterStore } from '../services/scaling.js'
 import { config } from '../config.js'
 import { toE164IndianMobile } from '../lib/phone.js'
 import { logger } from '../lib/logger.js'
+import { optionalAuth } from '../middleware/auth.js'
+import { isPhoneVerificationRequired, isPhoneVerified } from '../services/phoneVerification.js'
 
 const router = Router()
 const partnerApplicationLimit = rateLimit({ windowMs: 60 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:partner:', 'open'), passOnStoreError: true, message: { error: 'Too many partner applications from this address. Try again later.' } })
@@ -75,6 +77,11 @@ const applicationSchema = z.object({
   })
 })
 
+function phoneVerificationAuth(request: Parameters<typeof optionalAuth>[0], response: Parameters<typeof optionalAuth>[1], next: Parameters<typeof optionalAuth>[2]) {
+  if (!isPhoneVerificationRequired()) return next()
+  return optionalAuth(request, response, next)
+}
+
 function reference() { return `PA-${crypto.randomUUID().slice(0, 8).toUpperCase()}` }
 async function hasRecentVerifiedPhoneChallenge(response: Response, challengeId: string | undefined, phone: string): Promise<boolean | null> {
   const phoneE164 = toE164IndianMobile(phone)
@@ -84,6 +91,7 @@ async function hasRecentVerifiedPhoneChallenge(response: Response, challengeId: 
     .select('id')
     .eq('id', challengeId)
     .eq('phone_e164', phoneE164)
+    .is('user_id', null)
     .not('verified_at', 'is', null)
     .gt('expires_at', new Date().toISOString())
     .maybeSingle()
@@ -141,7 +149,24 @@ router.post('/documents/signed-url', partnerDocumentUploadLimit, async (request,
   response.json({ path, token: signed.token, signedUrl: signed.signedUrl, contentType: parsed.data.contentType, maxBytes: maxPartnerDocumentBytes })
 })
 
-router.post('/applications', partnerApplicationLimit, async (request, response) => {
+router.post('/applications', partnerApplicationLimit, phoneVerificationAuth, async (request, response) => {
+  if (request.authUser && isPhoneVerificationRequired()) {
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('phone_verified,phone_verified_at')
+      .eq('id', request.authUser.id)
+      .maybeSingle()
+    if (profileError) {
+      logger.error('partner.application_phone_verification_lookup_failed', { requestId: response.locals.requestId, error: profileError.message })
+      return response.status(500).json({ error: 'Account phone verification could not be checked. Please try again.' })
+    }
+    if (!profile || !isPhoneVerified(profile)) {
+      return response.status(403).json({
+        code: 'PHONE_NOT_VERIFIED',
+        error: 'Verify your account phone number before submitting a partner application.',
+      })
+    }
+  }
   const parsed = applicationSchema.safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Complete the required partner application fields.', details: parsed.error.flatten() })
   const input = parsed.data

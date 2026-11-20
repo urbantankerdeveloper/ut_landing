@@ -74,6 +74,19 @@ export async function requireAuth(request: Request, response: Response, next: Ne
   return next()
 }
 
+export async function optionalAuth(request: Request, response: Response, next: NextFunction) {
+  const token = request.headers.authorization?.replace(/^Bearer\s+/i, '')
+  if (!token) return next()
+
+  const { data, error } = await supabase.auth.getUser(token)
+  if (error || !data.user) return response.status(401).json({ error: 'Invalid session' })
+
+  const { data: profile } = await supabase.from('profiles').select('id,role,full_name').eq('id', data.user.id).single()
+  request.authUser = data.user
+  request.profile = profile ?? undefined
+  return next()
+}
+
 export function requireRole(...roles: string[]) {
   return (request: Request, response: Response, next: NextFunction) => {
     if (!request.profile || !roles.includes(request.profile.role)) return response.status(403).json({ error: 'Insufficient permissions' })

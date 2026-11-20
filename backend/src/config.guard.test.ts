@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 
-const base = { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k', SUPABASE_DB_URL: '', OTP_HMAC_SECRET: 'x'.repeat(32), CORS_ORIGINS: '', REQUIRE_BOOKING_PHONE_VERIFICATION: '', TEST_PRICING_ENABLED: 'false' }
+const base = { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k', SUPABASE_DB_URL: '', OTP_HMAC_SECRET: 'x'.repeat(32), CORS_ORIGINS: '', REQUIRE_BOOKING_PHONE_VERIFICATION: '', PHONE_VERIFY_REQUIRED_AFTER: '', PHONE_VERIFY_DIALOG_ENABLED: 'false', TEST_PRICING_ENABLED: 'false' }
 
 describe('production configuration guards', () => {
   const original = { ...process.env }
@@ -32,6 +32,16 @@ describe('production configuration guards', () => {
     process.env.REQUIRE_BOOKING_PHONE_VERIFICATION = 'false'
     const disabledConfig = await import('./config.js')
     expect(disabledConfig.config.REQUIRE_BOOKING_PHONE_VERIFICATION).toBe(false)
+  })
+
+  it('accepts an ISO-8601 phone verification deadline and rejects malformed values', async () => {
+    process.env = { ...original, ...base, NODE_ENV: 'test', PHONE_VERIFY_REQUIRED_AFTER: '2026-12-01T00:00:00Z' }
+    const configured = await import('./config.js')
+    expect(configured.config.PHONE_VERIFY_REQUIRED_AFTER).toBe('2026-12-01T00:00:00Z')
+
+    vi.resetModules()
+    process.env.PHONE_VERIFY_REQUIRED_AFTER = 'next month'
+    await expect(import('./config.js')).rejects.toThrow('Invalid backend configuration')
   })
 
   it('reads the comma-separated CORS origin list', async () => {

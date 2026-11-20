@@ -2,7 +2,7 @@ import { apiFetch } from './client'
 import { feedbackContent } from '../content/feedback'
 import type { WorkspaceRole } from '../stores/navigationStore'
 
-export type AuthUser = { id?: string; username: string; email?: string; name: string; role: WorkspaceRole; phone?: string; phoneVerified?: boolean; themeMode?: string; selfieRequired?: boolean }
+export type AuthUser = { id?: string; username: string; email?: string; name: string; role: WorkspaceRole; phone?: string; phoneVerified?: boolean; phoneVerificationRequired?: boolean; themeMode?: string; selfieRequired?: boolean }
 export type AuthResponse = { accessToken?: string; token?: string; user: AuthUser }
 export type PhoneVerifyChallenge = { challengeId: string; channel: 'whatsapp' | 'sms'; expiresInSeconds: number; resendAfterSeconds: number }
 export type PhoneVerifyResult = { verified: true; phone: string; phoneVerified: true; challengeId: string }

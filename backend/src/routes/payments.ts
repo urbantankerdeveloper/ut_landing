@@ -14,6 +14,7 @@ import { failure } from '../lib/httpErrors.js'
 import { settleBookingCheckout, type CheckoutRow } from './customer.js'
 import { config } from '../config.js'
 import { createInvoiceIfEligible, syncInvoicePaymentStatus } from '../services/invoices.js'
+import { isPhoneVerificationRequired, isPhoneVerified } from '../services/phoneVerification.js'
 const router = Router()
 const razorpay = () => ({ key: process.env.RAZORPAY_KEY_ID, secret: process.env.RAZORPAY_KEY_SECRET })
 type RazorpayKeys = { key?: string; secret?: string }
@@ -76,6 +77,20 @@ async function checkoutPaymentOrder(response: Response, customerId: string, chec
   response.status(201).json({ id: orderId, amount: amountPaise, currency: 'INR', keyId: keys.key })
 }
 router.post('/razorpay/order', requireAuth, async (request, response) => {
+  if (isPhoneVerificationRequired()) {
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select('phone_verified,phone_verified_at')
+      .eq('id', request.authUser!.id)
+      .maybeSingle()
+    if (error) return databaseFailure(response, 'payments.phone_verification_failed', error, 500)
+    if (!profile || !isPhoneVerified(profile)) {
+      return response.status(403).json({
+        code: 'PHONE_NOT_VERIFIED',
+        error: 'Verify your account phone number before creating a payment order.',
+      })
+    }
+  }
   const parsed = z.object({ amount: z.number().positive().optional(), bookingId: z.string().uuid().optional(), checkoutId: z.string().uuid().optional() })
     .refine((body) => Number(Boolean(body.bookingId)) + Number(Boolean(body.checkoutId)) === 1, { error: 'Provide exactly one of bookingId or checkoutId' })
     .safeParse(request.body)

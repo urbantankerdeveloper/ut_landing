@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react'
 import { MessageCircle, MessageSquare } from 'lucide-react'
 import { authApi, type PhoneVerifyResult } from '../api/auth'
+import { ApiError } from '../api/errors'
+import { canSkipPhoneVerification, pastedOtpDigits, phoneOtpDeliveryCopy } from '../utils/phoneVerification'
 import { Modal } from './Modal'
 
 type Props = {
@@ -21,6 +23,8 @@ export function PhoneVerifyDialog({ initialPhone = '', allowSkip, onClose, onVer
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [resendRemaining, setResendRemaining] = useState(0)
+  const [lockoutRemaining, setLockoutRemaining] = useState(0)
+  const [lockoutMessage, setLockoutMessage] = useState<string | null>(null)
   const digitRefs = useRef<Array<HTMLInputElement | null>>([])
   const closeTimer = useRef<number | null>(null)
 
@@ -31,6 +35,12 @@ export function PhoneVerifyDialog({ initialPhone = '', allowSkip, onClose, onVer
   }, [resendRemaining, step])
 
   useEffect(() => {
+    if (lockoutRemaining <= 0) return
+    const timer = window.setTimeout(() => setLockoutRemaining((remaining) => remaining - 1), 1000)
+    return () => window.clearTimeout(timer)
+  }, [lockoutRemaining])
+
+  useEffect(() => {
     if (step === 'code') digitRefs.current[0]?.focus()
   }, [step])
 
@@ -38,7 +48,20 @@ export function PhoneVerifyDialog({ initialPhone = '', allowSkip, onClose, onVer
     if (closeTimer.current !== null) window.clearTimeout(closeTimer.current)
   }, [])
 
+  function showRequestError(requestError: unknown, fallback: string) {
+    if (requestError instanceof ApiError && ([423, 429].includes(requestError.status) || requestError.retryAfterSeconds !== undefined)) {
+      const seconds = Math.max(1, Math.ceil(requestError.retryAfterSeconds ?? (requestError.status === 423 ? 60 : 30)))
+      setLockoutRemaining(seconds)
+      setLockoutMessage(requestError.serverMessage
+        ?? (requestError.status === 423 ? 'Phone verification is temporarily locked.' : 'Too many attempts. Please wait before trying again.'))
+      setError(null)
+      return
+    }
+    setError(requestError instanceof Error ? requestError.message : fallback)
+  }
+
   async function sendCode() {
+    if (lockoutRemaining > 0) return
     if (!/^\d{10}$/.test(phone)) {
       setError('Enter a valid 10-digit mobile number.')
       return
@@ -51,16 +74,18 @@ export function PhoneVerifyDialog({ initialPhone = '', allowSkip, onClose, onVer
       setChannel(challenge.channel)
       setOtp(emptyOtp())
       setStep('code')
-      setResendRemaining(Math.max(1, challenge.resendAfterSeconds))
+      setResendRemaining(Math.max(30, challenge.resendAfterSeconds || 30))
+      setLockoutRemaining(0)
+      setLockoutMessage(null)
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'The code could not be sent.')
+      showRequestError(requestError, 'The code could not be sent.')
     } finally {
       setBusy(false)
     }
   }
 
   function pasteCode(event: ClipboardEvent<HTMLInputElement>) {
-    const pasted = event.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6)
+    const pasted = pastedOtpDigits(event.clipboardData.getData('text'))
     if (!pasted) return
     event.preventDefault()
     setOtp([...pasted, ...Array.from({ length: 6 - pasted.length }, () => '')])
@@ -89,6 +114,7 @@ export function PhoneVerifyDialog({ initialPhone = '', allowSkip, onClose, onVer
   }
 
   async function verifyCode() {
+    if (lockoutRemaining > 0) return
     if (!challengeId || otp.join('').length !== 6) {
       setError('Enter the 6-digit code.')
       return
@@ -101,7 +127,7 @@ export function PhoneVerifyDialog({ initialPhone = '', allowSkip, onClose, onVer
       setStep('success')
       closeTimer.current = window.setTimeout(onClose, 650)
     } catch (verifyError) {
-      setError(verifyError instanceof Error ? verifyError.message : 'The code could not be verified.')
+      showRequestError(verifyError, 'The code could not be verified.')
     } finally {
       setBusy(false)
     }
@@ -115,7 +141,8 @@ export function PhoneVerifyDialog({ initialPhone = '', allowSkip, onClose, onVer
     setError(null)
   }
 
-  const canClose = allowSkip || step === 'success'
+  const canSkip = canSkipPhoneVerification(allowSkip)
+  const canClose = canSkip || step === 'success'
   return <Modal
     title="Verify your phone number"
     onClose={canClose ? onClose : () => undefined}
@@ -141,7 +168,7 @@ export function PhoneVerifyDialog({ initialPhone = '', allowSkip, onClose, onVer
           />
         </div>
         <p id="phone-verify-help" className="phone-verify-help">Enter your 10-digit Indian mobile number.</p>
-        <button className="button button-primary phone-verify-action" type="button" onClick={() => void sendCode()} disabled={busy || phone.length !== 10}>
+        <button className="button button-primary phone-verify-action" type="button" onClick={() => void sendCode()} disabled={busy || lockoutRemaining > 0 || phone.length !== 10}>
           {busy ? 'Sending…' : 'Send code'}
         </button>
       </>}
@@ -149,7 +176,7 @@ export function PhoneVerifyDialog({ initialPhone = '', allowSkip, onClose, onVer
       {step === 'code' && <>
         <div className={`otp-delivery otp-delivery-${channel}`} role="status">
           {channel === 'whatsapp' ? <MessageCircle size={18} aria-hidden="true" /> : <MessageSquare size={18} aria-hidden="true" />}
-          <span>We sent a code via {channel === 'whatsapp' ? 'WhatsApp' : 'SMS'} to +91 {phone}.</span>
+          <span>{phoneOtpDeliveryCopy(channel, phone)}</span>
         </div>
         <p className="phone-verify-help">The code expires in 5 minutes.</p>
         <label className="phone-verify-label" id="phone-verify-code-label">6-digit code</label>
@@ -167,20 +194,21 @@ export function PhoneVerifyDialog({ initialPhone = '', allowSkip, onClose, onVer
             onPaste={pasteCode}
           />)}
         </div>
-        <button className="button button-primary phone-verify-action" type="button" onClick={() => void verifyCode()} disabled={busy || otp.join('').length !== 6}>
+        <button className="button button-primary phone-verify-action" type="button" onClick={() => void verifyCode()} disabled={busy || lockoutRemaining > 0 || otp.join('').length !== 6}>
           {busy ? 'Verifying…' : 'Verify'}
         </button>
         <div className="phone-verify-links">
           <button type="button" onClick={changeNumber} disabled={busy}>Change number</button>
           {resendRemaining > 0
             ? <span>Resend in {resendRemaining}s</span>
-            : <button type="button" onClick={() => void sendCode()} disabled={busy}>Resend code</button>}
+            : <button type="button" onClick={() => void sendCode()} disabled={busy || lockoutRemaining > 0}>Resend code</button>}
         </div>
       </>}
 
       {step === 'success' && <p className="phone-verify-success" role="status">Phone number verified successfully.</p>}
       {error && <p className="phone-verify-error" role="alert">{error}</p>}
-      {allowSkip && step !== 'success' && <button className="phone-verify-skip" type="button" onClick={onClose}>Skip for now</button>}
+      {lockoutRemaining > 0 && <p className="phone-verify-error" role="status">{lockoutMessage} Try again in {lockoutRemaining} seconds.</p>}
+      {canSkip && step !== 'success' && <button className="phone-verify-skip" type="button" onClick={onClose}>Skip for now</button>}
     </div>
   </Modal>
 }

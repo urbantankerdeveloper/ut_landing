@@ -397,6 +397,7 @@ export default function BookingScreen() {
   const [otpPendingPhone, setOtpPendingPhone] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const bookingSubmitInProgress = useRef(false)
   const [bookingId, setBookingId] = useState<string | null>(draft.bookingId ?? null)
   const [bookingReference, setBookingReference] = useState<string | null>(null)
   const [quotedTotal, setQuotedTotal] = useState<number | null>(draft.quotedTotal ?? null)
@@ -652,12 +653,7 @@ export default function BookingScreen() {
   }
   function isPhoneVerified(phoneValue: string) {
     const normalized = phoneValue.replace(/\D/g, '').slice(-10)
-    const guestPhone = user?.username.startsWith('guest_') ? user.username.slice('guest_'.length).replace(/\D/g, '').slice(-10) : ''
-    const savedVerifiedPhone = phoneVerificationQuery.data?.verified ? phoneVerificationQuery.data.phone.replace(/\D/g, '').slice(-10) : ''
-    const savedChallenge = phoneVerificationQuery.data?.challengeId
-    const profilePhone = user?.phone?.replace(/\D/g, '').slice(-10)
-    const profileChallenge = user?.phoneVerified === true && profilePhone === normalized && Boolean(savedChallenge)
-    return Boolean(normalized && (phoneChallenges[normalized] !== undefined || guestPhone === normalized || savedVerifiedPhone === normalized || profileChallenge))
+    return Boolean(normalized && phoneChallenges[normalized])
   }
   function review(values: BookingFormValues) {
     const today = currentDateInputValue()
@@ -682,7 +678,7 @@ export default function BookingScreen() {
       setError(c.errors.correctServiceDetails)
       return
     }
-    if (isRegisteredCustomer && phoneVerifyDialogEnabled && (user?.phoneVerified !== true || !isPhoneVerified(normalizedPhone))) {
+    if (isRegisteredCustomer && phoneVerifyDialogEnabled && user?.phoneVerificationRequired === true && user.phoneVerified !== true) {
       setError(null)
       setPhoneVerifyDialogOpen(true)
       return
@@ -798,6 +794,7 @@ export default function BookingScreen() {
   }
 
   async function confirmBooking() {
+    if (bookingSubmitInProgress.current) return
     setIsSubmitting(true)
     setError(null)
     setPaymentFailure(null)
@@ -811,6 +808,7 @@ export default function BookingScreen() {
       setIsSubmitting(false)
       return
     }
+    bookingSubmitInProgress.current = true
     try {
       const primaryService = serviceItems[0]
       if (!primaryService) throw new Error(c.errors.selectServiceBeforeConfirm)
@@ -837,9 +835,7 @@ export default function BookingScreen() {
           notes: details.notes,
           couponCode,
           phone: normalizedPhone,
-          phoneVerificationChallengeId: phoneChallenges[normalizedPhone]
-            ?? phoneVerificationQuery.data?.challengeId
-            ?? undefined,
+          phoneVerificationChallengeId: phoneChallenges[normalizedPhone],
           latitude: sharedCoordinates?.lat,
           longitude: sharedCoordinates?.lng,
           paymentMethod,
@@ -870,7 +866,10 @@ export default function BookingScreen() {
     } catch (paymentError) {
       if (paymentError instanceof CheckoutError) setPaymentFailure(paymentError)
       else setError(paymentError instanceof Error ? paymentError.message : c.errors.bookingFailed)
-    } finally { setIsSubmitting(false) }
+    } finally {
+      bookingSubmitInProgress.current = false
+      setIsSubmitting(false)
+    }
   }
 
   // Only cancelled or failed checkouts can fall back to COD. A verification failure may already be paid, so it must not.
@@ -1063,11 +1062,10 @@ export default function BookingScreen() {
     {locationModalOpen && <Suspense fallback={<div className="surface booking-map-loading" role="status">{c.location.loadingMap}</div>}><LocationPickerModal value={sharedCoordinates} addressGeocodingEnabled={featureFlags.data?.address_geocoding_enabled === true} onChange={(point, address) => updateMapLocation('shared', point, address)} onClose={() => setLocationModalOpen(false)} /></Suspense>}
     {phoneVerifyDialogEnabled && phoneVerifyDialogOpen && <PhoneVerifyDialog
       initialPhone={phone || user?.phone}
-      allowSkip={false}
+      allowSkip={user?.phoneVerificationRequired === false}
       onClose={() => setPhoneVerifyDialogOpen(false)}
       onVerified={async (result) => {
         setValue('phone', result.phone, { shouldDirty: true, shouldValidate: true })
-        setPhoneChallenges((current) => ({ ...current, [result.phone]: result.challengeId }))
         const current = useAuthStore.getState().user
         if (current) setAuthUser({ ...current, phone: result.phone, phoneVerified: true })
         setError(null)
