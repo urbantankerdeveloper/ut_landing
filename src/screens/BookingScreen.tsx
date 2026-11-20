@@ -919,7 +919,15 @@ export default function BookingScreen() {
         } catch (paymentError) {
           // Closing Razorpay without paying removes the booking, so the customer starts clean on the next attempt.
           if (paymentError instanceof CheckoutError && paymentError.kind === 'cancelled') {
-            await customerApi.cancelOnlinePayment(currentPaymentBookingId, couponCode || undefined)
+            if (multiServiceUiEnabled) {
+              if (!currentBookingId) {
+                setError(c.errors.paymentCancelled)
+                return
+              }
+              await customerApi.cancelUnpaidMultiServiceOrder(currentBookingId, couponCode || undefined)
+            } else {
+              await customerApi.cancelOnlinePayment(currentPaymentBookingId, couponCode || undefined)
+            }
             setBookingId(null)
             setPaymentBookingId(null)
             setError(c.errors.paymentCancelled)

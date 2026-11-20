@@ -5,7 +5,7 @@ export type CustomerOrderItem = { id: string; serviceId: string; serviceName: st
 export type CustomerOrderFulfilment = { id: string; status: string; itemIds: string[]; amountPaise: number; location?: string; scheduledAt?: string; vendorName?: string }
 export type MultiServiceOrderItemInput = { couponCode?: string; serviceId: string; quantity: number; quantityUnit?: string; location: string; deliveryDate: string; slot?: string; latitude?: number; longitude?: number; capacity?: string; waterType?: string; serviceType?: string; details?: Record<string, unknown> }
 export type MultiServiceOrderResult = { id: string; order_group_reference?: string; reference?: string; legacyBookingId: string; total_paise?: number; quote?: { subtotalPaise: number; gstPaise: number; bundleDiscountPaise: number; deliveryChargesPaise: number; totalPaise: number }; quoted_amount_paise?: number; items: Record<string, unknown>[]; fulfilments: Record<string, unknown>[] }
-export type CustomerBooking = { id: string; reference?: string; orderGroupId?: string; orderGroupReference?: string; orderGroupSize?: number; service: string; services: BookingServiceDetails[]; orderItems?: CustomerOrderItem[]; fulfilments?: CustomerOrderFulfilment[]; location: string; status: string; amount: number; scheduledAt: string; phone?: string; notes?: string; paymentMethod?: BookingPaymentMethod; latitude?: number; longitude?: number }
+export type CustomerBooking = { id: string; orderId?: string; reference?: string; orderGroupId?: string; orderGroupReference?: string; orderGroupSize?: number; service: string; services: BookingServiceDetails[]; orderItems?: CustomerOrderItem[]; fulfilments?: CustomerOrderFulfilment[]; location: string; status: string; amount: number; scheduledAt: string; phone?: string; notes?: string; paymentMethod?: BookingPaymentMethod; latitude?: number; longitude?: number }
 export type CustomerBookingPage = { rows: CustomerBooking[]; nextOffset: number | null }
 export type SavedAddress = { id: string; label: string; address: string; city: string; pincode: string; latitude?: number; longitude?: number }
 export type CustomerSubscription = { id: string; name: string; status: 'active' | 'paused' | 'cancelled'; nextDelivery?: string; amount: number }
@@ -181,6 +181,7 @@ function normalizeBooking(item: Record<string, unknown>): CustomerBooking {
   const totalPaise = item.total_paise ?? item.totalPaise ?? item.quoted_amount_paise
   return {
     id: String(item.id ?? item.reference),
+    orderId: typeof item.order_id === 'string' ? item.order_id : undefined,
     reference: typeof item.reference === 'string' ? item.reference : undefined,
     orderGroupId: typeof item.order_group_id === 'string' ? item.order_group_id : undefined,
     orderGroupReference: typeof item.order_group_reference === 'string' ? item.order_group_reference : undefined,
@@ -242,6 +243,7 @@ export const customerApi = {
   pricingForCustomer: () => apiFetch<{ gstPercentage: number; gstRate: number; gstWaived: boolean; testPricingPerServicePaise?: number | null }>('/customer/pricing/me'),
   createBooking: (payload: CreateBookingPayload) => apiFetch<CreateBookingResult>('/customer/orders/quote', { method: 'POST', body: JSON.stringify(payload) }),
   createMultiServiceOrder: (payload: { couponCode?: string; idempotencyKey: string; paymentMethod: BookingPaymentMethod; phone?: string; phoneVerificationChallengeId?: string; items: MultiServiceOrderItemInput[] }) => apiFetch<MultiServiceOrderResult>('/customer/multi-service-orders', { method: 'POST', body: JSON.stringify(payload) }),
+  cancelUnpaidMultiServiceOrder: (orderId: string, couponCode?: string) => apiFetch<void>(`/customer/multi-service-orders/${orderId}/cancel-online-payment`, { method: 'POST', body: JSON.stringify({ couponCode }) }),
   updateMultiServiceOrderItem: (orderId: string, itemId: string, payload: { location?: string; scheduledFor?: string; slot?: string; latitude?: number; longitude?: number }) => apiFetch<unknown>(`/customer/orders/${orderId}/items/${itemId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   cancelMultiServiceOrderItem: (orderId: string, itemId: string) => apiFetch<unknown>(`/customer/orders/${orderId}/items/${itemId}`, { method: 'DELETE' }),
   requestMultiServiceDeliveryOtp: (orderId: string, fulfilmentId: string) => apiFetch<{ fulfilmentId: string; expiresAt: string; message: string }>(`/customer/orders/${orderId}/fulfilments/${fulfilmentId}/delivery-otp`, { method: 'POST' }),

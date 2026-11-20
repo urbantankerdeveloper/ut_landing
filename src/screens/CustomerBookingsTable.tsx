@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { ArrowRight } from 'lucide-react'
 import { customerDemoDataEnabled } from '../constants/demo'
 import { REPEAT_BOOKING_KEY } from '../constants/bookingDraft'
@@ -54,6 +55,7 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
   const multiServiceOrdersEnabled = isMultiServiceOrdersEnabled(featureFlags.data?.multi_service_orders_enabled)
   const cancellation = useCustomerCancel()
   const deliveryOtp = useCustomerDeliveryOtp()
+  const queryClient = useQueryClient()
   const [filter, setFilter] = useState('all')
   const [sort, setSort] = useState<'recent' | 'status' | 'amount'>('recent')
   const [page, setPage] = useState(1)
@@ -71,6 +73,8 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
   const [cancelError, setCancelError] = useState<string | null>(null)
   const [deliveryOtpResult, setDeliveryOtpResult] = useState<{ bookingId: string; otp: string; expiresAt: string; smsSent: boolean } | null>(null)
   const [deliveryOtpError, setDeliveryOtpError] = useState<string | null>(null)
+  const [multiServiceBusy, setMultiServiceBusy] = useState<string | null>(null)
+  const [multiServiceMessage, setMultiServiceMessage] = useState<string | null>(null)
   // Derived from the rows so the modal reflects refetched data (e.g. a switched payment method) without reopening.
   const selectedBooking = selectedBookingId ? rows.find((row) => row.id === selectedBookingId) ?? null : null
   const selectedTasks = selectedBooking
@@ -97,6 +101,82 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
       onSuccess: (result) => setDeliveryOtpResult({ bookingId, ...result }),
       onError: () => setDeliveryOtpError(c.bookingsTable.deliveryOtp.failed),
     })
+  }
+
+  async function editOrderItem(item: NonNullable<CustomerBooking['orderItems']>[number]) {
+    if (!selectedBooking?.orderId || !['pending_vendor', 'offered'].includes(item.status)) return
+    const location = window.prompt('Update delivery location', item.details.location ?? selectedBooking.location)?.trim()
+    if (!location) return
+    const date = window.prompt('Update delivery date (YYYY-MM-DD)', item.scheduledAt?.slice(0, 10) ?? selectedBooking.scheduledAt.slice(0, 10))?.trim()
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      setMultiServiceMessage('Enter the delivery date in YYYY-MM-DD format.')
+      return
+    }
+    setMultiServiceBusy(item.id)
+    setMultiServiceMessage(null)
+    try {
+      await customerApi.updateMultiServiceOrderItem(selectedBooking.orderId, item.id, {
+        location,
+        scheduledFor: new Date(`${date}T10:00:00+05:30`).toISOString(),
+      })
+      await queryClient.invalidateQueries({ queryKey: ['customer', 'bookings'] })
+      setMultiServiceMessage('Service details updated.')
+    } catch (error) {
+      setMultiServiceMessage(error instanceof Error ? error.message : 'The service could not be updated.')
+    } finally {
+      setMultiServiceBusy(null)
+    }
+  }
+
+  async function cancelOrderItem(item: NonNullable<CustomerBooking['orderItems']>[number]) {
+    if (!selectedBooking?.orderId || !['pending_vendor', 'offered'].includes(item.status)) return
+    if (!window.confirm(`Cancel ${item.serviceName}?`)) return
+    setMultiServiceBusy(item.id)
+    setMultiServiceMessage(null)
+    try {
+      await customerApi.cancelMultiServiceOrderItem(selectedBooking.orderId, item.id)
+      await queryClient.invalidateQueries({ queryKey: ['customer', 'bookings'] })
+      setMultiServiceMessage('Service cancelled.')
+    } catch (error) {
+      setMultiServiceMessage(error instanceof Error ? error.message : 'The service could not be cancelled.')
+    } finally {
+      setMultiServiceBusy(null)
+    }
+  }
+
+  async function requestFulfilmentOtp(fulfilmentId: string) {
+    if (!selectedBooking?.orderId) return
+    setMultiServiceBusy(fulfilmentId)
+    setMultiServiceMessage(null)
+    try {
+      const result = await customerApi.requestMultiServiceDeliveryOtp(selectedBooking.orderId, fulfilmentId)
+      setMultiServiceMessage(`${result.message} Expires ${new Date(result.expiresAt).toLocaleTimeString()}.`)
+    } catch (error) {
+      setMultiServiceMessage(error instanceof Error ? error.message : 'The delivery code could not be sent.')
+    } finally {
+      setMultiServiceBusy(null)
+    }
+  }
+
+  async function rateFulfilment(fulfilmentId: string) {
+    const ratingText = window.prompt('Rate this delivery from 1 to 5')
+    if (!ratingText) return
+    const rating = Number(ratingText)
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      setMultiServiceMessage('Choose a rating from 1 to 5.')
+      return
+    }
+    const review = window.prompt('Add an optional review')?.trim()
+    setMultiServiceBusy(fulfilmentId)
+    setMultiServiceMessage(null)
+    try {
+      await customerApi.rateMultiServiceFulfilment(fulfilmentId, rating, review || undefined)
+      setMultiServiceMessage('Thank you for rating this delivery.')
+    } catch (error) {
+      setMultiServiceMessage(error instanceof Error ? error.message : 'The rating could not be saved.')
+    } finally {
+      setMultiServiceBusy(null)
+    }
   }
 
   function cancelSelectedBooking() {
@@ -239,6 +319,10 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
             <p>{item.details.capacity || item.details.quantity || item.details.details || c.bookingsTable.noAdditionalDetails}</p>
             {item.amountPaise > 0 && <p>{c.common.rupee((item.amountPaise / 100).toLocaleString('en-IN'))}</p>}
             {(item.scheduledAt || item.location) && <small>{item.location ?? selectedBooking.location}{item.scheduledAt ? ` · ${formatDate(item.scheduledAt)}` : ''}</small>}
+            {['pending_vendor', 'offered'].includes(item.status) && <div className="action-row">
+              <button className="button button-quiet" type="button" disabled={multiServiceBusy === item.id} onClick={() => void editOrderItem(item)}>Edit service</button>
+              <button className="button button-danger" type="button" disabled={multiServiceBusy === item.id} onClick={() => void cancelOrderItem(item)}>Cancel service</button>
+            </div>}
           </li>)}</ul></section>
           : <section><h3>{c.bookingsTable.serviceDetails}</h3>{selectedBooking.services.length
             ? <ul>{selectedBooking.services.map((service) => <li key={service.serviceId}><strong>{serviceLabel(service.serviceId)}</strong>{service.capacity && <span>{c.bookingsTable.capacitySeparator}{service.capacity}</span>}{service.deliveryDate && <p>{c.bookingsTable.preferredDate(formatDate(service.deliveryDate))}</p>}<p>{service.details || c.bookingsTable.noAdditionalDetails}</p></li>)}</ul>
@@ -250,8 +334,11 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
             {fulfilment.vendorName && <span> · {fulfilment.vendorName}</span>}
             <p>{fulfilment.itemIds.length} service{fulfilment.itemIds.length === 1 ? '' : 's'} · {fulfilment.location ?? selectedBooking.location}</p>
             {fulfilment.scheduledAt && <small>{formatDate(fulfilment.scheduledAt)}</small>}
+            {fulfilment.status === 'arrived' && <button className="button button-primary" type="button" disabled={multiServiceBusy === fulfilment.id} onClick={() => void requestFulfilmentOtp(fulfilment.id)}>Send delivery code</button>}
+            {fulfilment.status === 'delivered' && <button className="button button-quiet" type="button" disabled={multiServiceBusy === fulfilment.id} onClick={() => void rateFulfilment(fulfilment.id)}>Rate service</button>}
           </li>)}</ul>
         </section> : null}
+        {multiServiceMessage && <p role="status">{multiServiceMessage}</p>}
         <section><h3>{c.bookingsTable.accessNotes}</h3><p>{selectedBooking.notes || c.bookingsTable.noAccessNotes}</p></section>
           {cancelError && <p className="booking-cancel-error" role="alert">{cancelError}</p>}
           {(selectedBooking.status.toLowerCase() === 'delivered' || (!customerDemoDataEnabled && customerCancellableStatuses.includes(selectedBooking.status.toLowerCase()))) && <div className="action-row">

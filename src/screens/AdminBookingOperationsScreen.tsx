@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, ChevronDown, RefreshCw } from 'lucide-react'
 import { adminApi, type AdminOrder } from '../api/admin'
 import { adminQueryKeys, useAdminBookings, useAdminDispatchSettings, useAdminOrderMutations, useAdminDrivers, useAdminOrdersBoard, useAdminVehicles, useAdminVendors, useUpdateAdminDispatchSettings } from '../hooks/useAdminData'
@@ -80,6 +80,12 @@ export function AdminBookingOperationsScreen({ onNotice }: { onNotice: (message:
   const featureFlags = useFeatureFlags()
   const multiServiceOrdersEnabled = isMultiServiceOrdersEnabled(featureFlags.data?.multi_service_orders_enabled)
   const boardQuery = useAdminOrdersBoard(featureFlags.data?.order_tracking_board_enabled === true)
+  const multiServiceOrdersQuery = useQuery({
+    queryKey: ['admin', 'multi-service-orders'],
+    queryFn: adminApi.multiServiceOrders,
+    enabled: multiServiceOrdersEnabled,
+    staleTime: 30_000,
+  })
   const mutations = useAdminOrderMutations()
   const dispatchSettingsQuery = useAdminDispatchSettings()
   const updateDispatchSettings = useUpdateAdminDispatchSettings()
@@ -100,6 +106,26 @@ export function AdminBookingOperationsScreen({ onNotice }: { onNotice: (message:
   const [boardVendorId, setBoardVendorId] = useState('all')
   const [boardArea, setBoardArea] = useState('all')
   const [boardDate, setBoardDate] = useState('')
+  const [fulfilmentAction, setFulfilmentAction] = useState<{ id: string; kind: 'complete' | 'reassign'; reference: string } | null>(null)
+  const [fulfilmentVendorId, setFulfilmentVendorId] = useState('')
+  const [fulfilmentReason, setFulfilmentReason] = useState('')
+  const multiServiceAction = useMutation({
+    mutationFn: async () => {
+      if (!fulfilmentAction || fulfilmentReason.trim().length < 5) throw new Error('Enter an audit reason of at least five characters.')
+      return fulfilmentAction.kind === 'complete'
+        ? adminApi.completeMultiServiceFulfilment(fulfilmentAction.id, fulfilmentReason.trim())
+        : adminApi.reassignMultiServiceFulfilment(fulfilmentAction.id, fulfilmentVendorId, fulfilmentReason.trim())
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'multi-service-orders'] })
+      void queryClient.invalidateQueries({ queryKey: adminQueryKeys.orders })
+      setFulfilmentAction(null)
+      setFulfilmentReason('')
+      setFulfilmentVendorId('')
+      onNotice('Fulfilment updated.')
+    },
+    onError: (error) => onNotice(error instanceof Error ? error.message : 'Fulfilment update failed.'),
+  })
 
   const filteredRows = useMemo(() => ((query.data ?? []) as BookingRow[]).filter((booking) => filter === 'all' || booking.status === filter), [filter, query.data])
   const boardRows = (boardQuery.data ?? query.data ?? []) as BookingRow[]
@@ -124,7 +150,7 @@ export function AdminBookingOperationsScreen({ onNotice }: { onNotice: (message:
   const pageCount = Math.max(1, Math.ceil(sortedRows.length / pageSize))
   const currentPage = Math.min(page, pageCount)
   const visibleRows = sortedRows.slice((currentPage - 1) * pageSize, currentPage * pageSize)
-  const vendors = (vendorsQuery.data ?? []) as Array<{ id: string; business_name?: string; name?: string; verification?: string }>
+  const vendors = (vendorsQuery.data ?? []) as Array<{ id: string; business_name?: string; name?: string; verification?: string; is_online?: boolean }>
   const vehicles = (vehiclesQuery.data ?? []) as Array<{ id: string; vendor_id?: string; registration_number?: string; capacity_litres?: number; is_active?: boolean; verification?: string }>
   const drivers = (driversQuery.data ?? []) as Array<{ id: string; vendor_id?: string; name?: string; mobile_e164?: string; is_active?: boolean; verification?: string }>
   const availableVehicles = vehicles.filter((vehicle) => vehicle.vendor_id === vendorId && vehicle.is_active && vehicle.verification === 'approved')
@@ -157,6 +183,32 @@ export function AdminBookingOperationsScreen({ onNotice }: { onNotice: (message:
   }
 
   return <>
+    {multiServiceOrdersEnabled && <section className="admin-view-panel" aria-label="Multi-service orders">
+      <div className="view-panel-heading"><div><p className="eyebrow">{c.bookings.eyebrow}</p><h2>Multi-service orders</h2></div><button className="button button-quiet" onClick={() => void multiServiceOrdersQuery.refetch()} disabled={multiServiceOrdersQuery.isFetching}>{c.common.refresh}</button></div>
+      {multiServiceOrdersQuery.isLoading && <p role="status">Loading multi-service orders…</p>}
+      {multiServiceOrdersQuery.isError && <p role="alert">Multi-service orders could not be loaded.</p>}
+      {multiServiceOrdersQuery.data?.map((order) => {
+        const fulfilments = Array.isArray(order.order_fulfilments) ? order.order_fulfilments as Array<{ id: string; status: string; reference?: string; vendor_id?: string }> : []
+        const items = Array.isArray(order.order_items) ? order.order_items as Array<{ id: string; status: string; service_types?: { name?: string; code?: string } }> : []
+        return <article className="admin-order-card" key={String(order.id)}>
+          <strong>{String(order.reference ?? order.id)}</strong>
+          <p>{formatStatus(String(order.status ?? 'pending_vendor'))} · ₹{(Number(order.total_paise ?? 0) / 100).toLocaleString('en-IN')}</p>
+          <ul>{items.map((item) => <li key={item.id}>{item.service_types?.name ?? item.service_types?.code ?? 'Service'} · {formatStatus(item.status)}</li>)}</ul>
+          {fulfilments.map((fulfilment) => <div className="action-row" key={fulfilment.id}>
+            <span>{fulfilment.reference ?? fulfilment.id} · {formatStatus(fulfilment.status)}</span>
+            {['pending_vendor', 'offered', 'accepted'].includes(fulfilment.status) && <button className="button button-quiet" type="button" onClick={() => {
+              setFulfilmentAction({ id: fulfilment.id, kind: 'reassign', reference: String(order.reference ?? order.id) })
+              setFulfilmentReason('')
+              setFulfilmentVendorId('')
+            }}>Reassign vendor</button>}
+            {['accepted', 'en_route', 'arrived'].includes(fulfilment.status) && <button className="button button-quiet" type="button" onClick={() => {
+              setFulfilmentAction({ id: fulfilment.id, kind: 'complete', reference: String(order.reference ?? order.id) })
+              setFulfilmentReason('')
+            }}>Mark complete</button>}
+          </div>)}
+        </article>
+      })}
+    </section>}
     {!dispatchSettingsQuery.isLoading && dispatchSettingsQuery.isError && <section className="admin-view-panel" role="alert"><h2>{c.bookings.dispatchMode.unavailable}</h2><button className="button button-quiet" onClick={() => void dispatchSettingsQuery.refetch()}>{c.common.retry}</button></section>}
     {dispatchSettingsQuery.isLoading && <section className="admin-view-panel" role="status"><p>{c.bookings.dispatchMode.loading}</p></section>}
     {dispatchSettingsQuery.data && <section className="admin-view-panel" aria-label={c.bookings.dispatchMode.title}><div className="view-panel-heading"><div><p className="eyebrow">{c.bookings.dispatchMode.title}</p></div><label><input type="checkbox" checked={dispatchSettingsQuery.data.manualAssignmentModeEnabled} disabled={updateDispatchSettings.isPending} onChange={(event) => updateDispatchSettings.mutate({ manualAssignmentModeEnabled: event.target.checked }, { onSuccess: (settings) => onNotice(settings.manualAssignmentModeEnabled ? c.bookings.notices.dispatchModeEnabled : c.bookings.notices.dispatchModeDisabled), onError: () => onNotice(c.bookings.notices.dispatchModeFailed) })} /> {c.bookings.dispatchMode.manualLabel}</label></div><p>{dispatchSettingsQuery.data.manualAssignmentModeEnabled ? c.bookings.dispatchMode.manualEnabled : c.bookings.dispatchMode.automaticEnabled}</p></section>}
@@ -278,6 +330,13 @@ export function AdminBookingOperationsScreen({ onNotice }: { onNotice: (message:
         <label>{c.bookings.cancel.reasonLabel}<textarea value={reason} onChange={(event) => setReason(event.target.value)} rows={3} placeholder={c.bookings.cancel.reasonPlaceholder} /></label>
         <div><button className="button button-quiet" onClick={() => { setSelected(null); setReason('') }}>{c.bookings.cancel.keepBooking}</button><button className="button button-primary" disabled={mutations.cancel.isPending || reason.trim().length < 2} onClick={cancel}><CheckCircle2 size={14} /> {c.bookings.cancel.confirm}</button></div>
       </div>
+    </Modal>}
+    {fulfilmentAction && <Modal title={`${fulfilmentAction.kind === 'complete' ? 'Complete' : 'Reassign'} fulfilment · ${fulfilmentAction.reference}`} onClose={() => setFulfilmentAction(null)}>
+      <form className="modal-form" onSubmit={(event) => { event.preventDefault(); multiServiceAction.mutate() }}>
+        {fulfilmentAction.kind === 'reassign' && <label>Approved vendor<select required value={fulfilmentVendorId} onChange={(event) => setFulfilmentVendorId(event.target.value)}><option value="" disabled>Select vendor</option>{vendors.filter((vendor) => vendor.verification === 'approved' && vendor.is_online).map((vendor) => <option value={vendor.id} key={vendor.id}>{vendor.business_name ?? vendor.name ?? vendor.id}</option>)}</select></label>}
+        <label>Audit reason<textarea required minLength={5} maxLength={500} value={fulfilmentReason} onChange={(event) => setFulfilmentReason(event.target.value)} rows={3} /></label>
+        <button className="button button-primary" type="submit" disabled={multiServiceAction.isPending || fulfilmentReason.trim().length < 5 || (fulfilmentAction.kind === 'reassign' && !fulfilmentVendorId)}>{multiServiceAction.isPending ? 'Saving…' : 'Confirm'}</button>
+      </form>
     </Modal>}
   </>
 }

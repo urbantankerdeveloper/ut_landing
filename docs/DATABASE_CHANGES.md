@@ -1,7 +1,7 @@
 # Database changes
 
 **Status:** Canonical schema reset on the explicitly confirmed disposable test project on 2026-11-20; PostgreSQL connectivity check passed. All 17 Auth users and 8 Storage objects were removed; 2 buckets remain empty. No production project was accessed.
-**Updated:** 2026-11-20
+**Updated:** 2026-11-21
 
 ## Current database
 
@@ -15,7 +15,7 @@
 | Date | Change | Migration / data safety |
 | --- | --- | --- |
 | 2026-11-20 | Consolidated the phone-verification schema updates into `backend/supabase/001_initial.sql`; no 006 migration files remain in this branch. | Canonical schema only; destructive and not an incremental migration. Do not run it against an existing database. |
-| 2026-11-20 | Added `backend/supabase/007_multi_service_orders.sql` and `007_multi_service_orders.down.sql`: normalized service types, parent orders, items, fulfilments, vendor capabilities/offers, acceptance and lifecycle RPCs, OTP request/lockout state, ratings, invoice linkage, accounting, audit and legacy backfill. | Additive and idempotent for schema/backfill, not applied to any database. Review on a disposable copy before production. Roll back backend code first; rollback drops Feature 2 data. |
+| 2026-11-21 | Applied the additive Feature 2 multi-service order schema to the development project `qlotsoputalbqkbkezlt`; verified all eleven Feature 2 tables, RLS, triggers, and service-role-only access for the unpaid-order cancellation RPC. `npm run db:check` passed and `MULTI_SERVICE_ORDERS_ENABLED` remains false. Consolidated the complete Feature 2 schema and function privileges into `backend/supabase/001_initial.sql`; removed the standalone 007 up/down files as requested. | No application data was cleared. The canonical `001_initial.sql` is for fresh/disposable installations only and must not be run on an existing database. Other existing projects still need a separately reviewed additive upgrade before enabling Feature 2. |
 | 2026-11-20 | Reinstalled the canonical schema from `001_initial.sql` on the explicitly confirmed disposable test project; deleted all Auth users and emptied Storage. | Reset ran with `NODE_ENV=test` and an explicit project allowlist; `npm run db:check` passed. Removed 17 Auth users and 8 objects; both Storage buckets remain configured and empty. Canonical install seed rows remain. No production project was accessed. |
 | 2026-11-18 | Applied migrations 002–004 sequentially to the configured development PostgreSQL database and verified expected schema objects, RLS, triggers, and indexes; `npm run db:check` passed afterward. | Development only; no production database was accessed. Migration 003 preflight found no duplicate active-phone groups or unsupported partner statuses. The SQL was applied through the existing `pg` connection pool because `psql` and the Supabase CLI were unavailable. |
 | 2026-11-18 | Added `backend/supabase/002_service_enquiries.sql`: structured contact/service/date fields on existing enquiries, an indexed append-only `enquiry_history` table, and a trigger that records submissions and admin status/response changes. | Additive/idempotent; applied and verified on development only. Existing enquiries are not backfilled, and history begins after migration. |

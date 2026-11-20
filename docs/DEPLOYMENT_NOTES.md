@@ -1,6 +1,6 @@
 # Deployment notes
 
-**Updated:** 2026-11-20
+**Updated:** 2026-11-21
 **Status:** Discovery only; no deployment or external configuration changed.
 
 ## Existing topology
@@ -10,7 +10,7 @@
 - **Mobile:** `urban_tanker_app` builds native Android/iOS applications and uses `API_BASE_URL`/`SOCKET_URL` build configuration. Release signing credentials must remain outside source control. iOS release work requires macOS/Xcode.
 - **Database:** Supabase Auth, Postgres and private document storage. `backend/supabase/001_initial.sql` is destructive and must only be used for fresh/disposable installs.
 - **Web export dependencies:** Excel workbooks use a lazily loaded ExcelJS bundle; the web build requires development dependencies (including Vite and Sass). The ExcelJS UUID dependency is pinned to a patched compatible release.
-- **Incremental schema:** `backend/supabase/002_service_enquiries.sql` adds structured service enquiry fields/history; `003_partner_vehicle_details.sql` adds per-vehicle partner application data; `004_service_pricing_history.sql` adds administrator attribution and append-only price/config history; `007_multi_service_orders.sql` adds the opt-in normalized order domain. Feature 1 phone-verification schema/functions are consolidated in `001_initial.sql`; the canonical file is destructive, not an upgrade path. No migration runner is exposed in the repository; have an authorized operator review additive migrations and test them on a disposable database before applying them to a target database.
+- **Incremental schema:** `backend/supabase/002_service_enquiries.sql` adds structured service enquiry fields/history; `003_partner_vehicle_details.sql` adds per-vehicle partner application data; `004_service_pricing_history.sql` adds administrator attribution and append-only price/config history. Feature 1 phone-verification and Feature 2 multi-service schema/functions are consolidated in `001_initial.sql`; Feature 2 was applied to the development project `qlotsoputalbqkbkezlt` on 2026-11-21. The canonical file is destructive, not an upgrade path. No migration runner is exposed in the repository; any other existing database requires a separately reviewed additive upgrade before enabling dependent features.
 
 ## Configuration and operational dependencies
 

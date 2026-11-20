@@ -341,7 +341,7 @@ customer.get('/service-types', async (request, response) => {
 customer.get('/multi-service-orders', async (request, response) => {
   if (!requireFeature(response) || !requireSupportedAppVersion(request, response)) return
   const { data, error } = await supabase.from('orders')
-    .select('*,order_items(*,service_types(code,name,quantity_unit)),order_fulfilments(id,reference,status,vendor_id,latitude,longitude,delivered_at,created_at)')
+    .select('*,order_items(*,service_types(code,name,quantity_unit)),order_fulfilments(id,reference,status,vendor_id,latitude,longitude,delivered_at,created_at,order_fulfilment_items(item_id))')
     .eq('customer_id', request.authUser!.id).order('created_at', { ascending: false }).limit(100)
   if (error) return databaseFailure(response, 'multi_service.order_list_failed', error, 500)
   response.json({ rows: data ?? [], nextOffset: null })
@@ -497,6 +497,36 @@ customer.get('/orders/:orderId', async (request, response) => {
   if (error) return databaseFailure(response, 'multi_service.order_load_failed', error, 500)
   if (!order) return response.status(404).json({ error: 'Order not found.' })
   response.json(order)
+})
+
+customer.post('/multi-service-orders/:orderId/cancel-online-payment', async (request, response) => {
+  if (!requireFeature(response) || !requireSupportedAppVersion(request, response)) return
+  const parsed = z.object({ couponCode: z.string().trim().max(80).optional() }).safeParse(request.body ?? {})
+  if (!parsed.success) return response.status(400).json({ error: 'Invalid cancellation request.' })
+  const customerId = request.authUser!.id
+  const { data, error } = await supabase.rpc('cancel_multi_service_unpaid_order', {
+    p_order_id: request.params.orderId,
+    p_customer_id: customerId,
+  })
+  if (error) return databaseFailure(response, 'multi_service.payment_cancel_failed', error, 500)
+  const outcome = data as { cancelled?: boolean; reason?: string; createdAt?: string }
+  if (!outcome.cancelled) {
+    if (outcome.reason === 'not_found') return response.status(404).json({ error: 'Order not found.' })
+    if (outcome.reason === 'paid') return response.status(409).json({ error: 'This order has already been paid.' })
+    if (outcome.reason === 'not_gateway') return response.status(409).json({ error: 'Only an online-payment order can be removed this way.' })
+    return response.status(409).json({ error: 'This order has already been accepted and cannot be removed.' })
+  }
+  if (parsed.data.couponCode) {
+    const { data: coupon } = await supabase.from('coupons').select('id').eq('code', parsed.data.couponCode.toUpperCase()).maybeSingle()
+    if (coupon) {
+      const { data: redemption } = await supabase.from('coupon_redemptions').select('redeemed_at')
+        .eq('coupon_id', coupon.id).eq('customer_id', customerId).maybeSingle()
+      if (redemption && outcome.createdAt && Math.abs(Date.parse(redemption.redeemed_at) - Date.parse(outcome.createdAt)) <= 5 * 60 * 1000) {
+        await supabase.from('coupon_redemptions').delete().eq('coupon_id', coupon.id).eq('customer_id', customerId)
+      }
+    }
+  }
+  return response.status(204).send()
 })
 
 customer.patch('/orders/:orderId/items/:itemId', async (request, response) => {

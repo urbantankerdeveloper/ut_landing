@@ -2864,6 +2864,25 @@ begin
   return jsonb_build_object('updated',true,'orderId',v_item.order_id);
 end $$;
 
+create or replace function public.cancel_multi_service_unpaid_order(p_order_id uuid, p_customer_id uuid)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  v_order public.orders%rowtype;
+  v_payment public.payments%rowtype;
+begin
+  select * into v_order from public.orders
+    where id=p_order_id and customer_id=p_customer_id for update;
+  if not found then return jsonb_build_object('cancelled',false,'reason','not_found'); end if;
+  if v_order.payment_method<>'gateway' then return jsonb_build_object('cancelled',false,'reason','not_gateway'); end if;
+  if v_order.status<>'pending_vendor' then return jsonb_build_object('cancelled',false,'reason','accepted'); end if;
+  select * into v_payment from public.payments where booking_id=v_order.legacy_booking_id for update;
+  if found and v_payment.status='paid' then return jsonb_build_object('cancelled',false,'reason','paid'); end if;
+  delete from public.payments where booking_id=v_order.legacy_booking_id and status<>'paid';
+  delete from public.orders where id=v_order.id;
+  delete from public.bookings where id=v_order.legacy_booking_id;
+  return jsonb_build_object('cancelled',true,'createdAt',v_order.created_at,'legacyBookingId',v_order.legacy_booking_id);
+end $$;
+
 create or replace function public.sweep_multi_service_order_offers(p_escalation_minutes integer default 30)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare v_expired integer; v_alerts integer;
@@ -2921,6 +2940,7 @@ grant all on public.service_types, public.orders, public.order_items, public.ord
   public.order_fulfilment_ratings, public.order_fulfilment_ledger, public.order_refunds,
   public.order_admin_audit to service_role;
 revoke all on function public.create_multi_service_order(jsonb,jsonb,jsonb) from public, anon, authenticated;
+revoke all on function public.refresh_multi_service_order_status(uuid) from public, anon, authenticated;
 revoke all on function public.accept_multi_service_offer(uuid,uuid) from public, anon, authenticated;
 revoke all on function public.transition_multi_service_fulfilment(uuid,uuid,text) from public, anon, authenticated;
 revoke all on function public.drop_multi_service_fulfilment(uuid,uuid) from public, anon, authenticated;
@@ -2930,10 +2950,12 @@ revoke all on function public.complete_multi_service_fulfilment_admin(uuid,uuid,
 revoke all on function public.reassign_multi_service_fulfilment_admin(uuid,uuid,uuid,text) from public, anon, authenticated;
 revoke all on function public.cancel_multi_service_item(uuid,uuid,text) from public, anon, authenticated;
 revoke all on function public.edit_multi_service_item(uuid,uuid,jsonb) from public, anon, authenticated;
+revoke all on function public.cancel_multi_service_unpaid_order(uuid,uuid) from public, anon, authenticated;
 revoke all on function public.sweep_multi_service_order_offers(integer) from public, anon, authenticated;
 revoke all on function public.record_multi_service_delivery_invoices() from public, anon, authenticated;
 revoke all on function public.sync_multi_service_invoice_payment() from public, anon, authenticated;
 grant execute on function public.create_multi_service_order(jsonb,jsonb,jsonb) to service_role;
+grant execute on function public.refresh_multi_service_order_status(uuid) to service_role;
 grant execute on function public.accept_multi_service_offer(uuid,uuid) to service_role;
 grant execute on function public.transition_multi_service_fulfilment(uuid,uuid,text) to service_role;
 grant execute on function public.drop_multi_service_fulfilment(uuid,uuid) to service_role;
@@ -2943,6 +2965,7 @@ grant execute on function public.complete_multi_service_fulfilment_admin(uuid,uu
 grant execute on function public.reassign_multi_service_fulfilment_admin(uuid,uuid,uuid,text) to service_role;
 grant execute on function public.cancel_multi_service_item(uuid,uuid,text) to service_role;
 grant execute on function public.edit_multi_service_item(uuid,uuid,jsonb) to service_role;
+grant execute on function public.cancel_multi_service_unpaid_order(uuid,uuid) to service_role;
 grant execute on function public.sweep_multi_service_order_offers(integer) to service_role;
 grant execute on function public.record_multi_service_delivery_invoices() to service_role;
 grant execute on function public.sync_multi_service_invoice_payment() to service_role;
