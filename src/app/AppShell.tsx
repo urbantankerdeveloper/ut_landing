@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Outlet, useBlocker, useLocation } from 'react-router'
-import { authApi } from '../api/auth'
+import { authApi, type PhoneVerifyResult } from '../api/auth'
+import { registerPhoneVerificationHandler } from '../api/client'
 import { Header } from '../components/Header'
 import { Footer } from '../components/Footer'
 import { PhoneVerifyDialog } from '../components/PhoneVerifyDialog'
@@ -27,6 +28,8 @@ export function AppShell() {
 	const hasHydrated = useAuthStore((state) => state.hasHydrated)
 	const setUser = useAuthStore((state) => state.setUser)
 	const [phoneVerifyDialogUserId, setPhoneVerifyDialogUserId] = useState<string | null>(null)
+	const [actionPhoneVerifyDialogOpen, setActionPhoneVerifyDialogOpen] = useState(false)
+	const pendingActionVerification = useRef<{ promise: Promise<boolean>; resolve: (verified: boolean) => void } | null>(null)
 	const loadedPhoneProfileFor = useRef<string | null>(null)
 	const phoneVerifyDialogEnabled = import.meta.env.VITE_PHONE_VERIFY_DIALOG_ENABLED === 'true'
 	const blocker = useBlocker(({ currentLocation, nextLocation }) => currentLocation.pathname !== nextLocation.pathname && needsLeaveConfirmation(currentLocation.pathname, nextLocation.pathname))
@@ -57,16 +60,35 @@ export function AppShell() {
 		})
 		return () => { active = false }
 	}, [hasHydrated, phoneVerifyDialogEnabled, setUser, user])
-	async function phoneVerified(result: { phone: string }) {
+	const requestPhoneVerification = useCallback(() => {
+		if (pendingActionVerification.current) return pendingActionVerification.current.promise
+		let resolvePromise: (verified: boolean) => void = () => undefined
+		const promise = new Promise<boolean>((resolve) => { resolvePromise = resolve })
+		pendingActionVerification.current = { promise, resolve: resolvePromise }
+		setPhoneVerifyDialogUserId(null)
+		setActionPhoneVerifyDialogOpen(true)
+		return promise
+	}, [])
+	useEffect(() => {
+		if (!phoneVerifyDialogEnabled) return
+		return registerPhoneVerificationHandler(requestPhoneVerification)
+	}, [phoneVerifyDialogEnabled, requestPhoneVerification])
+	function closeActionPhoneVerifyDialog() {
+		setActionPhoneVerifyDialogOpen(false)
+		const pending = pendingActionVerification.current
+		pendingActionVerification.current = null
+		pending?.resolve(false)
+	}
+	async function phoneVerified(result: PhoneVerifyResult) {
 		const current = useAuthStore.getState().user
 		if (current) setUser({ ...current, phone: result.phone, phoneVerified: true })
-		try {
-			const profile = await authApi.me()
-			setUser(profile.user)
-		} catch (error) {
-			notifyError(error instanceof Error ? error.message : 'Your profile could not be refreshed.')
-		}
+		const profile = await authApi.me()
+		setUser(profile.user)
+		setPhoneVerifyDialogUserId(null)
 		notifySuccess('Phone number verified.')
+		const pending = pendingActionVerification.current
+		pendingActionVerification.current = null
+		pending?.resolve(true)
 	}
 	const isBookingScreen = activeScreen === 'booking' && !bookingCompleted
 	const isPartnerDraft = activeScreen === 'partner' && partnerFormDirty
@@ -95,9 +117,15 @@ export function AppShell() {
 		{isBookingScreen ? <BookingPageFooter /> : !isPublicTracking && !isWorkspace && !isAuthScreen && <Footer />}
 		<ServerWakingNotice />
 		{blocker.state === 'blocked' && <Modal title={activeScreen === 'partner' ? c.appShell.leavePartner.title : c.appShell.leaveBooking.title} onClose={blocker.reset}><div className="booking-exit-confirmation"><p>{activeScreen === 'partner' ? c.appShell.leavePartner.body : c.appShell.leaveBooking.body}</p><div><button className="button button-quiet" type="button" onClick={blocker.reset}>{c.appShell.stayOnPage}</button><button className="button button-primary" type="button" onClick={() => { prepareScreenChange(blocker.location.pathname); blocker.proceed() }}>{activeScreen === 'partner' ? c.appShell.leavePartner.confirm : c.appShell.leaveBooking.confirm}</button></div></div></Modal>}
-		{phoneVerifyDialogEnabled && user && phoneVerifyDialogUserId === user.id && <PhoneVerifyDialog
+		{phoneVerifyDialogEnabled && actionPhoneVerifyDialogOpen && <PhoneVerifyDialog
 			initialPhone={user?.phone}
-			allowSkip
+			allowSkip={user?.phoneVerificationRequired === false}
+			onClose={closeActionPhoneVerifyDialog}
+			onVerified={phoneVerified}
+		/>}
+		{phoneVerifyDialogEnabled && !actionPhoneVerifyDialogOpen && user && phoneVerifyDialogUserId === user.id && <PhoneVerifyDialog
+			initialPhone={user?.phone}
+			allowSkip={user.phoneVerificationRequired === false}
 			onClose={() => setPhoneVerifyDialogUserId(null)}
 			onVerified={phoneVerified}
 		/>}

@@ -19,6 +19,8 @@ export default function PartnerApplicationScreen() {
   const fileUpload = useFileUpload()
   const featureFlags = useFeatureFlags()
   const otpEnabled = featureFlags.data?.partner_application_otp_enabled === true
+  const phoneVerifyDialogEnabled = import.meta.env.VITE_PHONE_VERIFY_DIALOG_ENABLED === 'true'
+  const accountPhoneVerificationRequired = phoneVerifyDialogEnabled && user?.phoneVerificationRequired === true && user.phoneVerified !== true
   const openVendorWorkspace = () => user ? openWorkspace(user.role) : navigate('login')
   const [selectedServices, setSelectedServices] = useState<string[]>([])
   const [submitted, setSubmitted] = useState(false)
@@ -29,9 +31,10 @@ export default function PartnerApplicationScreen() {
   const [phoneVerified, setPhoneVerified] = useState(false)
   const [phoneVerifyDialogOpen, setPhoneVerifyDialogOpen] = useState(false)
   const [otpBusy, setOtpBusy] = useState(false)
-  const phoneVerifyDialogEnabled = import.meta.env.VITE_PHONE_VERIFY_DIALOG_ENABLED === 'true'
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [vehicles, setVehicles] = useState([{ id: 1 }])
   const nextVehicleId = useRef(2)
+  const submitInProgress = useRef(false)
   const toggleService = (service: string) => setSelectedServices((current) => current.includes(service) ? current.filter((item) => item !== service) : [...current, service])
   const addVehicle = () => {
     setVehicles((current) => current.length >= 250 ? current : [...current, { id: nextVehicleId.current++ }])
@@ -80,8 +83,9 @@ export default function PartnerApplicationScreen() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (submitInProgress.current) return
     if (!featureFlags.isSuccess) return
-    if (otpEnabled && user && phoneVerifyDialogEnabled && (!phoneVerified || !phoneChallengeId)) {
+    if (otpEnabled && accountPhoneVerificationRequired) {
       setPhoneVerifyDialogOpen(true)
       return
     }
@@ -101,6 +105,8 @@ export default function PartnerApplicationScreen() {
     }))
     const files = vehicleForms.flatMap((vehicle) => vehicle.files)
     if (files.length > 10) { notifyError(p.messages.tooManyDocuments); return }
+    submitInProgress.current = true
+    setIsSubmitting(true)
     try {
       const applicationId = crypto.randomUUID()
       const documents: PartnerDocument[] = []
@@ -154,6 +160,9 @@ export default function PartnerApplicationScreen() {
     } catch (error) {
       setSubmitted(false)
       notifyError(error instanceof Error ? error.message : p.messages.submitFailed)
+    } finally {
+      submitInProgress.current = false
+      setIsSubmitting(false)
     }
   }
 
@@ -232,13 +241,13 @@ export default function PartnerApplicationScreen() {
             </div>
             <div className="partner-otp-actions">
               <button className="button button-primary" type="button" onClick={() => {
-                if (phoneVerifyDialogEnabled && user?.phoneVerified === false) {
+                if (accountPhoneVerificationRequired) {
                   setPhoneVerifyDialogOpen(true)
                 } else {
                   void requestPhoneOtp()
                 }
               }} disabled={otpBusy || phone.length !== 10}>
-                {phoneVerifyDialogEnabled && user?.phoneVerified === false
+                {accountPhoneVerificationRequired
                   ? 'Verify account phone'
                   : phoneChallengeId ? p.verification.resendCode : p.verification.sendCode}
               </button>
@@ -310,7 +319,7 @@ export default function PartnerApplicationScreen() {
             <label className="partner-field">{p.fields.notes.label}<textarea name="notes" rows={3} placeholder={p.fields.notes.placeholder} /></label>
           </section>
           <label className="partner-declaration"><input name="declaration" type="checkbox" required /><span>{p.declaration}</span></label>
-          <button className="button button-primary partner-submit" type="submit">{p.actions.submit} <ArrowRight size={15} /></button>
+          <button className="button button-primary partner-submit" type="submit" disabled={isSubmitting}>{isSubmitting ? 'Submitting…' : p.actions.submit} <ArrowRight size={15} /></button>
           {submitted && <button className="button button-quiet partner-login-action" type="button" onClick={openVendorWorkspace}>{p.actions.continueToVendorLogin}</button>}
         </>}
     </form>
@@ -326,7 +335,7 @@ export default function PartnerApplicationScreen() {
     </aside>
     {phoneVerifyDialogEnabled && phoneVerifyDialogOpen && <PhoneVerifyDialog
       initialPhone={phone || user?.phone}
-      allowSkip={false}
+      allowSkip={user?.phoneVerificationRequired === false}
       onClose={() => setPhoneVerifyDialogOpen(false)}
       onVerified={async (result) => {
         setPhone(result.phone)
