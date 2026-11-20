@@ -49,7 +49,7 @@ function present(row: WhatsAppTemplateRow) {
     canDeactivate: !isOtpTemplateKey(row.template_key),
     provider: 'combirds-whatsapp',
     bodyUsedByProvider: false,
-    providerNote: 'The approved message wording and live campaign are managed in Combirds WABA. This database body supplies the ordered {{placeholder}} references that map to Combirds $AttributeName template parameters.',
+    providerNote: 'The approved message wording and live campaign are managed in Combirds WABA. This database body supplies the ordered {{placeholder}} references; their resolved values are sent as Combirds template parameters.',
   }
 }
 async function audit(actorId: string, action: string, key: string, metadata: Record<string, unknown>) { await supabase.from('audit_logs').insert({ actor_id: actorId, action, entity_type: 'whatsapp_template', entity_id: null, metadata: { templateKey: key, ...metadata } }) }
