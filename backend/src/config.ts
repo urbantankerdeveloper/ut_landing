@@ -63,6 +63,7 @@ const schema = z.object({
   MSG91_TEMPLATE_ID_COD_REVERTED_TO_CASH: optionalSecret,
   USE_DEFAULT_VERIFICATION_CODE: z.preprocess((value) => value === undefined ? undefined : value === 'true', z.boolean().default(false)),
   REQUIRE_BOOKING_PHONE_VERIFICATION: z.preprocess((value) => value === undefined ? undefined : value === 'true', z.boolean().default(true)),
+  PHONE_VERIFY_DIALOG_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
   DEFAULT_VERIFICATION_CODE: z.string().regex(/^\d{6}$/, 'DEFAULT_VERIFICATION_CODE must be a 6-digit code').default('123456'),
   RAZORPAY_KEY_ID: optionalSecret,
   RAZORPAY_KEY_SECRET: optionalSecret,

@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent } from 'react'
-import { ArrowRight, Check, Plus, Trash2 } from 'lucide-react'
+import { ArrowRight, Check, MessageCircle, MessageSquare, Plus, Trash2 } from 'lucide-react'
 import { useNavigationStore } from '../stores/navigationStore'
 import { useAppNavigation } from '../routing/useAppNavigation'
 import { useAuthStore } from '../stores/authStore'
@@ -8,22 +8,28 @@ import { useFileUpload } from '../hooks/useFrontendFeatures'
 import { useFeatureFlags } from '../hooks/useFeatureFlags'
 import { partnerContent as p } from '../content/partner'
 import { notifyError, notifySuccess } from '../utils/notify'
+import { PhoneVerifyDialog } from '../components/PhoneVerifyDialog'
+import { authApi } from '../api/auth'
 
 export default function PartnerApplicationScreen() {
   const { navigate, openWorkspace } = useAppNavigation()
   const setPartnerFormDirty = useNavigationStore((state) => state.setPartnerFormDirty)
   const user = useAuthStore((state) => state.user)
+  const setAuthUser = useAuthStore((state) => state.setUser)
   const fileUpload = useFileUpload()
   const featureFlags = useFeatureFlags()
   const otpEnabled = featureFlags.data?.partner_application_otp_enabled === true
   const openVendorWorkspace = () => user ? openWorkspace(user.role) : navigate('login')
   const [selectedServices, setSelectedServices] = useState<string[]>([])
   const [submitted, setSubmitted] = useState(false)
-  const [phone, setPhone] = useState('')
+  const [phone, setPhone] = useState(user?.phone?.replace(/\D/g, '').slice(-10) ?? '')
   const [otp, setOtp] = useState('')
   const [phoneChallengeId, setPhoneChallengeId] = useState<string | null>(null)
+  const [phoneOtpChannel, setPhoneOtpChannel] = useState<'whatsapp' | 'sms' | null>(null)
   const [phoneVerified, setPhoneVerified] = useState(false)
+  const [phoneVerifyDialogOpen, setPhoneVerifyDialogOpen] = useState(false)
   const [otpBusy, setOtpBusy] = useState(false)
+  const phoneVerifyDialogEnabled = import.meta.env.VITE_PHONE_VERIFY_DIALOG_ENABLED === 'true'
   const [vehicles, setVehicles] = useState([{ id: 1 }])
   const nextVehicleId = useRef(2)
   const toggleService = (service: string) => setSelectedServices((current) => current.includes(service) ? current.filter((item) => item !== service) : [...current, service])
@@ -41,8 +47,9 @@ export default function PartnerApplicationScreen() {
     try {
       const result = await partnerApi.requestPhoneOtp(phone)
       setPhoneChallengeId(result.challengeId)
+      setPhoneOtpChannel(result.channel)
       setOtp('')
-      notifySuccess(p.verification.sent)
+      notifySuccess(`We sent a code via ${result.channel === 'whatsapp' ? 'WhatsApp' : 'SMS'} to +91 ${phone}.`)
     } catch (error) {
       notifyError(error instanceof Error ? error.message : p.messages.otpSendFailed)
     } finally {
@@ -67,12 +74,17 @@ export default function PartnerApplicationScreen() {
   function changePhone() {
     setPhoneVerified(false)
     setPhoneChallengeId(null)
+    setPhoneOtpChannel(null)
     setOtp('')
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!featureFlags.isSuccess) return
+    if (otpEnabled && user && phoneVerifyDialogEnabled && (!phoneVerified || !phoneChallengeId)) {
+      setPhoneVerifyDialogOpen(true)
+      return
+    }
     if (otpEnabled && (!phoneVerified || !phoneChallengeId)) {
       notifyError(p.messages.otpVerifyFailed)
       return
@@ -183,6 +195,7 @@ export default function PartnerApplicationScreen() {
                   onChange={(event) => {
                     setPhone(event.target.value.replace(/\D/g, '').slice(0, 10))
                     setPhoneChallengeId(null)
+                    setPhoneOtpChannel(null)
                     setPhoneVerified(false)
                     setOtp('')
                   }}
@@ -191,12 +204,24 @@ export default function PartnerApplicationScreen() {
                 />
               </label>
               {phoneChallengeId && (
+                <div className={`otp-delivery otp-delivery-${phoneOtpChannel ?? 'unknown'}`} role="status">
+                  {phoneOtpChannel === 'whatsapp'
+                    ? <MessageCircle size={18} aria-hidden="true" />
+                    : <MessageSquare size={18} aria-hidden="true" />}
+                  <span>
+                    {phoneOtpChannel
+                      ? `We sent a code via ${phoneOtpChannel === 'whatsapp' ? 'WhatsApp' : 'SMS'} to +91 ${phone}.`
+                      : `Enter the phone code sent to +91 ${phone}.`}
+                  </span>
+                </div>
+              )}
+              {phoneChallengeId && (
                 <label className="partner-field">
                   {p.verification.otpLabel}
                   <input
                     type="text"
                     inputMode="numeric"
-                    autoComplete="one-time-code"
+                    autoComplete={phoneOtpChannel === 'sms' ? 'one-time-code' : 'off'}
                     maxLength={6}
                     value={otp}
                     onChange={(event) => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))}
@@ -206,8 +231,16 @@ export default function PartnerApplicationScreen() {
               )}
             </div>
             <div className="partner-otp-actions">
-              <button className="button button-primary" type="button" onClick={() => { void requestPhoneOtp() }} disabled={otpBusy || phone.length !== 10}>
-                {phoneChallengeId ? p.verification.resendCode : p.verification.sendCode}
+              <button className="button button-primary" type="button" onClick={() => {
+                if (phoneVerifyDialogEnabled && user?.phoneVerified === false) {
+                  setPhoneVerifyDialogOpen(true)
+                } else {
+                  void requestPhoneOtp()
+                }
+              }} disabled={otpBusy || phone.length !== 10}>
+                {phoneVerifyDialogEnabled && user?.phoneVerified === false
+                  ? 'Verify account phone'
+                  : phoneChallengeId ? p.verification.resendCode : p.verification.sendCode}
               </button>
               {phoneChallengeId && (
                 <button className="button button-quiet" type="button" onClick={() => { void verifyPhoneOtp() }} disabled={otpBusy || otp.length !== 6}>
@@ -291,6 +324,27 @@ export default function PartnerApplicationScreen() {
         <button className="button button-quiet" type="button" onClick={openVendorWorkspace}>{user ? p.actions.openWorkspace : p.actions.goToVendorLogin}</button>
       </div>
     </aside>
+    {phoneVerifyDialogEnabled && phoneVerifyDialogOpen && <PhoneVerifyDialog
+      initialPhone={phone || user?.phone}
+      allowSkip={false}
+      onClose={() => setPhoneVerifyDialogOpen(false)}
+      onVerified={async (result) => {
+        setPhone(result.phone)
+        setPhoneChallengeId(result.challengeId)
+        setPhoneOtpChannel(null)
+        setOtp('')
+        setPhoneVerified(true)
+        const current = useAuthStore.getState().user
+        if (current) setAuthUser({ ...current, phone: result.phone, phoneVerified: true })
+        try {
+          const profile = await authApi.me()
+          setAuthUser(profile.user)
+        } catch (profileError) {
+          notifyError(profileError instanceof Error ? profileError.message : 'Your profile could not be refreshed.')
+        }
+        notifySuccess(p.verification.verified)
+      }}
+    />}
   </div>
 }
 

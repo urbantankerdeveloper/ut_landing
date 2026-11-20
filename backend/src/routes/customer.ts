@@ -133,14 +133,17 @@ router.get('/pricing/me', async (request, response) => {
   }
 })
 router.get('/phone-verification', async (request, response) => {
-  const { data: profile, error: profileError } = await supabase.from('profiles').select('phone_e164').eq('id', request.authUser!.id).single()
+  const { data: profile, error: profileError } = await supabase.from('profiles').select('phone_e164,phone_verified,phone_verified_at').eq('id', request.authUser!.id).single()
   if (profileError) return databaseFailure(response, 'customer.phone_verification_failed', profileError, 500)
   const phoneE164 = toE164IndianMobile(String(profile.phone_e164 ?? ''))
-  if (!phoneE164) return response.json({ phone: '', verified: false, required: config.REQUIRE_BOOKING_PHONE_VERIFICATION })
+  const phoneVerified = profile.phone_verified === true || Boolean(profile.phone_verified_at)
+  if (!phoneE164) return response.json({ phone: '', verified: false, phoneVerified, challengeId: null, required: config.REQUIRE_BOOKING_PHONE_VERIFICATION })
   if (!config.REQUIRE_BOOKING_PHONE_VERIFICATION) {
     return response.json({
       phone: phoneE164.slice(-10),
       verified: true,
+      phoneVerified,
+      challengeId: null,
       required: false,
     })
   }
@@ -149,6 +152,8 @@ router.get('/phone-verification', async (request, response) => {
   response.json({
     phone: phoneE164.slice(-10),
     verified: config.REQUIRE_BOOKING_PHONE_VERIFICATION ? Boolean(challenge) : true,
+    phoneVerified,
+    challengeId: challenge?.id ?? null,
     required: config.REQUIRE_BOOKING_PHONE_VERIFICATION,
   })
 })
@@ -725,7 +730,7 @@ router.get('/subscriptions', async (request, response) => {
   if (error) return databaseFailure(response, 'customer.database_error', error, 500)
   sendList(response, list, data ?? [], count)
 })
-router.get('/profile', async (request, response) => { const { data, error } = await supabase.from('profiles').select('full_name, phone_e164').eq('id', request.authUser!.id).single(); if (error) return databaseFailure(response, 'customer.database_error', error, 500); response.json({ name: data.full_name, email: request.authUser!.email ?? '', phone: String(data.phone_e164 ?? '').replace(/\D/g, '').slice(-10) }) })
+router.get('/profile', async (request, response) => { const { data, error } = await supabase.from('profiles').select('full_name, phone_e164, phone_verified, phone_verified_at').eq('id', request.authUser!.id).single(); if (error) return databaseFailure(response, 'customer.database_error', error, 500); response.json({ name: data.full_name, email: request.authUser!.email ?? '', phone: String(data.phone_e164 ?? '').replace(/\D/g, '').slice(-10), phoneVerified: data.phone_verified === true || Boolean(data.phone_verified_at) }) })
 router.post('/profile/selfie', express.raw({ type: 'image/jpeg', limit: selfieMaxBytes }), async (request, response) => {
   const customerId = request.authUser!.id
   const image = request.body
@@ -769,6 +774,7 @@ router.patch('/profile', async (request, response) => {
       if (error) return databaseFailure(response, 'customer.phone_verification_failed', error, 500)
       if (!verified) return response.status(400).json({ error: 'Verify the new mobile number before changing it.' })
       profileUpdate.phone_e164 = phoneE164
+      profileUpdate.phone_verified = true
       profileUpdate.phone_verified_at = new Date().toISOString()
     }
   }
@@ -780,6 +786,6 @@ router.patch('/profile', async (request, response) => {
   }
   const { data, error } = await supabase.from('profiles').update(profileUpdate).eq('id', userId).select().single()
   if (error) return databaseFailure(response, 'customer.profile_update_failed', error, 400)
-  response.json({ name: data.full_name, email: emailChanged ? parsed.data.email : (currentEmail ?? parsed.data.email), phone: String(data.phone_e164 ?? '').replace(/\D/g, '').slice(-10) })
+  response.json({ name: data.full_name, email: emailChanged ? parsed.data.email : (currentEmail ?? parsed.data.email), phone: String(data.phone_e164 ?? '').replace(/\D/g, '').slice(-10), phoneVerified: data.phone_verified === true || Boolean(data.phone_verified_at) })
 })
 export default router

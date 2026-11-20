@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   isEmailConfigured: vi.fn(() => true),
   sendEmail: vi.fn(),
   sendTemplateWhatsApp: vi.fn(),
+  sendTemplateSms: vi.fn(),
+  recentPhoneChallenge: null as null | { id: string; delivery_channel: string; created_at: string; expires_at: string },
   authUser: {
     id: 'user-1',
     email: 'guest@example.com',
@@ -62,6 +64,9 @@ vi.mock('../middleware/auth.js', () => ({
     next()
   },
 }))
+vi.mock('../services/sms.js', () => ({
+  sendTemplateSms: (...args: unknown[]) => mocks.sendTemplateSms(...args),
+}))
 vi.mock('../services/providers.js', () => ({
   isEmailConfigured: () => mocks.isEmailConfigured(),
   sendEmail: (...args: unknown[]) => mocks.sendEmail(...args),
@@ -70,6 +75,7 @@ vi.mock('../services/whatsapp.js', () => ({ sendTemplateWhatsApp: (...args: unkn
 
 import authRouter from './auth.js'
 import { hashOtp } from '../services/otp.js'
+import { config } from '../config.js'
 
 const CHALLENGE = '11111111-1111-4111-8111-111111111111'
 const EMAIL_CHALLENGE = '22222222-2222-4222-8222-222222222222'
@@ -92,10 +98,33 @@ beforeEach(() => {
       return { data: { id: table === 'email_otp_challenges' ? EMAIL_CHALLENGE : CHALLENGE }, error: null }
     }
     if (last === 'maybeSingle' && table === 'email_otp_challenges') return { data: { id: EMAIL_CHALLENGE }, error: null }
-    if (last === 'maybeSingle' && table === 'guest_otp_challenges') return { data: { id: CHALLENGE }, error: null }
+    if (last === 'maybeSingle' && table === 'guest_otp_challenges') {
+      return { data: ops.some((op) => op.name === 'gte') ? mocks.recentPhoneChallenge : { id: CHALLENGE }, error: null }
+    }
     return { data: null, error: null }
   })
   mocks.rpc.mockReset()
+  mocks.rpc.mockImplementation(async (procedure) => {
+    if (procedure !== 'claim_guest_otp_challenge') return { data: null, error: null }
+    const now = new Date()
+    const recent = mocks.recentPhoneChallenge
+    return {
+      data: [{
+        challenge_id: recent?.id ?? CHALLENGE,
+        delivery_channel: recent?.delivery_channel ?? 'pending',
+        created_at: recent?.created_at ?? now.toISOString(),
+        expires_at: recent?.expires_at ?? new Date(now.getTime() + 600_000).toISOString(),
+        is_new: recent == null,
+      }],
+      error: null,
+    }
+  })
+  mocks.sendTemplateWhatsApp.mockReset()
+  mocks.sendTemplateWhatsApp.mockResolvedValue({ queued: false, reason: 'WhatsApp unavailable' })
+  mocks.sendTemplateSms.mockReset()
+  mocks.sendTemplateSms.mockResolvedValue({ queued: false, reason: 'SMS unavailable' })
+  mocks.recentPhoneChallenge = null
+  config.featureFlags.otp_sms_fallback_enabled = true
   mocks.createUser.mockReset()
   mocks.createUser.mockResolvedValue({ data: { user: { id: 'user-1' } }, error: null })
   mocks.deleteUser.mockReset()
@@ -364,21 +393,57 @@ describe('POST /guest/request-otp', () => {
     mocks.sendTemplateWhatsApp.mockResolvedValue({ queued: true, provider: 'combirds-whatsapp', requestId: 'guest-otp-1' })
     const response = await request(buildApp()).post('/guest/request-otp').send({ phone: PHONE })
     expect(response.status).toBe(202)
-    expect(response.body).toMatchObject({ challengeId: CHALLENGE, expiresInSeconds: 600 })
+    expect(response.body).toMatchObject({ challengeId: CHALLENGE, channel: 'whatsapp', expiresInSeconds: 600 })
     expect(mocks.sendTemplateWhatsApp).toHaveBeenCalledWith('booking_verification_otp', '+919876543210', expect.objectContaining({ otp: expect.any(String) }))
   })
 
-  it('keeps the phone-only behaviour: 503 when WhatsApp is not configured and no email is given', async () => {
+  it('falls back to SMS with the same code when Combirds rejects a send', async () => {
+    mocks.sendTemplateSms.mockResolvedValue({ queued: true, provider: 'msg91', requestId: 'sms-1' })
+    const response = await request(buildApp()).post('/phone/request-otp').send({ phone: PHONE })
+    expect(response.status).toBe(202)
+    expect(response.body).toMatchObject({ challengeId: CHALLENGE, channel: 'sms' })
+    expect(mocks.sendTemplateWhatsApp).toHaveBeenCalledTimes(1)
+    expect(mocks.sendTemplateSms).toHaveBeenCalledWith(
+      'user_registration_otp',
+      '+919876543210',
+      mocks.sendTemplateWhatsApp.mock.calls[0]?.[2],
+    )
+  })
+
+  it('allows disabling WhatsApp-to-SMS fallback with the feature flag', async () => {
+    config.featureFlags.otp_sms_fallback_enabled = false
+    const response = await request(buildApp()).post('/phone/request-otp').send({ phone: PHONE })
+    expect(response.status).toBe(503)
+    expect(mocks.sendTemplateWhatsApp).toHaveBeenCalledTimes(1)
+    expect(mocks.sendTemplateSms).not.toHaveBeenCalled()
+  })
+
+  it('does not send duplicates when the same phone retries inside the cooldown', async () => {
+    const now = new Date()
+    mocks.recentPhoneChallenge = {
+      id: CHALLENGE,
+      delivery_channel: 'whatsapp',
+      created_at: new Date(now.getTime() - 5_000).toISOString(),
+      expires_at: new Date(now.getTime() + 595_000).toISOString(),
+    }
+    const response = await request(buildApp()).post('/phone/request-otp').send({ phone: PHONE })
+    expect(response.status).toBe(202)
+    expect(response.body).toMatchObject({ challengeId: CHALLENGE, channel: 'whatsapp' })
+    expect(mocks.sendTemplateWhatsApp).not.toHaveBeenCalled()
+    expect(mocks.sendTemplateSms).not.toHaveBeenCalled()
+  })
+
+  it('keeps the phone-only behavior: 503 when both providers fail and no email is given', async () => {
     const response = await request(buildApp()).post('/guest/request-otp').send({ phone: PHONE })
     expect(response.status).toBe(503)
-    expect(response.body.error).toBe('WhatsApp OTP is not configured correctly.')
+    expect(response.body.error).toBe('OTP delivery failed.')
     expect(mocks.sendEmail).not.toHaveBeenCalled()
   })
 
   it('sends an email code when SMS is off and an email is given', async () => {
     const response = await request(buildApp()).post('/guest/request-otp').send({ phone: PHONE, email: 'guest@example.com' })
     expect(response.status).toBe(202)
-    expect(response.body).toMatchObject({ challengeId: null, phoneOtpSent: false, emailChallengeId: EMAIL_CHALLENGE, emailOtpSent: true })
+    expect(response.body).toMatchObject({ challengeId: null, phoneOtpSent: false, phoneOtpChannel: null, emailChallengeId: EMAIL_CHALLENGE, emailOtpSent: true })
     expect(mocks.sendEmail).toHaveBeenCalledWith('guest@example.com', expect.any(String), expect.any(String))
   })
 
@@ -386,7 +451,7 @@ describe('POST /guest/request-otp', () => {
     mocks.sendTemplateWhatsApp.mockResolvedValue({ queued: true, provider: 'combirds-whatsapp', requestId: 'req-2' })
     const response = await request(buildApp()).post('/guest/request-otp').send({ phone: PHONE, email: 'guest@example.com' })
     expect(response.status).toBe(202)
-    expect(response.body).toMatchObject({ challengeId: CHALLENGE, phoneOtpSent: true, emailChallengeId: EMAIL_CHALLENGE, emailOtpSent: true })
+    expect(response.body).toMatchObject({ challengeId: CHALLENGE, phoneOtpSent: true, phoneOtpChannel: 'whatsapp', emailChallengeId: EMAIL_CHALLENGE, emailOtpSent: true })
   })
 
   it('returns 503 when neither channel can send', async () => {

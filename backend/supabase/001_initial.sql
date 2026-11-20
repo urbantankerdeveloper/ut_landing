@@ -640,16 +640,95 @@ alter table public.bookings
 
 create table if not exists public.guest_otp_challenges (
   id uuid primary key default gen_random_uuid(),
+  user_id uuid references public.profiles(id) on delete cascade,
   phone_e164 text not null,
   otp_hash text not null,
   expires_at timestamptz not null,
   attempts integer not null default 0,
   verified_at timestamptz,
+  template_key text,
+  delivery_channel text check (delivery_channel in ('pending', 'whatsapp', 'sms')),
   created_at timestamptz not null default now()
 );
+alter table public.guest_otp_challenges add column if not exists user_id uuid references public.profiles(id) on delete cascade;
+alter table public.guest_otp_challenges add column if not exists template_key text;
+alter table public.guest_otp_challenges add column if not exists delivery_channel text;
+alter table public.guest_otp_challenges drop constraint if exists guest_otp_challenges_delivery_channel_check;
+alter table public.guest_otp_challenges
+  add constraint guest_otp_challenges_delivery_channel_check
+  check (delivery_channel is null or delivery_channel in ('pending', 'whatsapp', 'sms'));
 
 create index if not exists guest_otp_challenges_phone_created_idx
   on public.guest_otp_challenges(phone_e164, created_at desc);
+create index if not exists guest_otp_challenges_phone_template_created_idx
+  on public.guest_otp_challenges(phone_e164, template_key, created_at desc)
+  where verified_at is null;
+create index if not exists guest_otp_challenges_user_phone_template_created_idx
+  on public.guest_otp_challenges(user_id, phone_e164, template_key, created_at desc)
+  where verified_at is null;
+
+drop function if exists public.claim_guest_otp_challenge(text, text, text, timestamptz, integer);
+create or replace function public.claim_guest_otp_challenge(
+  p_phone_e164 text,
+  p_template_key text,
+  p_otp_hash text,
+  p_expires_at timestamptz,
+  p_resend_after_seconds integer,
+  p_user_id uuid default null
+)
+returns table (
+  challenge_id uuid,
+  delivery_channel text,
+  created_at timestamptz,
+  expires_at timestamptz,
+  is_new boolean
+)
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  existing_challenge public.guest_otp_challenges%rowtype;
+begin
+  if p_resend_after_seconds < 0 then
+    raise exception 'resend cooldown cannot be negative';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtext(p_phone_e164), hashtext(p_template_key));
+
+  select *
+    into existing_challenge
+    from public.guest_otp_challenges as challenge
+   where challenge.phone_e164 = p_phone_e164
+     and challenge.template_key = p_template_key
+     and challenge.user_id is not distinct from p_user_id
+     and challenge.verified_at is null
+     and challenge.created_at >= now() - make_interval(secs => p_resend_after_seconds)
+   order by challenge.created_at desc
+   limit 1;
+
+  if found then
+    return query
+      select existing_challenge.id, existing_challenge.delivery_channel,
+             existing_challenge.created_at, existing_challenge.expires_at, false;
+    return;
+  end if;
+
+  insert into public.guest_otp_challenges (
+    user_id, phone_e164, template_key, otp_hash, expires_at, delivery_channel
+  )
+  values (
+    p_user_id, p_phone_e164, p_template_key, p_otp_hash, p_expires_at, 'pending'
+  )
+  returning * into existing_challenge;
+
+  return query
+    select existing_challenge.id, existing_challenge.delivery_channel,
+           existing_challenge.created_at, existing_challenge.expires_at, true;
+end;
+$$;
+revoke all on function public.claim_guest_otp_challenge(text, text, text, timestamptz, integer, uuid) from public;
+grant execute on function public.claim_guest_otp_challenge(text, text, text, timestamptz, integer, uuid) to service_role;
 
 -- BEGIN incremental update: sms templates (idempotent, run with npm run db:update)
 create table if not exists public.sms_templates (
@@ -1013,6 +1092,7 @@ alter table public.bookings
 -- Atomic guest OTP attempt. Returns the stored hash only while the challenge is open, unverified,
 -- unexpired, and under 5 attempts. An empty result means invalid, expired, or exhausted.
 -- The caller compares the hash and must not reveal which condition failed.
+drop function if exists public.consume_guest_otp_attempt(uuid, text);
 create or replace function public.consume_guest_otp_attempt(p_challenge_id uuid, p_phone text)
 returns table(otp_hash text)
 language sql
@@ -1022,6 +1102,24 @@ as $$
   set attempts = attempts + 1
   where id = p_challenge_id
     and phone_e164 = p_phone
+    and user_id is null
+    and verified_at is null
+    and attempts < 5
+    and expires_at > now()
+  returning guest_otp_challenges.otp_hash;
+$$;
+
+drop function if exists public.consume_user_phone_otp_attempt(uuid, text, uuid);
+create or replace function public.consume_user_phone_otp_attempt(p_challenge_id uuid, p_phone text, p_user_id uuid)
+returns table(otp_hash text)
+language sql
+set search_path = public
+as $$
+  update public.guest_otp_challenges
+  set attempts = attempts + 1
+  where id = p_challenge_id
+    and phone_e164 = p_phone
+    and user_id = p_user_id
     and verified_at is null
     and attempts < 5
     and expires_at > now()
@@ -1030,11 +1128,20 @@ $$;
 
 revoke all on function public.consume_guest_otp_attempt(uuid, text) from public, anon, authenticated;
 grant execute on function public.consume_guest_otp_attempt(uuid, text) to service_role;
+revoke all on function public.consume_user_phone_otp_attempt(uuid, text, uuid) from public, anon, authenticated;
+grant execute on function public.consume_user_phone_otp_attempt(uuid, text, uuid) to service_role;
 
 -- ===== 7. Phone identity (H-14) =====
 
 alter table public.profiles
+  add column if not exists phone_verified boolean not null default false;
+
+alter table public.profiles
   add column if not exists phone_verified_at timestamptz;
+
+update public.profiles
+set phone_verified = true
+where phone_verified_at is not null;
 
 -- Only verified phones are indexed here; UNIQUE(phone_e164) also applies to all rows.
 create unique index if not exists profiles_phone_verified_unique_idx

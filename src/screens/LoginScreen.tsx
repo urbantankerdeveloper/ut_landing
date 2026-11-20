@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, ArrowRight, Eye, EyeOff, LogIn, ShieldCheck } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Eye, EyeOff, LogIn, MessageCircle, MessageSquare, ShieldCheck } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
 import { useAppNavigation } from '../routing/useAppNavigation'
 import { authApi } from '../api/auth'
@@ -85,6 +85,7 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false)
   const [signupEmailChallengeId, setSignupEmailChallengeId] = useState<string | null>(null)
   const [signupPhoneChallengeId, setSignupPhoneChallengeId] = useState<string | null>(null)
+  const [signupPhoneOtpChannel, setSignupPhoneOtpChannel] = useState<'whatsapp' | 'sms' | null>(null)
   const [signupEmailOtp, setSignupEmailOtp] = useState('')
   const [signupPhoneOtp, setSignupPhoneOtp] = useState('')
 
@@ -228,12 +229,15 @@ export default function LoginScreen() {
         })
         if (response.requiresEmailVerification) {
           if (!response.challengeId) throw new Error('The email verification code was not created.')
-          if (response.phoneOtpSent && !response.phoneChallengeId) {
+          if (response.phoneOtpSent && (!response.phoneChallengeId || !response.phoneOtpChannel)) {
             throw new Error('The mobile verification code was not created.')
           }
           setSignupEmailChallengeId(response.challengeId)
           setSignupPhoneChallengeId(
             response.phoneOtpSent ? response.phoneChallengeId ?? null : null,
+          )
+          setSignupPhoneOtpChannel(
+            response.phoneOtpSent ? response.phoneOtpChannel ?? null : null,
           )
           setSignupEmailOtp('')
           setSignupPhoneOtp('')
@@ -308,14 +312,24 @@ export default function LoginScreen() {
           <p className="eyebrow">{c.panel.eyebrow.signUp}</p>
           <h2>Verify your account</h2>
           <p className="auth-intro">
-            Enter the email code{signupPhoneChallengeId ? ' and mobile code' : ''} to finish creating your account.
+            Enter the email code{signupPhoneChallengeId ? ' and phone code' : ''} to finish creating your account.
           </p>
           <form className="auth-form" onSubmit={submit} noValidate>
             <label htmlFor="signup-email-otp">Email verification code</label>
             <input id="signup-email-otp" value={signupEmailOtp} onChange={(event) => setSignupEmailOtp(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" required />
             {signupPhoneChallengeId && <>
-              <label htmlFor="signup-phone-otp">Mobile verification code</label>
-              <input id="signup-phone-otp" value={signupPhoneOtp} onChange={(event) => setSignupPhoneOtp(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" required />
+              <div className={`otp-delivery otp-delivery-${signupPhoneOtpChannel ?? 'unknown'}`} role="status">
+                {signupPhoneOtpChannel === 'whatsapp'
+                  ? <MessageCircle size={18} aria-hidden="true" />
+                  : <MessageSquare size={18} aria-hidden="true" />}
+                <span>
+                  {signupPhoneOtpChannel
+                    ? `We sent a code via ${signupPhoneOtpChannel === 'whatsapp' ? 'WhatsApp' : 'SMS'} to +91 ${phone}.`
+                    : `Enter the phone code sent to +91 ${phone}.`}
+                </span>
+              </div>
+              <label htmlFor="signup-phone-otp">Phone verification code</label>
+              <input id="signup-phone-otp" value={signupPhoneOtp} onChange={(event) => setSignupPhoneOtp(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoComplete={signupPhoneOtpChannel === 'sms' ? 'one-time-code' : 'off'} maxLength={6} required />
             </>}
             <button className="button button-primary button-large" type="submit">Verify and continue <ArrowRight size={15} /></button>
             <button className="button button-quiet" type="button" onClick={async () => {
@@ -332,6 +346,7 @@ export default function LoginScreen() {
             <button type="button" onClick={() => {
               setSignupEmailChallengeId(null)
               setSignupPhoneChallengeId(null)
+              setSignupPhoneOtpChannel(null)
               setSignupEmailOtp('')
               setSignupPhoneOtp('')
               setMode('login')

@@ -21,7 +21,7 @@ export type PaymentReceipt = { status: 'pending' | 'paid' | 'failed' | 'refunded
 export type BookingPaymentMethod = 'wallet' | 'gateway' | 'cod'
 export type BookingServiceDetails = { serviceId: string; capacity?: string; waterType?: string; tankerCount?: string; serviceType?: string; quantity?: string; depth?: string; grade?: string; pump?: string; pickupLocation?: string; materialType?: string; details: string; deliveryDate?: string; preferredTime?: string; location?: string; phone?: string; latitude?: number; longitude?: number; phoneVerificationChallengeId?: string }
 export type CreateBookingPayload = { idempotencyKey: string; serviceId: string; services: BookingServiceDetails[]; capacity: string; location: string; deliveryDate: string; preferredTime?: string; notes?: string; couponCode?: string; phone?: string; phoneVerificationChallengeId?: string; latitude?: number; longitude?: number; paymentMethod?: BookingPaymentMethod }
-export type GuestOtpChallenge = { challengeId: string; expiresInSeconds: number }
+export type GuestOtpChallenge = { challengeId: string; channel: 'whatsapp' | 'sms'; expiresInSeconds: number; resendAfterSeconds: number }
 export type GuestSession = { accessToken: string; user: { username: string; name: string; role: 'customer' } }
 export type CreateSupportRequestPayload = { subject: string; message: string; orderId?: string; priority?: string }
 type ServiceEnquiryContact = { customerName: string; mobile: string; email?: string; location: string; requiredDate: string }
@@ -36,7 +36,7 @@ export type WalletTransaction = { id: string; amount: number; type: string; stat
 export type CustomerContract = { id: string; property_type: string; service_plan: Record<string, unknown>; address: string; estimate: number; status: string; created_at: string }
 export type CustomerOffer = { id: string; code: string; title: string; discount_type: string; discount_value: number; valid_until?: string }
 export type CustomerService = { code: string; name: string; description?: string; base_price_paise: number; is_active: boolean; config?: { capacityOptions?: string[]; detailOptions?: string[]; waterTypeOptions?: string[]; tankerCountOptions?: string[]; optionSurchargesPaise?: Record<string, Record<string, number>> } }
-export type CustomerPhoneVerification = { phone: string; verified: boolean }
+export type CustomerPhoneVerification = { phone: string; verified: boolean; phoneVerified?: boolean; challengeId?: string | null; required?: boolean }
 export type PublicTracking = {
   bookingReference: string
   status: string
@@ -144,7 +144,7 @@ async function fetchPaymentReceipt(bookingId: string): Promise<PaymentReceipt | 
 }
 
 export const customerApi = {
-  requestGuestOtp: (phone: string) => apiFetch<GuestOtpChallenge>('/auth/guest/request-otp', { method: 'POST', successMessage: feedbackContent.success.codeSent, body: JSON.stringify({ phone }) }),
+  requestGuestOtp: (phone: string) => apiFetch<GuestOtpChallenge>('/auth/guest/request-otp', { method: 'POST', body: JSON.stringify({ phone }) }),
   verifyGuestOtp: (payload: { challengeId: string; phone: string; otp: string; name?: string }) => apiFetch<GuestSession>('/auth/guest/verify-otp', { method: 'POST', body: JSON.stringify(payload) }),
   verifyContactPhoneOtp: (payload: { challengeId: string; phone: string; otp: string }) => apiFetch<{ verified: boolean }>('/auth/guest/verify-phone', { method: 'POST', successMessage: feedbackContent.success.phoneVerified, body: JSON.stringify(payload) }),
   bookings: async (offset = 0) => {

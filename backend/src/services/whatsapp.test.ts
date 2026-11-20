@@ -4,7 +4,9 @@ const state = vi.hoisted(() => ({
     COMBIRDS_WABA_API_KEY: 'test-api-key' as string | undefined,
     COMBIRDS_WABA_CAMPAIGN_NAME: 'URBAN TANKER' as string | undefined,
     COMBIRDS_WABA_SOURCE: 'backend-tests',
+    COMBIRDS_WABA_ENDPOINT: 'https://backend.api-wa.co/campaign/combirds/api/v2',
     COMBIRDS_WABA_BUTTONS_JSON: undefined as string | undefined,
+    COMBIRDS_CAMPAIGN_USER_NAME: 'Urban Tanker',
     COMBIRDS_CAMPAIGN_USER_REGISTRATION_OTP: undefined as string | undefined,
   },
   rows: new Map<string, { body: string; is_active: boolean }>(),
@@ -38,7 +40,7 @@ describe('Combirds WhatsApp campaign API', () => {
   it('builds Combirds v2 payload with ordered variable references and attributes', () => {
     const payload = buildCombirdsCampaignPayload('key', 'URBAN TANKER', '+919876543210', 'Maneesh', 'website', 'Hello {{first_name}}, OTP {{otp}}', { first_name: 'Maneesh', otp: '123456' })
     expect(payload).toMatchObject({
-      apiKey: 'key', campaignName: 'URBAN TANKER', destination: '919876543210', userName: 'Maneesh',
+      apiKey: 'key', campaignName: 'URBAN TANKER', destination: '919876543210', userName: 'Urban Tanker',
       templateParams: ['$FirstName', '$Otp'], source: 'website',
       paramsFallbackValue: { FirstName: 'Maneesh', Otp: '123456' },
       attributes: {}, media: {}, buttons: [], carouselCards: [], location: {},
@@ -74,7 +76,8 @@ describe('Combirds WhatsApp campaign API', () => {
   it('returns provider errors without throwing', async () => {
     state.rows.set('user_registration_otp', { body: 'Your code is {{otp}}', is_active: true })
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ success: false, message: 'Invalid API key' }), { status: 401 })))
-    expect((await sendTemplateWhatsApp('user_registration_otp', '+919876543210', { otp: '1' })).reason).toContain('Invalid API key')
+    const result = await sendTemplateWhatsApp('user_registration_otp', '+919876543210', { otp: '1' })
+    expect('reason' in result && result.reason).toContain('Invalid API key')
   })
   it('accepts a successful 2xx Combirds response without a success boolean', async () => {
     state.rows.set('user_registration_otp', { body: 'Your code is {{otp}}', is_active: true })
@@ -85,15 +88,38 @@ describe('Combirds WhatsApp campaign API', () => {
   it('rejects an explicit provider failure even when the HTTP response is 200', async () => {
     state.rows.set('user_registration_otp', { body: 'Your code is {{otp}}', is_active: true })
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ status: 'failed', message: 'Campaign inactive' }), { status: 200 })))
-    expect((await sendTemplateWhatsApp('user_registration_otp', '+919876543210', { otp: '123456' })).reason).toContain('Campaign inactive')
+    const result = await sendTemplateWhatsApp('user_registration_otp', '+919876543210', { otp: '123456' })
+    expect('reason' in result && result.reason).toContain('Campaign inactive')
   })
 
   it('supports Combirds URL buttons with dynamic OTP values from environment JSON', async () => {
     state.rows.set('user_registration_otp', { body: 'Your code is {{otp}}', is_active: true })
-    state.config.COMBIRDS_WABA_BUTTONS_JSON = '[{\"type\":\"button\",\"sub_type\":\"url\",\"index\":0,\"parameters\":[{\"type\":\"text\",\"text\":\"{{otp}}\"}]}]'
+    state.config.COMBIRDS_WABA_BUTTONS_JSON = '[{"type":"button","sub_type":"url","index":0,"parameters":[{"type":"text","text":"{{otp}}"}]}]'
     await sendTemplateWhatsApp('user_registration_otp', '+919876543210', { otp: '123456' })
     const [, init] = vi.mocked(fetch).mock.calls[0]!
     expect(JSON.parse(String(init?.body)).buttons).toEqual([{ type: 'button', sub_type: 'url', index: 0, parameters: [{ type: 'text', text: '123456' }] }])
+  })
+
+  it('does not log the OTP, full phone, or template body when the provider echoes request data', async () => {
+    state.rows.set('user_registration_otp', { body: 'Your code is {{otp}}', is_active: true })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      status: 'failed',
+      message: 'OTP 123456 for +919876543210 could not be delivered',
+    }), { status: 500 })))
+    const logs = [
+      vi.spyOn(console, 'log').mockImplementation(() => undefined),
+      vi.spyOn(console, 'info').mockImplementation(() => undefined),
+      vi.spyOn(console, 'error').mockImplementation(() => undefined),
+    ]
+    try {
+      await sendTemplateWhatsApp('user_registration_otp', '+919876543210', { otp: '123456' })
+      const output = JSON.stringify(logs.flatMap((log) => log.mock.calls))
+      expect(output).not.toContain('123456')
+      expect(output).not.toContain('+919876543210')
+      expect(output).not.toContain('Your code is')
+    } finally {
+      for (const log of logs) log.mockRestore()
+    }
   })
 
 })

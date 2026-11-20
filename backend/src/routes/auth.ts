@@ -1,4 +1,4 @@
-import { Router, type Request, type Response } from 'express'
+import { Router, type NextFunction, type Request, type Response } from 'express'
 import crypto from 'node:crypto'
 import { z } from 'zod'
 import rateLimit from 'express-rate-limit'
@@ -9,6 +9,7 @@ import { clientPlatformFromHeader, credentialsSchema, themeModeSchema } from '..
 import { decodeSelfieJpeg, selfieBucket, selfieObjectPath } from '../services/selfie.js'
 import { isEmailConfigured, sendEmail } from '../services/providers.js'
 import { sendTemplateWhatsApp } from '../services/whatsapp.js'
+import { sendTemplateSms } from '../services/sms.js'
 import { emailCodeEmail, passwordResetEmail } from '../services/signupEmail.js'
 import { hashOtp, otpMatches } from '../services/otp.js'
 import { config } from '../config.js'
@@ -36,6 +37,8 @@ const passwordResetLimit = rateLimit({ windowMs: 15 * minute, limit: 5, standard
 const passwordResetEmailLimit = rateLimit({ windowMs: 60 * minute, limit: 3, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:password-reset-email:', 'memory'), keyGenerator: (request) => `reset:${normalizeIdentifier(request.body?.email)}`, handler: (_request, response) => { response.status(202).json({ accepted: true }) } })
 const passwordUpdateLimit = rateLimit({ windowMs: 15 * minute, limit: 10, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:password-update:', 'memory'), message: { error: 'Too many password update attempts. Try again later.' } })
 const phoneOtpVerifyLimit = rateLimit({ windowMs: 15 * minute, limit: 20, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:phone-otp-verify:', 'memory'), message: { error: 'Too many verification attempts. Try again later.' } })
+const phoneVerifyUserRequestLimit = rateLimit({ windowMs: 10 * minute, limit: 3, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:phone-verify-user:', 'memory'), keyGenerator: (request) => `user:${request.authUser!.id}`, message: { error: 'Too many phone verification codes requested. Try again later.' } })
+const phoneVerifyUserConfirmLimit = rateLimit({ windowMs: 15 * minute, limit: 20, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:phone-verify-confirm-user:', 'memory'), keyGenerator: (request) => `user:${request.authUser!.id}`, message: { error: 'Too many phone verification attempts. Try again later.' } })
 const emailOtpRequestLimit = rateLimit({ windowMs: 10 * minute, limit: 10, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:email-otp-request:', 'memory'), message: { error: 'Too many code requests. Try again later.' } })
 const emailOtpEmailLimit = rateLimit({ windowMs: 15 * minute, limit: 5, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:email-otp-email:', 'memory'), keyGenerator: (request) => `email:${normalizeIdentifier(request.body?.email)}`, message: { error: 'Too many codes requested for this email. Try again later.' } })
 const emailOtpVerifyLimit = rateLimit({ windowMs: 15 * minute, limit: 20, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:email-otp-verify:', 'memory'), message: { error: 'Too many verification attempts. Try again later.' } })
@@ -105,6 +108,14 @@ function mailErrorCode(error: unknown) {
 
 const phoneSchema = z.string().regex(/^\d{10}$/)
 const duplicatePhoneMessage = 'This mobile number is already registered. Try signing in instead.'
+const phoneVerificationExpiredSeconds = 5 * 60
+
+function requirePhoneVerifyDialogEnabled(_request: Request, response: Response, next: NextFunction) {
+  if (!config.PHONE_VERIFY_DIALOG_ENABLED) {
+    return response.status(404).json({ error: 'Phone verification is disabled.' })
+  }
+  return next()
+}
 
 async function findVerifiedPhoneOwner(phone: string, exceptUserId?: string) {
   let query = supabase
@@ -116,60 +127,151 @@ async function findVerifiedPhoneOwner(phone: string, exceptUserId?: string) {
   return query.maybeSingle()
 }
 
-async function issueOtpChallenge(response: Response, phone: string, template: 'booking_verification_otp' | 'user_registration_otp') {
-  const otp = config.USE_DEFAULT_VERIFICATION_CODE ? config.DEFAULT_VERIFICATION_CODE : crypto.randomInt(100000, 1000000).toString()
-  const { data: challenge, error } = await supabase
-    .from('guest_otp_challenges')
-    .insert({ phone_e164: phone, otp_hash: hashOtp(otp), expires_at: new Date(Date.now() + 10 * minute).toISOString() })
-    .select('id')
-    .single()
-  if (error || !challenge) {
-    logFailure('otp.challenge_create_failed', response.locals.requestId, error?.message)
-    return response.status(500).json({ error: 'OTP could not be created.' })
-  }
-  if (!config.USE_DEFAULT_VERIFICATION_CODE) {
-    try {
-      const delivery = await sendTemplateWhatsApp(template, phone, { otp })
-      if (!delivery.queued) {
-        await supabase.from('guest_otp_challenges').delete().eq('id', challenge.id)
-        return response.status(503).json({ error: 'Mobile verification is not configured yet.' })
-      }
-    } catch (deliveryError) {
-      logFailure('otp.delivery_failed', response.locals.requestId, deliveryError instanceof Error ? deliveryError.message : undefined)
-      await supabase.from('guest_otp_challenges').delete().eq('id', challenge.id)
-      return response.status(502).json({ error: 'OTP delivery failed.' })
-    }
-  }
-  return response.status(202).json({ challengeId: challenge.id, expiresInSeconds: 600, resendAfterSeconds: emailCodeResendAfterSeconds })
+type OtpTemplate = 'booking_verification_otp' | 'user_registration_otp'
+type PhoneOtpChannel = 'whatsapp' | 'sms'
+
+async function claimOtpChallenge(
+  phone: string,
+  template: OtpTemplate,
+  otp: string,
+  options: { userId?: string; expiresInSeconds?: number } = {},
+) {
+  const { data, error } = await supabase.rpc('claim_guest_otp_challenge', {
+    p_phone_e164: phone,
+    p_template_key: template,
+    p_otp_hash: hashOtp(otp),
+    p_expires_at: new Date(Date.now() + (options.expiresInSeconds ?? 10 * 60) * 1000).toISOString(),
+    p_resend_after_seconds: emailCodeResendAfterSeconds,
+    p_user_id: options.userId ?? null,
+  })
+  const challenge = (data as Array<{
+    challenge_id: string
+    delivery_channel: string | null
+    created_at: string
+    expires_at: string
+    is_new: boolean
+  }> | null)?.[0]
+  return { challenge, error }
 }
 
-// Signup never fails because of WhatsApp. When WhatsApp is not configured the phone leg is reported as not sent and the email flow continues.
-async function sendPhoneOtpBestEffort(requestId: unknown, phone: string, template: 'booking_verification_otp' | 'user_registration_otp' = 'user_registration_otp'): Promise<{ sent: boolean; challengeId: string | null }> {
-  const otp = config.USE_DEFAULT_VERIFICATION_CODE ? config.DEFAULT_VERIFICATION_CODE : crypto.randomInt(100000, 1000000).toString()
-  const { data: challenge, error } = await supabase
-    .from('guest_otp_challenges')
-    .insert({ phone_e164: phone, otp_hash: hashOtp(otp), expires_at: new Date(Date.now() + 10 * minute).toISOString() })
-    .select('id')
-    .single()
-  if (error || !challenge) {
-    logFailure('signup.phone_challenge_failed', requestId, error?.message)
-    return { sent: false, challengeId: null }
-  }
-  if (config.USE_DEFAULT_VERIFICATION_CODE) return { sent: true, challengeId: challenge.id }
+async function sendPhoneOtp(phone: string, template: OtpTemplate, otp: string): Promise<PhoneOtpChannel | null> {
   try {
-    const delivery = await sendTemplateWhatsApp(template, phone, { otp })
-    if (delivery.queued) return { sent: true, challengeId: challenge.id }
-    logFailure('signup.phone_not_sent', requestId, 'reason' in delivery ? delivery.reason : undefined)
-  } catch (deliveryError) {
-    logFailure('signup.phone_delivery_failed', requestId, deliveryError instanceof Error ? deliveryError.message : undefined)
+    const whatsapp = await sendTemplateWhatsApp(template, phone, { otp })
+    if (whatsapp.queued) return 'whatsapp'
+  } catch {
+    logger.warn('otp.whatsapp_submission_exception')
   }
-  await supabase.from('guest_otp_challenges').delete().eq('id', challenge.id)
-  return { sent: false, challengeId: null }
+  if (!config.featureFlags.otp_sms_fallback_enabled) return null
+
+  try {
+    const sms = await sendTemplateSms(template, phone, { otp })
+    return sms.queued ? 'sms' : null
+  } catch {
+    logger.warn('otp.sms_fallback_exception')
+    return null
+  }
+}
+
+async function issueOtpChallenge(
+  response: Response,
+  phone: string,
+  template: OtpTemplate,
+  options: { userId?: string; expiresInSeconds?: number } = {},
+) {
+  const otp = config.USE_DEFAULT_VERIFICATION_CODE ? config.DEFAULT_VERIFICATION_CODE : crypto.randomInt(100000, 1000000).toString()
+  const { challenge, error } = await claimOtpChallenge(phone, template, otp, options)
+  if (error || !challenge) {
+    logFailure('otp.challenge_lookup_failed', response.locals.requestId)
+    return response.status(500).json({ error: 'OTP could not be created.' })
+  }
+  if (!challenge.is_new) {
+    if (challenge.delivery_channel !== 'whatsapp' && challenge.delivery_channel !== 'sms') {
+      return response.status(503).json({ error: 'OTP delivery is still being processed. Try again shortly.' })
+    }
+    const expiresInSeconds = Math.max(0, Math.ceil((Date.parse(challenge.expires_at) - Date.now()) / 1000))
+    const resendAfterSeconds = Math.max(0, emailCodeResendAfterSeconds - Math.floor((Date.now() - Date.parse(challenge.created_at)) / 1000))
+    return response.status(202).json({
+      challengeId: challenge.challenge_id,
+      channel: challenge.delivery_channel,
+      expiresInSeconds,
+      resendAfterSeconds,
+    })
+  }
+
+  let channel: PhoneOtpChannel | null = 'whatsapp'
+  if (!config.USE_DEFAULT_VERIFICATION_CODE) {
+    channel = await sendPhoneOtp(phone, template, otp)
+    if (!channel) {
+      await supabase.from('guest_otp_challenges').delete().eq('id', challenge.challenge_id)
+      logFailure('otp.delivery_failed', response.locals.requestId)
+      return response.status(503).json({ error: 'OTP delivery failed.' })
+    }
+  }
+  const { error: channelError } = await supabase
+    .from('guest_otp_challenges')
+    .update({ delivery_channel: channel })
+    .eq('id', challenge.challenge_id)
+  if (channelError) {
+    logFailure('otp.delivery_channel_update_failed', response.locals.requestId)
+    return response.status(500).json({ error: 'OTP delivery could not be confirmed.' })
+  }
+  return response.status(202).json({
+    challengeId: challenge.challenge_id,
+    channel,
+    expiresInSeconds: Math.max(0, Math.ceil((Date.parse(challenge.expires_at) - Date.now()) / 1000)),
+    resendAfterSeconds: emailCodeResendAfterSeconds,
+  })
+}
+
+// Signup never fails because phone delivery is unavailable; email verification can continue.
+async function sendPhoneOtpBestEffort(requestId: unknown, phone: string, template: OtpTemplate = 'user_registration_otp'): Promise<{ sent: boolean; challengeId: string | null; channel: PhoneOtpChannel | null }> {
+  const otp = config.USE_DEFAULT_VERIFICATION_CODE ? config.DEFAULT_VERIFICATION_CODE : crypto.randomInt(100000, 1000000).toString()
+  const { challenge, error } = await claimOtpChallenge(phone, template, otp)
+  if (error || !challenge) {
+    logFailure('signup.phone_challenge_lookup_failed', requestId)
+    return { sent: false, challengeId: null, channel: null }
+  }
+  if (!challenge.is_new) {
+    if (challenge.delivery_channel !== 'whatsapp' && challenge.delivery_channel !== 'sms') {
+      return { sent: false, challengeId: null, channel: null }
+    }
+    return {
+      sent: true,
+      challengeId: challenge.challenge_id,
+      channel: challenge.delivery_channel,
+    }
+  }
+
+  const channel = config.USE_DEFAULT_VERIFICATION_CODE
+    ? 'whatsapp'
+    : await sendPhoneOtp(phone, template, otp)
+  if (channel) {
+    const { error: channelError } = await supabase
+      .from('guest_otp_challenges')
+      .update({ delivery_channel: channel })
+      .eq('id', challenge.challenge_id)
+    if (!channelError) return { sent: true, challengeId: challenge.challenge_id, channel }
+    logFailure('signup.phone_delivery_channel_update_failed', requestId)
+  }
+  await supabase.from('guest_otp_challenges').delete().eq('id', challenge.challenge_id)
+  logFailure('signup.phone_delivery_failed', requestId)
+  return { sent: false, challengeId: null, channel: null }
 }
 
 // The attempt counter is incremented atomically in SQL before the code is compared, so guesses cannot race past the limit.
-async function passesChallengeAttempt(response: Response, challengeId: string, phone: string, otp: string): Promise<boolean> {
-  const { data, error } = await supabase.rpc('consume_guest_otp_attempt', { p_challenge_id: challengeId, p_phone: phone })
+async function passesChallengeAttempt(
+  response: Response,
+  challengeId: string,
+  phone: string,
+  otp: string,
+  userId?: string,
+): Promise<boolean> {
+  const { data, error } = await supabase.rpc(
+    userId ? 'consume_user_phone_otp_attempt' : 'consume_guest_otp_attempt',
+    userId
+      ? { p_challenge_id: challengeId, p_phone: phone, p_user_id: userId }
+      : { p_challenge_id: challengeId, p_phone: phone },
+  )
   if (error) {
     logFailure('otp.attempt_failed', response.locals.requestId, error.message)
     response.status(500).json({ error: verificationFailedMessage })
@@ -187,15 +289,15 @@ async function passesChallengeAttempt(response: Response, challengeId: string, p
   return true
 }
 
-async function markChallengeVerified(response: Response, challengeId: string): Promise<boolean> {
-  const { data, error } = await supabase
+async function markChallengeVerified(response: Response, challengeId: string, userId?: string): Promise<boolean> {
+  let query = supabase
     .from('guest_otp_challenges')
     .update({ verified_at: new Date().toISOString() })
     .eq('id', challengeId)
     .is('verified_at', null)
     .gt('expires_at', new Date().toISOString())
-    .select('id')
-    .maybeSingle()
+  query = userId ? query.eq('user_id', userId) : query.is('user_id', null)
+  const { data, error } = await query.select('id').maybeSingle()
   if (error) {
     logFailure('otp.consume_failed', response.locals.requestId, error.message)
     response.status(500).json({ error: verificationFailedMessage })
@@ -322,6 +424,7 @@ function sendSignedInUser(request: Request, response: Response, session: { acces
       role: profile.role,
       themeMode: profile.theme_mode ?? 'system',
       selfieRequired: profile.selfie_required === true,
+      ...phoneProfileFields(profile),
     },
   })
 }
@@ -332,9 +435,19 @@ type ProfileRow = {
   full_name: string
   username: string | null
   phone_e164: string | null
+  phone_verified: boolean | null
+  phone_verified_at: string | null
   theme_mode: string | null
   selfie_required: boolean | null
   approval_status: string | null
+}
+
+function phoneProfileFields(profile: Pick<ProfileRow, 'phone_e164' | 'phone_verified' | 'phone_verified_at'>) {
+  const phone = toE164IndianMobile(profile.phone_e164 ?? '')
+  return {
+    phone: phone?.slice(-10) ?? '',
+    phoneVerified: profile.phone_verified === true || Boolean(profile.phone_verified_at),
+  }
 }
 
 router.post('/guest/request-otp', otpRequestLimit, otpPhoneLimit, async (request, response) => {
@@ -353,6 +466,7 @@ router.post('/guest/request-otp', otpRequestLimit, otpPhoneLimit, async (request
   return response.status(202).json({
     challengeId: phoneCode.challengeId,
     phoneOtpSent: phoneCode.sent,
+    phoneOtpChannel: phoneCode.channel,
     emailChallengeId: emailCode.ok ? emailCode.challengeId : null,
     emailOtpSent: emailCode.ok,
     expiresInSeconds: emailCodeExpiresInSeconds,
@@ -431,7 +545,7 @@ router.post('/guest/verify-otp', async (request, response) => {
     logFailure('guest.user_create_failed', response.locals.requestId, createError?.message)
     return response.status(500).json({ error: 'Guest account could not be created.' })
   }
-  const { error: profileError } = await supabase.from('profiles').upsert({ id: created.user.id, full_name: name, phone_e164: phone, phone_verified_at: new Date().toISOString(), username: `guest_${parsed.data.phone}`, role: 'customer' })
+  const { error: profileError } = await supabase.from('profiles').upsert({ id: created.user.id, full_name: name, phone_e164: phone, phone_verified: true, phone_verified_at: new Date().toISOString(), username: `guest_${parsed.data.phone}`, role: 'customer' })
   if (profileError) {
     logFailure('guest.profile_failed', response.locals.requestId, profileError.message)
     const { error: rollbackError } = await authSupabase.auth.admin.deleteUser(created.user.id)
@@ -482,6 +596,94 @@ router.post('/phone/request-otp', otpRequestLimit, otpPhoneLimit, async (request
   return issueOtpChallenge(response, phone, 'user_registration_otp')
 })
 
+router.post(
+  '/phone/verify/request',
+  requireAuth,
+  requirePhoneVerifyDialogEnabled,
+  otpRequestLimit,
+  phoneVerifyUserRequestLimit,
+  otpPhoneLimit,
+  async (request, response) => {
+    const parsed = z.object({ phone: phoneSchema }).safeParse(request.body)
+    if (!parsed.success) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
+    const phone = toE164IndianMobile(parsed.data.phone)
+    if (!phone) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
+    const userId = request.authUser!.id
+    const { data: owner, error: ownerError } = await findVerifiedPhoneOwner(phone, userId)
+    if (ownerError) {
+      logFailure('phone_verification.owner_lookup_failed', response.locals.requestId, ownerError.message)
+      return response.status(500).json({ error: verificationFailedMessage })
+    }
+    if (owner) return response.status(409).json({ error: duplicatePhoneMessage })
+    return issueOtpChallenge(response, phone, 'user_registration_otp', {
+      userId,
+      expiresInSeconds: phoneVerificationExpiredSeconds,
+    })
+  },
+)
+
+router.post(
+  '/phone/verify/confirm',
+  requireAuth,
+  requirePhoneVerifyDialogEnabled,
+  phoneVerifyUserConfirmLimit,
+  async (request, response) => {
+    const parsed = z.object({
+      phone: phoneSchema,
+      code: z.string().regex(/^\d{6}$/),
+    }).safeParse(request.body)
+    if (!parsed.success) return response.status(400).json({ error: 'Enter the 6-digit verification code.' })
+    const phone = toE164IndianMobile(parsed.data.phone)
+    if (!phone) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
+    const userId = request.authUser!.id
+    const { data: challenge, error: challengeError } = await supabase
+      .from('guest_otp_challenges')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('phone_e164', phone)
+      .eq('template_key', 'user_registration_otp')
+      .is('verified_at', null)
+      .gt('expires_at', new Date().toISOString())
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (challengeError) {
+      logFailure('phone_verification.challenge_lookup_failed', response.locals.requestId, challengeError.message)
+      return response.status(500).json({ error: verificationFailedMessage })
+    }
+    if (!challenge) return response.status(400).json({ error: invalidCodeMessage })
+    if (!(await passesChallengeAttempt(response, challenge.id, phone, parsed.data.code, userId))) return
+
+    const { data: owner, error: ownerError } = await findVerifiedPhoneOwner(phone, userId)
+    if (ownerError) {
+      logFailure('phone_verification.owner_lookup_failed', response.locals.requestId, ownerError.message)
+      return response.status(500).json({ error: verificationFailedMessage })
+    }
+    if (owner) return response.status(409).json({ error: duplicatePhoneMessage })
+    if (!(await markChallengeVerified(response, challenge.id, userId))) return
+
+    const verifiedAt = new Date().toISOString()
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .update({ phone_e164: phone, phone_verified: true, phone_verified_at: verifiedAt })
+      .eq('id', userId)
+      .select('phone_e164,phone_verified,phone_verified_at')
+      .single()
+    if (profileError?.code === '23505') {
+      return response.status(409).json({ error: duplicatePhoneMessage })
+    }
+    if (profileError || !profile) {
+      logFailure('phone_verification.profile_update_failed', response.locals.requestId, profileError?.message)
+      return response.status(500).json({ error: verificationFailedMessage })
+    }
+    return response.json({
+      verified: true,
+      ...phoneProfileFields(profile as Pick<ProfileRow, 'phone_e164' | 'phone_verified' | 'phone_verified_at'>),
+      challengeId: challenge.id,
+    })
+  },
+)
+
 router.post('/phone/verify-otp', phoneOtpVerifyLimit, async (request, response) => {
   const parsed = z.object({
     challengeId: z.string().uuid(),
@@ -500,7 +702,7 @@ router.post('/phone/verify-otp', phoneOtpVerifyLimit, async (request, response) 
 
   const { data: matchedProfile, error: lookupError } = await supabase
     .from('profiles')
-    .select('id,role,full_name,username,phone_e164,theme_mode,selfie_required')
+    .select('id,role,full_name,username,phone_e164,phone_verified,phone_verified_at,theme_mode,selfie_required')
     .eq('phone_e164', phone)
     .not('phone_verified_at', 'is', null)
     .maybeSingle()
@@ -572,13 +774,14 @@ router.post('/phone/verify-otp', phoneOtpVerifyLimit, async (request, response) 
         id: created.user.id,
         full_name: parsed.data.name,
         phone_e164: phone,
+        phone_verified: true,
         phone_verified_at: new Date().toISOString(),
         username,
         role: 'customer',
         signup_platform: signupPlatform,
         selfie_required: signupPlatform === 'mobile',
       })
-      .select('id,role,full_name,username,phone_e164,theme_mode,selfie_required')
+      .select('id,role,full_name,username,phone_e164,phone_verified,phone_verified_at,theme_mode,selfie_required')
       .single()
     if (profileError || !createdProfile) {
       logFailure('phone.profile_create_failed', response.locals.requestId, profileError?.message)
@@ -615,6 +818,7 @@ router.post('/phone/verify-otp', phoneOtpVerifyLimit, async (request, response) 
       role: profile.role,
       themeMode: profile.theme_mode ?? 'system',
       selfieRequired: profile.selfie_required === true,
+      ...phoneProfileFields(profile),
     },
   })
 })
@@ -656,14 +860,14 @@ router.post('/email/verify-otp', emailOtpVerifyLimit, async (request, response) 
   if (row.user_id) {
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
-      .select('id,role,full_name,username,phone_e164,theme_mode,selfie_required,approval_status')
+      .select('id,role,full_name,username,phone_e164,phone_verified,phone_verified_at,theme_mode,selfie_required,approval_status')
       .eq('id', row.user_id)
       .maybeSingle()
     if (profileError) {
       logFailure('email.profile_lookup_failed', response.locals.requestId, profileError.message)
       return response.status(500).json({ error: verificationFailedMessage })
     }
-    const existing = profile as ProfileRow | null
+    let existing = profile as ProfileRow | null
     const pendingApproval = (existing?.role === 'admin' || existing?.role === 'vendor') && existing.approval_status === 'pending'
     if (!existing || (!['customer', 'vendor'].includes(existing.role) && !pendingApproval)) {
       return response.status(403).json({ error: 'This account cannot sign in here.' })
@@ -679,9 +883,10 @@ router.post('/email/verify-otp', emailOtpVerifyLimit, async (request, response) 
         if (owner) return response.status(409).json({ error: duplicatePhoneMessage })
       }
       if (!(await markChallengeVerified(response, phoneChallengeId))) return
+      const verifiedAt = new Date().toISOString()
       const { error: phoneUpdateError } = await supabase
         .from('profiles')
-        .update({ phone_e164: phoneE164, phone_verified_at: new Date().toISOString() })
+        .update({ phone_e164: phoneE164, phone_verified: true, phone_verified_at: verifiedAt })
         .eq('id', row.user_id)
       if (phoneUpdateError?.code === '23505') {
         return response.status(409).json({ error: duplicatePhoneMessage })
@@ -689,6 +894,14 @@ router.post('/email/verify-otp', emailOtpVerifyLimit, async (request, response) 
       if (phoneUpdateError) {
         logFailure('signup.phone_update_failed', response.locals.requestId, phoneUpdateError.message)
         return response.status(500).json({ error: verificationFailedMessage })
+      }
+      if (existing) {
+        existing = {
+          ...existing,
+          phone_e164: phoneE164,
+          phone_verified: true,
+          phone_verified_at: verifiedAt,
+        }
       }
     }
     if (!(await markEmailChallengeVerified(response, challengeId))) return
@@ -734,12 +947,12 @@ router.post('/email/verify-otp', emailOtpVerifyLimit, async (request, response) 
   }
   const signupPlatform = clientPlatformFromHeader(request.header('x-client-platform'))
   const verifiedPhone = phoneChallengeId && phoneE164
-    ? { phone_e164: phoneE164, phone_verified_at: new Date().toISOString() }
+    ? { phone_e164: phoneE164, phone_verified: true, phone_verified_at: new Date().toISOString() }
     : {}
   const { data: createdProfile, error: profileError } = await supabase
     .from('profiles')
     .upsert({ id: created.user.id, full_name: name, username, role: 'customer', signup_platform: signupPlatform, selfie_required: false, ...verifiedPhone })
-    .select('id,role,full_name,username,phone_e164,theme_mode,selfie_required')
+    .select('id,role,full_name,username,phone_e164,phone_verified,phone_verified_at,theme_mode,selfie_required')
     .single()
   if (profileError || !createdProfile) {
     logFailure('email.profile_create_failed', response.locals.requestId, profileError?.message)
@@ -835,7 +1048,7 @@ router.post('/login', loginLimit, loginAccountLimit, async (request, response) =
   }
   const { data, error } = await authSupabase.auth.signInWithPassword({ email, password: parsed.data.password })
   if (error || !data.session || !data.user) return response.status(401).json({ error: 'Invalid credentials' })
-  const { data: profile, error: profileError } = await supabase.from('profiles').select('id,role,full_name,username,phone_e164,theme_mode,selfie_required,approval_status').eq('id', data.user.id).single()
+  const { data: profile, error: profileError } = await supabase.from('profiles').select('id,role,full_name,username,phone_e164,phone_verified,phone_verified_at,theme_mode,selfie_required,approval_status').eq('id', data.user.id).single()
   if (profileError || !profile) return response.status(403).json({ error: 'Account profile is unavailable.' })
   if ((profile.role === 'admin' || profile.role === 'vendor') && profile.approval_status !== 'approved') {
     return response.status(403).json({ error: adminApprovalPendingMessage })
@@ -863,7 +1076,7 @@ router.post('/login', loginLimit, loginAccountLimit, async (request, response) =
     }
   }
   setRefreshCookie(response, data.session.refresh_token)
-  const user = { id: data.user.id, email: data.user.email, username: profile.username ?? username ?? data.user.email, name: profile.full_name ?? data.user.email, role: profile.role ?? 'customer', themeMode: profile.theme_mode ?? 'system', selfieRequired: profile.selfie_required === true }
+  const user = { id: data.user.id, email: data.user.email, username: profile.username ?? username ?? data.user.email, name: profile.full_name ?? data.user.email, role: profile.role ?? 'customer', themeMode: profile.theme_mode ?? 'system', selfieRequired: profile.selfie_required === true, ...phoneProfileFields(profile as ProfileRow) }
   return response.json({ accessToken: data.session.access_token, ...refreshTokenForClient(request.header('x-client-platform'), data.session.refresh_token), user })
 })
 
@@ -991,6 +1204,7 @@ router.post('/signup', signupLimit, signupEmailLimit, async (request, response) 
     expiresInSeconds: emailCodeExpiresInSeconds,
     resendAfterSeconds: emailCodeResendAfterSeconds,
     phoneOtpSent: phoneCode.sent,
+    phoneOtpChannel: phoneCode.channel,
     phoneChallengeId: phoneCode.challengeId,
     userId,
     role,
@@ -1064,8 +1278,32 @@ router.post('/mobile-refresh', async (request, response) => {
   if (!parsed.success) return response.status(400).json({ error: 'Refresh token required' })
   const { data, error } = await authSupabase.auth.refreshSession({ refresh_token: parsed.data.refreshToken })
   if (error || !data.session || !data.user) return response.status(401).json({ error: 'Session expired' })
-  const { data: profile } = await supabase.from('profiles').select('id,role,full_name,username,theme_mode').eq('id', data.user.id).single()
-  return response.json({ accessToken: data.session.access_token, ...refreshTokenForClient(request.header('x-client-platform'), data.session.refresh_token), user: { id: data.user.id, email: data.user.email, username: profile?.username ?? data.user.email, name: profile?.full_name ?? data.user.email, role: profile?.role ?? 'customer', themeMode: profile?.theme_mode ?? 'system' } })
+  const { data: profile } = await supabase.from('profiles').select('id,role,full_name,username,phone_e164,phone_verified,phone_verified_at,theme_mode,selfie_required').eq('id', data.user.id).single()
+  return response.json({ accessToken: data.session.access_token, ...refreshTokenForClient(request.header('x-client-platform'), data.session.refresh_token), user: { id: data.user.id, email: data.user.email, username: profile?.username ?? data.user.email, name: profile?.full_name ?? data.user.email, role: profile?.role ?? 'customer', themeMode: profile?.theme_mode ?? 'system', selfieRequired: profile?.selfie_required === true, ...(profile ? phoneProfileFields(profile as ProfileRow) : { phone: '', phoneVerified: false }) } })
+})
+
+router.get('/me', requireAuth, async (request, response) => {
+  const { data: profile, error } = await supabase
+    .from('profiles')
+    .select('id,role,full_name,username,phone_e164,phone_verified,phone_verified_at,theme_mode,selfie_required')
+    .eq('id', request.authUser!.id)
+    .single()
+  if (error || !profile) {
+    logFailure('auth.profile_lookup_failed', response.locals.requestId, error?.message)
+    return response.status(404).json({ error: 'Profile not found.' })
+  }
+  return response.json({
+    user: {
+      id: request.authUser!.id,
+      email: request.authUser!.email,
+      username: profile.username ?? request.authUser!.email,
+      name: profile.full_name,
+      role: profile.role,
+      themeMode: profile.theme_mode ?? 'system',
+      selfieRequired: profile.selfie_required === true,
+      ...phoneProfileFields(profile as ProfileRow),
+    },
+  })
 })
 
 router.get('/preferences', requireAuth, async (request, response) => {

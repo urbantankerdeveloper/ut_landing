@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { workspaceContent as w } from '../content/workspace'
 
-export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+export function Modal({ title, onClose, children, dismissible = true, contentClassName }: { title: string; onClose: () => void; children: ReactNode; dismissible?: boolean; contentClassName?: string }) {
   const dialogRef = useRef<HTMLElement>(null)
   const titleId = useId()
   const onCloseRef = useRef(onClose)
@@ -14,7 +14,10 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
     const firstFocusable = dialogRef.current?.querySelector<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])')
     if (!dialogRef.current?.contains(document.activeElement)) (firstFocusable ?? dialogRef.current)?.focus()
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') { event.preventDefault(); onCloseRef.current(); return }
+      if (event.key === 'Escape') {
+        if (dismissible) { event.preventDefault(); onCloseRef.current() }
+        return
+      }
       if (event.key !== 'Tab' || !dialogRef.current) return
       const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'))
       if (!focusable.length) return
@@ -27,6 +30,6 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => { document.removeEventListener('keydown', handleKeyDown); previousFocus?.focus() }
-  }, [])
-  return <div className="modal-backdrop-new" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section ref={dialogRef} className="modal-new" role="dialog" tabIndex={-1} aria-modal="true" aria-labelledby={titleId}><button className="modal-close-new" type="button" onClick={onClose} aria-label={w.common.closeDialog}><X size={17} aria-hidden="true" /></button><p className="eyebrow">{w.modal.eyebrow}</p><h2 id={titleId}>{title}</h2>{children}</section></div>
+  }, [dismissible])
+  return <div className="modal-backdrop-new" role="presentation" onMouseDown={(event) => { if (dismissible && event.target === event.currentTarget) onClose() }}><section ref={dialogRef} className={`modal-new ${contentClassName ?? ''}`} role="dialog" tabIndex={-1} aria-modal="true" aria-labelledby={titleId}>{dismissible && <button className="modal-close-new" type="button" onClick={onClose} aria-label={w.common.closeDialog}><X size={17} aria-hidden="true" /></button>}<p className="eyebrow">{w.modal.eyebrow}</p><h2 id={titleId}>{title}</h2>{children}</section></div>
 }

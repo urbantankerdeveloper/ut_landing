@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 export const defaultFeatureFlags = {
   duplicate_phone_check_enabled: true,
+  otp_sms_fallback_enabled: true,
   mpin_cooldown_enabled: true,
   multi_service_tasks_enabled: false,
   order_tracking_board_enabled: true,
@@ -19,6 +20,7 @@ export const defaultFeatureFlags = {
 
 const overridesSchema = z.object({
   duplicate_phone_check_enabled: z.boolean().optional(),
+  otp_sms_fallback_enabled: z.boolean().optional(),
   mpin_cooldown_enabled: z.boolean().optional(),
   multi_service_tasks_enabled: z.boolean().optional(),
   order_tracking_board_enabled: z.boolean().optional(),

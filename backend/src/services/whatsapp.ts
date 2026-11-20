@@ -184,31 +184,38 @@ function providerRejected(result: Record<string, unknown>) {
 // }
 
 function resolveCampaignName(key: SmsTemplateKey) {
-  console.log('Resolving Combirds campaign name for template key:', key)
   const campaignNames: Record<SmsTemplateKey, string | undefined> = {
     user_registration_otp:
+      config.COMBIRDS_CAMPAIGN_USER_REGISTRATION_OTP ??
       config.COMBIRDS_WABA_CAMPAIGN_NAME,
 
     booking_verification_otp:
+      config.COMBIRDS_CAMPAIGN_BOOKING_VERIFICATION_OTP ??
       config.COMBIRDS_WABA_CAMPAIGN_NAME,
 
     guest_booking_confirmation:
-      config.COMBIRDS_CAMPAIGN_GUEST_BOOKING_CONFIRMATION,
+      config.COMBIRDS_CAMPAIGN_GUEST_BOOKING_CONFIRMATION ??
+      config.COMBIRDS_WABA_CAMPAIGN_NAME,
 
     vendor_acceptance:
-      config.COMBIRDS_CAMPAIGN_VENDOR_ACCEPTANCE,
+      config.COMBIRDS_CAMPAIGN_VENDOR_ACCEPTANCE ??
+      config.COMBIRDS_WABA_CAMPAIGN_NAME,
 
     delivery_confirmation:
-      config.COMBIRDS_CAMPAIGN_DELIVERY_CONFIRMATION,
+      config.COMBIRDS_CAMPAIGN_DELIVERY_CONFIRMATION ??
+      config.COMBIRDS_WABA_CAMPAIGN_NAME,
 
     delivery_otp:
-      config.COMBIRDS_CAMPAIGN_DELIVERY_OTP,
+      config.COMBIRDS_CAMPAIGN_DELIVERY_OTP ??
+      config.COMBIRDS_WABA_CAMPAIGN_NAME,
 
     cod_switched_to_online:
-      config.COMBIRDS_CAMPAIGN_COD_SWITCHED_TO_ONLINE,
+      config.COMBIRDS_CAMPAIGN_COD_SWITCHED_TO_ONLINE ??
+      config.COMBIRDS_WABA_CAMPAIGN_NAME,
 
     cod_reverted_to_cash:
-      config.COMBIRDS_CAMPAIGN_COD_REVERTED_TO_CASH,
+      config.COMBIRDS_CAMPAIGN_COD_REVERTED_TO_CASH ??
+      config.COMBIRDS_WABA_CAMPAIGN_NAME,
   }
 
   return campaignNames[key]
@@ -223,7 +230,7 @@ export function toWhatsAppRecipient(phone: string) {
     )
   }
 
-  return `+${digits}`
+  return digits
 }
 
 export function toCombirdsAttributeName(key: string) {
@@ -250,8 +257,7 @@ export function buildCombirdsCampaignPayload(
     ...body.matchAll(/\{\{(\w+)\}\}/g),
   ].map((match) => match[1]!)
 
-  // Send actual resolved values instead of literal $Otp references.
-  const templateParams = placeholders.map((key) => {
+  const paramsFallbackValue = Object.fromEntries(placeholders.map((key) => {
     if (!(key in vars)) {
       throw new Error(
         `WhatsApp template is missing variable ${key}`,
@@ -266,8 +272,11 @@ export function buildCombirdsCampaignPayload(
       )
     }
 
-    return value
-  })
+    return [toCombirdsAttributeName(key), value]
+  }))
+  const templateParams = placeholders.map(
+    (key) => `$${toCombirdsAttributeName(key)}`,
+  )
 
   return {
     apiKey,
@@ -275,6 +284,7 @@ export function buildCombirdsCampaignPayload(
     destination: toWhatsAppRecipient(destination),
     userName: config.COMBIRDS_CAMPAIGN_USER_NAME ?? userName,
     templateParams,
+    paramsFallbackValue,
     source,
     media: {},
     buttons: resolveCombirdsButtons(vars),
@@ -334,7 +344,6 @@ export async function sendTemplateWhatsApp(
     console.error('[WhatsApp OTP] Send skipped', {
       template: key,
       destination: maskWhatsAppRecipient(phoneE164),
-      error: reason,
     })
 
     return {
@@ -375,15 +384,6 @@ export async function sendTemplateWhatsApp(
         `WhatsApp template ${key} is missing or inactive`,
       )
     }
-
-    console.info('[WhatsApp Template Debug]', {
-      templateKey: key,
-      campaignName,
-      body,
-      placeholders: [
-        ...body.matchAll(/\{\{(\w+)\}\}/g),
-      ].map(match => match[1]),
-    })
 
     const requiredVariables =
       smsTemplateRequiredVariables[key as SmsTemplateKey] ?? []
@@ -478,12 +478,10 @@ export async function sendTemplateWhatsApp(
       campaignName,
       destination: maskWhatsAppRecipient(phoneE164),
       httpStatus: response.status,
-      requestId:
-        typeof requestId === 'string' ? requestId : undefined,
     })
 
     return {
-      queued: true,
+      queued: true as const,
       provider: 'combirds-whatsapp' as const,
       requestId:
         typeof requestId === 'string' ? requestId : undefined,
@@ -498,7 +496,6 @@ export async function sendTemplateWhatsApp(
     console.error('[WhatsApp OTP] Send failed', {
       template: key,
       destination: maskWhatsAppRecipient(phoneE164),
-      error: reason,
     })
 
     return {
