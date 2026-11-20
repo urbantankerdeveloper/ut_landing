@@ -122,6 +122,8 @@ const verifyPaymentRow = { id: 'row-1', booking_id: 'booking-1', amount_paise: 5
 beforeEach(() => {
   state.results.clear()
   state.calls.length = 0
+  config.PHONE_VERIFY_DIALOG_ENABLED = false
+  config.PHONE_VERIFY_REQUIRED_AFTER = undefined
   config.featureFlags.online_payment_enabled = true
   config.featureFlags.vendor_earnings_realtime_enabled = true
   vi.stubEnv('RAZORPAY_WEBHOOK_SECRET', WEBHOOK_SECRET)
@@ -406,6 +408,20 @@ describe('switch gateway booking to cash on delivery', () => {
 
 describe('checkout payments before a booking exists', () => {
   const checkout = { id: 'checkout-1', customer_id: 'cust-1', status: 'awaiting_payment', quoted_amount_paise: 50000, provider_order_id: null, booking_id: null }
+
+  it('blocks authenticated payment-order creation after the phone-verification deadline', async () => {
+    config.PHONE_VERIFY_DIALOG_ENABLED = true
+    config.PHONE_VERIFY_REQUIRED_AFTER = new Date(Date.now() - 1_000).toISOString()
+
+    const response = await request(buildApp())
+      .post('/api/payment/razorpay/order')
+      .send({ checkoutId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11' })
+
+    expect(response.status).toBe(403)
+    expect(response.body.code).toBe('PHONE_NOT_VERIFIED')
+    expect(state.calls.some((call) => call.table === 'profiles')).toBe(true)
+    expect(state.calls.some((call) => call.table === 'booking_checkouts')).toBe(false)
+  })
 
   it('does not create new Razorpay orders when online payments are disabled', async () => {
     config.featureFlags.online_payment_enabled = false

@@ -1,7 +1,7 @@
 # API changes
 
 **Status:** Service enquiry and pricing-history APIs are implemented; dependent additive migrations must be applied before deployment.
-**Updated:** 2026-11-18
+**Updated:** 2026-11-20
 
 ## Existing API inventory
 
@@ -21,6 +21,7 @@ The dated `docs/api_consumers.md` contains endpoint-by-endpoint request/response
 
 | Date | Change | Compatibility / validation |
 | --- | --- | --- |
+| 2026-11-20 | Hardened authenticated account phone verification: requests no longer reveal duplicate-number ownership; confirms report conflicts. Five incorrect codes lock further confirmation and resends for 10 minutes. 24-hour caps are 10 sends per phone and 30 per IP. Added masked structured audit events. Optional `PHONE_VERIFY_REQUIRED_AFTER` (ISO-8601) gates customer order and payment-order creation plus authenticated partner applications after its deadline when `PHONE_VERIFY_DIALOG_ENABLED=true`; `/auth/me` exposes `phoneVerificationRequired`. | Uses the existing shared OTP challenge table and provider fallback. Guest partner applicants retain their existing OTP flow, and per-order contact OTP remains separate and required by default. Apply `backend/supabase/006_phone_verification_hardening.sql` before deploying; migration not applied. |
 | 2026-11-18 | None. Stage 1 was repository analysis and documentation. | No API implementation changed; endpoint behavior was inspected, not newly integration-tested. |
 | 2026-11-18 | Flutter Admin Setup now consumes existing `GET /api/admin/enquiries?page=&pageSize=` and `PATCH /api/admin/enquiries/:id` contracts for listing and status/response updates. | No backend route or response contract changed. Authenticated MockClient contract tests cover pagination and update payloads; a stored response note is not an outbound customer notification. |
 | 2026-11-18 | Added public `POST /api/service-enquiries` for Empty Tanker, RMC Concrete Mixer, and Borewell enquiries. Added admin `GET /api/admin/enquiries/:id/history`; admin status/response updates now write the acting admin and preserve an existing response when omitted. | Zod validation and IP rate limiting are covered by route tests; web API and mobile history contracts are tested. Apply `002_service_enquiries.sql` before deploying these API changes. Live database, SMS/email and deployed Admin App behavior were not tested. |

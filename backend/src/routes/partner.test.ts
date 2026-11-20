@@ -10,6 +10,10 @@ const mocks = vi.hoisted(() => ({
   notificationError: false,
   admins: [{ id: 'admin-1' }],
   featureFlags: { partner_application_otp_enabled: true },
+  authUser: null as null | { id: string; email: string },
+  phoneProfile: { phone_verified: false, phone_verified_at: null as string | null },
+  phoneVerifyDialogEnabled: false,
+  phoneVerifyRequiredAfter: undefined as string | undefined,
 }))
 
 function chain(table: string, ops: Array<{ name: string; args: unknown[] }> = []): unknown {
@@ -26,6 +30,11 @@ function chain(table: string, ops: Array<{ name: string; args: unknown[] }> = []
 
 vi.mock('../supabase.js', () => ({
   supabase: {
+    auth: {
+      getUser: (token: string) => Promise.resolve(token === 'valid-token' && mocks.authUser
+        ? { data: { user: mocks.authUser }, error: null }
+        : { data: { user: null }, error: { message: 'invalid' } }),
+    },
     from: (table: string) => chain(table),
     storage: {
       from: () => ({
@@ -34,7 +43,13 @@ vi.mock('../supabase.js', () => ({
     },
   },
 }))
-vi.mock('../config.js', () => ({ config: { featureFlags: mocks.featureFlags } }))
+vi.mock('../config.js', () => ({
+  config: {
+    featureFlags: mocks.featureFlags,
+    get PHONE_VERIFY_DIALOG_ENABLED() { return mocks.phoneVerifyDialogEnabled },
+    get PHONE_VERIFY_REQUIRED_AFTER() { return mocks.phoneVerifyRequiredAfter },
+  },
+}))
 vi.mock('express-rate-limit', () => ({ default: () => (_req: unknown, _res: unknown, next: () => void) => next() }))
 vi.mock('../services/scaling.js', () => ({ limiterStore: () => undefined }))
 vi.mock('../lib/logger.js', () => ({ logger: { error: vi.fn() } }))
@@ -67,6 +82,10 @@ function buildApp() {
 
 beforeEach(() => {
   mocks.featureFlags.partner_application_otp_enabled = true
+  mocks.authUser = null
+  mocks.phoneProfile = { phone_verified: false, phone_verified_at: null }
+  mocks.phoneVerifyDialogEnabled = false
+  mocks.phoneVerifyRequiredAfter = undefined
   mocks.respond.mockReset()
   mocks.createSignedUploadUrl.mockReset()
   mocks.createSignedUploadUrl.mockResolvedValue({ data: { token: 'upload-token', signedUrl: 'https://storage.example/upload' }, error: null })
@@ -86,7 +105,12 @@ beforeEach(() => {
       if (ops.some((operation) => operation.name === 'insert')) return { data: { id: APPLICATION_ID, reference: 'PA-12345678', status: 'submitted' }, error: null }
       return { data: mocks.existingApplication, error: null }
     }
-    if (table === 'profiles') return { data: mocks.admins, error: null }
+    if (table === 'profiles') {
+      const selected = ops.find((operation) => operation.name === 'select')?.args[0]
+      return selected === 'phone_verified,phone_verified_at'
+        ? { data: mocks.phoneProfile, error: null }
+        : { data: mocks.admins, error: null }
+    }
     if (table === 'notifications') return { data: null, error: mocks.notificationError ? { code: 'NOTIFY_FAILED' } : null }
     return { data: null, error: null }
   })
@@ -177,9 +201,38 @@ describe('POST /applications', () => {
     expect(challengeQuery?.[1]).toEqual(expect.arrayContaining([
       { name: 'eq', args: ['id', CHALLENGE] },
       { name: 'eq', args: ['phone_e164', '+919876543210'] },
+      { name: 'is', args: ['user_id', null] },
       { name: 'not', args: ['verified_at', 'is', null] },
     ]))
     expect(mocks.respond.mock.calls.some(([table]) => table === 'partner_applications')).toBe(true)
+  })
+
+  it('blocks an authenticated partner applicant past the configured deadline when the account phone is unverified', async () => {
+    mocks.authUser = { id: 'partner-user', email: 'owner@example.com' }
+    mocks.phoneVerifyDialogEnabled = true
+    mocks.phoneVerifyRequiredAfter = new Date(Date.now() - 1_000).toISOString()
+    const response = await request(buildApp())
+      .post('/applications')
+      .set('authorization', 'Bearer valid-token')
+      .send(application)
+
+    expect(response.status).toBe(403)
+    expect(response.body).toEqual({
+      code: 'PHONE_NOT_VERIFIED',
+      error: 'Verify your account phone number before submitting a partner application.',
+    })
+    expect(mocks.respond.mock.calls.some(([table]) => table === 'partner_applications')).toBe(false)
+  })
+
+  it('keeps guest applicants on the existing per-application OTP flow', async () => {
+    mocks.phoneVerifyDialogEnabled = true
+    mocks.phoneVerifyRequiredAfter = new Date(Date.now() - 1_000).toISOString()
+    const response = await request(buildApp()).post('/applications').send({
+      ...application,
+      phoneChallengeId: CHALLENGE,
+    })
+
+    expect(response.status).toBe(201)
   })
 
   it('stores the supplied details and documents for each vehicle', async () => {

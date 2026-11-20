@@ -16,9 +16,13 @@ import { config } from '../config.js'
 import { logger } from '../lib/logger.js'
 import { isAllowedCorsOrigin } from '../lib/corsOrigins.js'
 import { limiterStore } from '../services/scaling.js'
+import { isPhoneVerificationRequired, logPhoneVerificationAudit } from '../services/phoneVerification.js'
 
 const router = Router()
 const minute = 60 * 1000
+// Conservative send caps: 10 codes per phone and 30 requests per IP in a 24-hour window.
+const phoneVerificationDailyPhoneLimit = 10
+const phoneVerificationDailyIpLimit = 30
 const bcryptPasswordMaxBytes = 72
 const unmatchedLoginEmail = 'no-account@login.urbantanker.local'
 const invalidCodeMessage = 'This verification code is invalid or expired.'
@@ -39,6 +43,8 @@ const passwordUpdateLimit = rateLimit({ windowMs: 15 * minute, limit: 10, standa
 const phoneOtpVerifyLimit = rateLimit({ windowMs: 15 * minute, limit: 20, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:phone-otp-verify:', 'memory'), message: { error: 'Too many verification attempts. Try again later.' } })
 const phoneVerifyUserRequestLimit = rateLimit({ windowMs: 10 * minute, limit: 3, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:phone-verify-user:', 'memory'), keyGenerator: (request) => `user:${request.authUser!.id}`, message: { error: 'Too many phone verification codes requested. Try again later.' } })
 const phoneVerifyUserConfirmLimit = rateLimit({ windowMs: 15 * minute, limit: 20, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:phone-verify-confirm-user:', 'memory'), keyGenerator: (request) => `user:${request.authUser!.id}`, message: { error: 'Too many phone verification attempts. Try again later.' } })
+const phoneVerifyDailyPhoneLimit = rateLimit({ windowMs: 24 * 60 * minute, limit: phoneVerificationDailyPhoneLimit, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:phone-verify-daily-phone:', 'memory'), keyGenerator: (request) => `phone:${phoneLimitKey(request.body?.phone)}`, message: { error: 'Daily phone verification code limit reached. Try again tomorrow.' } })
+const phoneVerifyDailyIpLimit = rateLimit({ windowMs: 24 * 60 * minute, limit: phoneVerificationDailyIpLimit, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:phone-verify-daily-ip:', 'memory'), message: { error: 'Daily phone verification request limit reached. Try again tomorrow.' } })
 const emailOtpRequestLimit = rateLimit({ windowMs: 10 * minute, limit: 10, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:email-otp-request:', 'memory'), message: { error: 'Too many code requests. Try again later.' } })
 const emailOtpEmailLimit = rateLimit({ windowMs: 15 * minute, limit: 5, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:email-otp-email:', 'memory'), keyGenerator: (request) => `email:${normalizeIdentifier(request.body?.email)}`, message: { error: 'Too many codes requested for this email. Try again later.' } })
 const emailOtpVerifyLimit = rateLimit({ windowMs: 15 * minute, limit: 20, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:auth:email-otp-verify:', 'memory'), message: { error: 'Too many verification attempts. Try again later.' } })
@@ -115,6 +121,16 @@ function requirePhoneVerifyDialogEnabled(_request: Request, response: Response, 
     return response.status(404).json({ error: 'Phone verification is disabled.' })
   }
   return next()
+}
+
+function phoneVerificationAudit(request: Request, action: string, phone?: string, details: Record<string, unknown> = {}) {
+  logPhoneVerificationAudit({
+    action,
+    userId: request.authUser!.id,
+    ip: request.ip,
+    phone,
+    details,
+  })
 }
 
 async function findVerifiedPhoneOwner(phone: string, exceptUserId?: string) {
@@ -603,22 +619,49 @@ router.post(
   otpRequestLimit,
   phoneVerifyUserRequestLimit,
   otpPhoneLimit,
+  phoneVerifyDailyPhoneLimit,
+  phoneVerifyDailyIpLimit,
   async (request, response) => {
     const parsed = z.object({ phone: phoneSchema }).safeParse(request.body)
-    if (!parsed.success) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
+    if (!parsed.success) {
+      phoneVerificationAudit(request, 'request_failure', undefined, { reason: 'invalid_request' })
+      return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
+    }
     const phone = toE164IndianMobile(parsed.data.phone)
-    if (!phone) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
+    if (!phone) {
+      phoneVerificationAudit(request, 'request_failure', undefined, { reason: 'invalid_phone' })
+      return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
+    }
     const userId = request.authUser!.id
-    const { data: owner, error: ownerError } = await findVerifiedPhoneOwner(phone, userId)
-    if (ownerError) {
-      logFailure('phone_verification.owner_lookup_failed', response.locals.requestId, ownerError.message)
+    phoneVerificationAudit(request, 'request', phone)
+    const { data: lockout, error: lockoutError } = await supabase
+      .from('user_phone_verification_lockouts')
+      .select('locked_until')
+      .eq('user_id', userId)
+      .maybeSingle()
+    if (lockoutError) {
+      logFailure('phone_verification.lockout_lookup_failed', response.locals.requestId)
       return response.status(500).json({ error: verificationFailedMessage })
     }
-    if (owner) return response.status(409).json({ error: duplicatePhoneMessage })
-    return issueOtpChallenge(response, phone, 'user_registration_otp', {
+    const retryAfterSeconds = lockout?.locked_until
+      ? Math.ceil((Date.parse(lockout.locked_until) - Date.now()) / 1000)
+      : 0
+    if (retryAfterSeconds > 0) {
+      phoneVerificationAudit(request, 'lockout', phone, { retryAfterSeconds })
+      return response.status(423).json({
+        code: 'PHONE_VERIFY_LOCKED',
+        error: `Phone verification is temporarily locked. Try again in ${retryAfterSeconds} seconds.`,
+        retryAfterSeconds,
+      })
+    }
+    const issued = await issueOtpChallenge(response, phone, 'user_registration_otp', {
       userId,
       expiresInSeconds: phoneVerificationExpiredSeconds,
     })
+    if (issued.statusCode >= 400) {
+      phoneVerificationAudit(request, 'request_failure', phone, { statusCode: issued.statusCode })
+    }
+    return issued
   },
 )
 
@@ -632,36 +675,98 @@ router.post(
       phone: phoneSchema,
       code: z.string().regex(/^\d{6}$/),
     }).safeParse(request.body)
-    if (!parsed.success) return response.status(400).json({ error: 'Enter the 6-digit verification code.' })
+    if (!parsed.success) {
+      phoneVerificationAudit(request, 'confirm_failure', undefined, { reason: 'invalid_request' })
+      return response.status(400).json({ error: 'Enter the 6-digit verification code.' })
+    }
     const phone = toE164IndianMobile(parsed.data.phone)
-    if (!phone) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
+    if (!phone) {
+      phoneVerificationAudit(request, 'confirm_failure', undefined, { reason: 'invalid_phone' })
+      return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
+    }
     const userId = request.authUser!.id
-    const { data: challenge, error: challengeError } = await supabase
-      .from('guest_otp_challenges')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('phone_e164', phone)
-      .eq('template_key', 'user_registration_otp')
-      .is('verified_at', null)
-      .gt('expires_at', new Date().toISOString())
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-    if (challengeError) {
-      logFailure('phone_verification.challenge_lookup_failed', response.locals.requestId, challengeError.message)
+    const { data: attempts, error: attemptsError } = await supabase.rpc('begin_user_phone_verification_attempt', {
+      p_phone: phone,
+      p_user_id: userId,
+    })
+    if (attemptsError) {
+      logFailure('phone_verification.attempt_failed', response.locals.requestId)
+      phoneVerificationAudit(request, 'confirm_failure', phone, { reason: 'verification_unavailable' })
       return response.status(500).json({ error: verificationFailedMessage })
     }
-    if (!challenge) return response.status(400).json({ error: invalidCodeMessage })
-    if (!(await passesChallengeAttempt(response, challenge.id, phone, parsed.data.code, userId))) return
+    const attempt = (attempts as Array<{
+      challenge_id: string | null
+      otp_hash: string | null
+      outcome: 'check' | 'invalid' | 'locked'
+      retry_after_seconds: number | null
+    }> | null)?.[0]
+    if (attempt?.outcome === 'locked') {
+      const retryAfterSeconds = Math.max(1, attempt.retry_after_seconds ?? 10 * 60)
+      phoneVerificationAudit(request, 'lockout', phone, { retryAfterSeconds })
+      phoneVerificationAudit(request, 'confirm_failure', phone, { reason: 'locked' })
+      return response.status(423).json({
+        code: 'PHONE_VERIFY_LOCKED',
+        error: `Phone verification is temporarily locked. Try again in ${retryAfterSeconds} seconds.`,
+        retryAfterSeconds,
+      })
+    }
+    if (!attempt?.challenge_id || !attempt.otp_hash || attempt.outcome !== 'check') {
+      phoneVerificationAudit(request, 'confirm_failure', phone, { reason: 'invalid_or_expired' })
+      return response.status(400).json({ error: invalidCodeMessage })
+    }
+    const codeMatches = otpMatches(attempt.otp_hash, parsed.data.code)
+    const { data: results, error: resultError } = await supabase.rpc('finish_user_phone_verification_attempt', {
+      p_challenge_id: attempt.challenge_id,
+      p_user_id: userId,
+      p_is_correct: codeMatches,
+    })
+    if (resultError) {
+      logFailure('phone_verification.result_failed', response.locals.requestId)
+      phoneVerificationAudit(request, 'confirm_failure', phone, { reason: 'verification_unavailable' })
+      return response.status(500).json({ error: verificationFailedMessage })
+    }
+    const result = (results as Array<{ outcome: 'valid' | 'incorrect' | 'invalid' | 'locked'; locked_until: string | null }> | null)?.[0]
+    if (result?.outcome === 'locked') {
+      const retryAfterSeconds = result.locked_until
+        ? Math.max(1, Math.ceil((Date.parse(result.locked_until) - Date.now()) / 1000))
+        : 10 * 60
+      phoneVerificationAudit(request, 'lockout', phone, { retryAfterSeconds })
+      phoneVerificationAudit(request, 'confirm_failure', phone, { reason: 'locked' })
+      return response.status(423).json({
+        code: 'PHONE_VERIFY_LOCKED',
+        error: `Phone verification is temporarily locked. Try again in ${retryAfterSeconds} seconds.`,
+        retryAfterSeconds,
+      })
+    }
+    if (result?.outcome === 'incorrect') {
+      phoneVerificationAudit(request, 'confirm_failure', phone, { reason: 'incorrect_code' })
+      return response.status(400).json({ error: incorrectCodeMessage })
+    }
+    if (result?.outcome !== 'valid') {
+      phoneVerificationAudit(request, 'confirm_failure', phone, { reason: 'invalid_or_expired' })
+      return response.status(400).json({ error: invalidCodeMessage })
+    }
 
     const { data: owner, error: ownerError } = await findVerifiedPhoneOwner(phone, userId)
     if (ownerError) {
-      logFailure('phone_verification.owner_lookup_failed', response.locals.requestId, ownerError.message)
+      logFailure('phone_verification.owner_lookup_failed', response.locals.requestId)
+      phoneVerificationAudit(request, 'confirm_failure', phone, { reason: 'verification_unavailable' })
       return response.status(500).json({ error: verificationFailedMessage })
     }
-    if (owner) return response.status(409).json({ error: duplicatePhoneMessage })
-    if (!(await markChallengeVerified(response, challenge.id, userId))) return
-
+    if (owner) {
+      phoneVerificationAudit(request, 'confirm_failure', phone, { reason: 'duplicate_phone' })
+      return response.status(409).json({ error: duplicatePhoneMessage })
+    }
+    const { data: existingProfile, error: existingProfileError } = await supabase
+      .from('profiles')
+      .select('phone_e164')
+      .eq('id', userId)
+      .single()
+    if (existingProfileError) {
+      logFailure('phone_verification.profile_lookup_failed', response.locals.requestId)
+      phoneVerificationAudit(request, 'confirm_failure', phone, { reason: 'verification_unavailable' })
+      return response.status(500).json({ error: verificationFailedMessage })
+    }
     const verifiedAt = new Date().toISOString()
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
@@ -670,16 +775,20 @@ router.post(
       .select('phone_e164,phone_verified,phone_verified_at')
       .single()
     if (profileError?.code === '23505') {
+      phoneVerificationAudit(request, 'confirm_failure', phone, { reason: 'duplicate_phone' })
       return response.status(409).json({ error: duplicatePhoneMessage })
     }
     if (profileError || !profile) {
-      logFailure('phone_verification.profile_update_failed', response.locals.requestId, profileError?.message)
+      logFailure('phone_verification.profile_update_failed', response.locals.requestId)
+      phoneVerificationAudit(request, 'confirm_failure', phone, { reason: 'profile_update_failed' })
       return response.status(500).json({ error: verificationFailedMessage })
     }
+    phoneVerificationAudit(request, 'confirm_success', phone)
+    if (existingProfile.phone_e164 !== phone) phoneVerificationAudit(request, 'number_change', phone)
     return response.json({
       verified: true,
       ...phoneProfileFields(profile as Pick<ProfileRow, 'phone_e164' | 'phone_verified' | 'phone_verified_at'>),
-      challengeId: challenge.id,
+      challengeId: attempt.challenge_id,
     })
   },
 )
@@ -1301,6 +1410,9 @@ router.get('/me', requireAuth, async (request, response) => {
       role: profile.role,
       themeMode: profile.theme_mode ?? 'system',
       selfieRequired: profile.selfie_required === true,
+      ...(config.PHONE_VERIFY_DIALOG_ENABLED
+        ? { phoneVerificationRequired: isPhoneVerificationRequired() }
+        : {}),
       ...phoneProfileFields(profile as ProfileRow),
     },
   })

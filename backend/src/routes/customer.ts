@@ -21,15 +21,28 @@ import { databaseFailure, failure } from '../lib/httpErrors.js'
 import { listWindow, sendList } from '../lib/listParams.js'
 import { cachedCatalog } from '../services/catalogCache.js'
 import { limiterStore } from '../services/scaling.js'
+import { isPhoneVerificationRequired, isPhoneVerified, logPhoneVerificationAudit } from '../services/phoneVerification.js'
 const router = Router()
 const catalogCacheControl = 'private, max-age=30, stale-while-revalidate=120'
 const quoteLimit = rateLimit({ windowMs: 10 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:customer:quote:', 'open'), passOnStoreError: true, keyGenerator: (request) => request.authUser!.id, message: { error: 'Too many quote requests. Try again later.' } })
 const phoneVerificationWindowMs = 15 * 60 * 1000
 function recentVerificationCutoff() { return new Date(Date.now() - phoneVerificationWindowMs).toISOString() }
 function bookingReference() { return `UT-${crypto.randomBytes(5).toString('hex').toUpperCase()}` }
-async function recentPhoneVerification(challengeId: string | undefined, phoneE164: string) {
+async function consumeRecentPhoneVerification(challengeId: string | undefined, phoneE164: string) {
   if (!challengeId) return { verified: false, error: null }
-  const { data, error } = await supabase.from('guest_otp_challenges').select('id').eq('id', challengeId).eq('phone_e164', phoneE164).not('verified_at', 'is', null).gte('verified_at', recentVerificationCutoff()).maybeSingle()
+  const { data, error } = await supabase
+    .from('guest_otp_challenges')
+    .update({ consumed_at: new Date().toISOString() })
+    .eq('id', challengeId)
+    .eq('phone_e164', phoneE164)
+    .eq('template_key', 'booking_verification_otp')
+    .is('user_id', null)
+    .is('consumed_at', null)
+    .not('verified_at', 'is', null)
+    .gte('verified_at', recentVerificationCutoff())
+    .gt('expires_at', new Date().toISOString())
+    .select('id')
+    .maybeSingle()
   return { verified: Boolean(data), error }
 }
 async function passwordIsCorrect(email: string, password: string) {
@@ -147,7 +160,7 @@ router.get('/phone-verification', async (request, response) => {
       required: false,
     })
   }
-  const { data: challenge, error } = await supabase.from('guest_otp_challenges').select('id').eq('phone_e164', phoneE164).not('verified_at', 'is', null).gte('verified_at', recentVerificationCutoff()).order('verified_at', { ascending: false }).limit(1).maybeSingle()
+  const { data: challenge, error } = await supabase.from('guest_otp_challenges').select('id').eq('phone_e164', phoneE164).eq('template_key', 'booking_verification_otp').is('user_id', null).is('consumed_at', null).not('verified_at', 'is', null).gte('verified_at', recentVerificationCutoff()).gt('expires_at', new Date().toISOString()).order('verified_at', { ascending: false }).limit(1).maybeSingle()
   if (error) return databaseFailure(response, 'customer.phone_verification_failed', error, 500)
   response.json({
     phone: phoneE164.slice(-10),
@@ -235,7 +248,7 @@ async function validateServicePhoneVerification(data: z.infer<typeof bookingSche
   for (const [phone, contact] of contactChallenges) {
     const phoneE164 = toE164IndianMobile(phone)
     if (!phoneE164) return { status: 400, message: 'Enter a valid 10-digit mobile number.' }
-    const { verified, error } = await recentPhoneVerification(contact.challengeId, phoneE164)
+    const { verified, error } = await consumeRecentPhoneVerification(contact.challengeId, phoneE164)
     if (error) return { status: 500, message: 'Phone verification could not be confirmed.' }
     if (!verified) return { status: 400, message: `Verify the contact number for ${contact.serviceId} before booking.` }
   }
@@ -486,13 +499,36 @@ async function debitWalletForBooking(customerId: string, amountPaise: number): P
   }
   return debit.id as string
 }
+
+async function requireAccountPhoneVerification(customerId: string, response: Response) {
+  if (!isPhoneVerificationRequired()) return true
+  const { data: profile, error } = await supabase
+    .from('profiles')
+    .select('phone_verified,phone_verified_at')
+    .eq('id', customerId)
+    .maybeSingle()
+  if (error) {
+    databaseFailure(response, 'customer.phone_verification_failed', error, 500)
+    return false
+  }
+  if (!profile || !isPhoneVerified(profile)) {
+    response.status(403).json({
+      code: 'PHONE_NOT_VERIFIED',
+      error: 'Verify your account phone number before placing an order.',
+    })
+    return false
+  }
+  return true
+}
+
 async function placeQuotedBooking(request: Request, response: Response, includeQuote: boolean) {
+  const customerId = request.authUser!.id
+  if (!(await requireAccountPhoneVerification(customerId, response))) return
   const parsed = bookingSchema.safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Invalid booking', details: parsed.error.flatten() })
   if (!parsed.data.paymentMethod) return response.status(400).json({ error: 'Choose a payment method: wallet, online payment, or cash on delivery.' })
   if (parsed.data.paymentMethod === 'wallet' && !config.featureFlags.wallet_enabled) return response.status(403).json({ error: 'Wallet is currently disabled. Choose another payment method.' })
   if (parsed.data.paymentMethod === 'gateway' && !config.featureFlags.online_payment_enabled) return response.status(503).json({ error: 'Online payments are currently unavailable. Please choose cash on delivery.' })
-  const customerId = request.authUser!.id
   if (!config.REQUIRE_BOOKING_PHONE_VERIFICATION) {
     const { data: profile, error } = await supabase.from('profiles').select('phone_e164').eq('id', customerId).maybeSingle()
     if (error) return databaseFailure(response, 'customer.phone_verification_failed', error, 500)
@@ -634,6 +670,7 @@ router.post('/orders', async (request, response) => placeQuotedBooking(request, 
 router.post('/orders/quote', quoteLimit, async (request, response) => placeQuotedBooking(request, response, true))
 router.post('/checkouts/:checkoutId/cash-on-delivery', async (request, response) => {
   const customerId = request.authUser!.id
+  if (!(await requireAccountPhoneVerification(customerId, response))) return
   const { data: checkout, error } = await supabase.from('booking_checkouts').select('*').eq('id', request.params.checkoutId).eq('customer_id', customerId).maybeSingle()
   if (error) return databaseFailure(response, 'customer.checkout_failed', error, 500)
   if (!checkout) return response.status(404).json({ error: 'Checkout not found' })
@@ -764,18 +801,20 @@ router.patch('/profile', async (request, response) => {
   const currentEmail = request.authUser!.email
   const emailChanged = currentEmail !== undefined && currentEmail !== parsed.data.email
   const profileUpdate: Record<string, unknown> = { full_name: parsed.data.name }
+  let phoneChange: { phone: string; hadExistingPhone: boolean } | null = null
   if (parsed.data.phone !== undefined) {
     const phoneE164 = toE164IndianMobile(parsed.data.phone)
     if (!phoneE164) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
     const { data: current, error: currentError } = await supabase.from('profiles').select('phone_e164').eq('id', userId).maybeSingle()
     if (currentError) return databaseFailure(response, 'customer.profile_lookup_failed', currentError, 500)
     if (toE164IndianMobile(String(current?.phone_e164 ?? '')) !== phoneE164) {
-      const { verified, error } = await recentPhoneVerification(parsed.data.phoneVerificationChallengeId, phoneE164)
+      const { verified, error } = await consumeRecentPhoneVerification(parsed.data.phoneVerificationChallengeId, phoneE164)
       if (error) return databaseFailure(response, 'customer.phone_verification_failed', error, 500)
       if (!verified) return response.status(400).json({ error: 'Verify the new mobile number before changing it.' })
       profileUpdate.phone_e164 = phoneE164
       profileUpdate.phone_verified = true
       profileUpdate.phone_verified_at = new Date().toISOString()
+      phoneChange = { phone: phoneE164, hadExistingPhone: Boolean(current?.phone_e164) }
     }
   }
   if (emailChanged) {
@@ -786,6 +825,15 @@ router.patch('/profile', async (request, response) => {
   }
   const { data, error } = await supabase.from('profiles').update(profileUpdate).eq('id', userId).select().single()
   if (error) return databaseFailure(response, 'customer.profile_update_failed', error, 400)
+  if (config.PHONE_VERIFY_DIALOG_ENABLED && phoneChange) {
+    logPhoneVerificationAudit({
+      action: 'number_change',
+      userId,
+      phone: phoneChange.phone,
+      ip: request.ip,
+      details: { hadExistingPhone: phoneChange.hadExistingPhone },
+    })
+  }
   response.json({ name: data.full_name, email: emailChanged ? parsed.data.email : (currentEmail ?? parsed.data.email), phone: String(data.phone_e164 ?? '').replace(/\D/g, '').slice(-10), phoneVerified: data.phone_verified === true || Boolean(data.phone_verified_at) })
 })
 export default router
