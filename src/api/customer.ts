@@ -1,7 +1,11 @@
 import { ApiError, apiFetch } from './client'
 import { feedbackContent } from '../content/feedback'
 
-export type CustomerBooking = { id: string; reference?: string; orderGroupId?: string; orderGroupReference?: string; orderGroupSize?: number; service: string; services: BookingServiceDetails[]; location: string; status: string; amount: number; scheduledAt: string; phone?: string; notes?: string; paymentMethod?: BookingPaymentMethod; latitude?: number; longitude?: number }
+export type CustomerOrderItem = { id: string; serviceId: string; serviceName: string; status: string; details: BookingServiceDetails; amountPaise: number; location?: string; scheduledAt?: string; fulfilmentId?: string }
+export type CustomerOrderFulfilment = { id: string; status: string; itemIds: string[]; amountPaise: number; location?: string; scheduledAt?: string; vendorName?: string }
+export type MultiServiceOrderItemInput = { serviceId: string; quantity: number; quantityUnit?: string; location: string; deliveryDate: string; slot?: string; latitude?: number; longitude?: number; capacity?: string; waterType?: string; serviceType?: string; details?: Record<string, unknown> }
+export type MultiServiceOrderResult = { id: string; reference?: string; legacyBookingId: string; total_paise?: number; quote?: { subtotalPaise: number; gstPaise: number; bundleDiscountPaise: number; deliveryChargesPaise: number; totalPaise: number }; items: Record<string, unknown>[]; fulfilments: Record<string, unknown>[] }
+export type CustomerBooking = { id: string; reference?: string; orderGroupId?: string; orderGroupReference?: string; orderGroupSize?: number; service: string; services: BookingServiceDetails[]; orderItems?: CustomerOrderItem[]; fulfilments?: CustomerOrderFulfilment[]; location: string; status: string; amount: number; scheduledAt: string; phone?: string; notes?: string; paymentMethod?: BookingPaymentMethod; latitude?: number; longitude?: number }
 export type CustomerBookingPage = { rows: CustomerBooking[]; nextOffset: number | null }
 export type SavedAddress = { id: string; label: string; address: string; city: string; pincode: string; latitude?: number; longitude?: number }
 export type CustomerSubscription = { id: string; name: string; status: 'active' | 'paused' | 'cancelled'; nextDelivery?: string; amount: number }
@@ -35,7 +39,7 @@ export type CreateServiceEnquiryResult = { id: string; subject: string; status: 
 export type WalletTransaction = { id: string; amount: number; type: string; status: string; createdAt?: string }
 export type CustomerContract = { id: string; property_type: string; service_plan: Record<string, unknown>; address: string; estimate: number; status: string; created_at: string }
 export type CustomerOffer = { id: string; code: string; title: string; discount_type: string; discount_value: number; valid_until?: string }
-export type CustomerService = { code: string; name: string; description?: string; base_price_paise: number; is_active: boolean; config?: { capacityOptions?: string[]; detailOptions?: string[]; waterTypeOptions?: string[]; tankerCountOptions?: string[]; optionSurchargesPaise?: Record<string, Record<string, number>> } }
+export type CustomerService = { code: string; name: string; description?: string; base_price_paise: number; is_active: boolean; min_quantity?: number; max_quantity?: number; unit?: string; service_type?: { min_quantity?: number; max_quantity?: number; unit?: string }; config?: { capacityOptions?: string[]; detailOptions?: string[]; waterTypeOptions?: string[]; tankerCountOptions?: string[]; optionSurchargesPaise?: Record<string, Record<string, number>> } }
 export type CustomerPhoneVerification = { phone: string; verified: boolean; phoneVerified?: boolean; challengeId?: string | null; required?: boolean }
 export type PublicTracking = {
   bookingReference: string
@@ -49,7 +53,53 @@ export type PublicTracking = {
 }
 const bookingStatusMap: Record<string, string> = { pending_vendor: 'pending_vendor', vendor_assigned: 'vendor_assigned', accepted: 'accepted', en_route: 'en_route', arrived: 'arrived', delivered: 'delivered', cancelled: 'cancelled' }
 function normalizeBooking(item: Record<string, unknown>): CustomerBooking {
-  const services = Array.isArray(item.service_details)
+  const orderItems = Array.isArray(item.items)
+    ? item.items.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return []
+      const line = entry as Record<string, unknown>
+      const lineDetailsValue = line.service_details ?? line.serviceDetails ?? line.details
+      const lineDetails = lineDetailsValue && typeof lineDetailsValue === 'object' && !Array.isArray(lineDetailsValue)
+        ? lineDetailsValue as Record<string, unknown>
+        : {}
+      const serviceType = line.service_type && typeof line.service_type === 'object'
+        ? line.service_type as Record<string, unknown>
+        : {}
+      const serviceId = String(line.service_type_id ?? line.serviceTypeId ?? line.service_id ?? line.serviceId ?? lineDetails.serviceId ?? '')
+      if (!serviceId) return []
+      const details: BookingServiceDetails = {
+        serviceId,
+        capacity: typeof lineDetails.capacity === 'string' ? lineDetails.capacity : typeof line.capacity === 'string' ? line.capacity : '',
+        waterType: typeof lineDetails.waterType === 'string' ? lineDetails.waterType : undefined,
+        tankerCount: typeof lineDetails.tankerCount === 'string' ? lineDetails.tankerCount : undefined,
+        serviceType: typeof lineDetails.serviceType === 'string' ? lineDetails.serviceType : undefined,
+        quantity: typeof lineDetails.quantity === 'string' ? lineDetails.quantity : typeof line.quantity === 'string' ? line.quantity : undefined,
+        depth: typeof lineDetails.depth === 'string' ? lineDetails.depth : undefined,
+        grade: typeof lineDetails.grade === 'string' ? lineDetails.grade : undefined,
+        pump: typeof lineDetails.pump === 'string' ? lineDetails.pump : undefined,
+        pickupLocation: typeof lineDetails.pickupLocation === 'string' ? lineDetails.pickupLocation : undefined,
+        materialType: typeof lineDetails.materialType === 'string' ? lineDetails.materialType : undefined,
+        details: typeof lineDetails.details === 'string' ? lineDetails.details : typeof line.details === 'string' ? line.details : '',
+        deliveryDate: typeof line.scheduled_for === 'string' ? line.scheduled_for : typeof line.scheduledFor === 'string' ? line.scheduledFor : typeof lineDetails.deliveryDate === 'string' ? lineDetails.deliveryDate : undefined,
+        preferredTime: typeof lineDetails.preferredTime === 'string' ? lineDetails.preferredTime : undefined,
+        location: typeof line.address_text === 'string' ? line.address_text : typeof line.location === 'string' ? line.location : undefined,
+        phone: typeof lineDetails.phone === 'string' ? lineDetails.phone : undefined,
+        latitude: typeof line.latitude === 'number' ? line.latitude : undefined,
+        longitude: typeof line.longitude === 'number' ? line.longitude : undefined,
+      }
+      return [{
+        id: String(line.id ?? line.item_id ?? serviceId),
+        serviceId,
+        serviceName: String(line.service_type_name ?? line.serviceName ?? serviceType.name ?? serviceId),
+        status: String(line.status ?? 'pending'),
+        details,
+        amountPaise: Number(line.price_paise ?? line.amount_paise ?? line.quoted_amount_paise ?? line.quotedAmountPaise ?? 0),
+        location: details.location,
+        scheduledAt: details.deliveryDate,
+        fulfilmentId: typeof line.fulfilment_id === 'string' ? line.fulfilment_id : typeof line.fulfilmentId === 'string' ? line.fulfilmentId : undefined,
+      }]
+    })
+    : []
+  const services: BookingServiceDetails[] = Array.isArray(item.service_details)
     ? item.service_details.flatMap((entry) => {
       if (!entry || typeof entry !== 'object') return []
       const detail = entry as Record<string, unknown>
@@ -76,6 +126,7 @@ function normalizeBooking(item: Record<string, unknown>): CustomerBooking {
       }]
     })
     : []
+  if (!services.length) services.push(...orderItems.map((orderItem) => orderItem.details))
   if (!services.length && typeof item.service_code === 'string') {
     services.push({
       serviceId: item.service_code,
@@ -102,6 +153,32 @@ function normalizeBooking(item: Record<string, unknown>): CustomerBooking {
   const paymentMethod = ['wallet', 'gateway', 'cod'].includes(String(item.payment_method))
     ? item.payment_method as BookingPaymentMethod
     : undefined
+  const fulfilmentsValue = item.fulfilments ?? item.fulfillments
+  const fulfilments = Array.isArray(fulfilmentsValue)
+    ? fulfilmentsValue.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return []
+      const fulfilment = entry as Record<string, unknown>
+      const linkedItems = fulfilment.item_ids ?? fulfilment.itemIds ?? fulfilment.items
+      const itemIds = Array.isArray(linkedItems)
+        ? linkedItems.flatMap((linkedItem) => {
+          if (typeof linkedItem === 'string') return [linkedItem]
+          if (!linkedItem || typeof linkedItem !== 'object') return []
+          const linkedRecord = linkedItem as Record<string, unknown>
+          return typeof linkedRecord.id === 'string' ? [linkedRecord.id] : []
+        })
+        : []
+      return [{
+        id: String(fulfilment.id ?? ''),
+        status: String(fulfilment.status ?? 'pending_vendor'),
+        itemIds,
+        amountPaise: Number(fulfilment.amount_paise ?? fulfilment.amountPaise ?? fulfilment.quoted_amount_paise ?? 0),
+        location: typeof fulfilment.address_text === 'string' ? fulfilment.address_text : typeof fulfilment.location === 'string' ? fulfilment.location : undefined,
+        scheduledAt: typeof fulfilment.scheduled_for === 'string' ? fulfilment.scheduled_for : typeof fulfilment.scheduledFor === 'string' ? fulfilment.scheduledFor : undefined,
+        vendorName: typeof fulfilment.vendor_name === 'string' ? fulfilment.vendor_name : typeof fulfilment.vendorName === 'string' ? fulfilment.vendorName : undefined,
+      }]
+    })
+    : []
+  const totalPaise = item.total_paise ?? item.totalPaise ?? item.quoted_amount_paise
   return {
     id: String(item.id ?? item.reference),
     reference: typeof item.reference === 'string' ? item.reference : undefined,
@@ -110,10 +187,16 @@ function normalizeBooking(item: Record<string, unknown>): CustomerBooking {
     orderGroupSize: typeof item.order_group_size === 'number' ? item.order_group_size : undefined,
     service: serviceNames.join(', ') || String(item.service ?? item.service_code ?? 'Service'),
     services,
+    orderItems,
+    fulfilments,
     location: String(item.location ?? item.address_text ?? ''),
     status: bookingStatusMap[String(item.status)] ?? String(item.status ?? 'pending_vendor'),
-    amount: Number(item.amount ?? item.quoted_amount_paise ?? 0) / (item.quoted_amount_paise !== undefined && item.amount === undefined ? 100 : 1),
-    scheduledAt: String(item.scheduledAt ?? item.scheduled_for ?? services[0]?.deliveryDate ?? ''),
+    amount: item.amount !== undefined
+      ? Number(item.amount)
+      : totalPaise !== undefined
+        ? Number(totalPaise) / 100
+        : 0,
+    scheduledAt: String(item.scheduledAt ?? item.scheduled_for ?? item.scheduledFor ?? services[0]?.deliveryDate ?? ''),
     phone: typeof item.phone === 'string' ? item.phone : typeof item.customer_phone_e164 === 'string' ? item.customer_phone_e164 : undefined,
     notes: typeof item.notes === 'string' ? item.notes : typeof item.access_notes === 'string' ? item.access_notes : undefined,
     paymentMethod,
@@ -158,6 +241,11 @@ export const customerApi = {
   pricing: () => apiFetch<{ gstPercentage: number; gstRate: number; gstWaived?: boolean; testPricingPerServicePaise?: number | null }>('/customer/pricing'),
   pricingForCustomer: () => apiFetch<{ gstPercentage: number; gstRate: number; gstWaived: boolean; testPricingPerServicePaise?: number | null }>('/customer/pricing/me'),
   createBooking: (payload: CreateBookingPayload) => apiFetch<CreateBookingResult>('/customer/orders/quote', { method: 'POST', body: JSON.stringify(payload) }),
+  createMultiServiceOrder: (payload: { idempotencyKey: string; paymentMethod: BookingPaymentMethod; phone?: string; phoneVerificationChallengeId?: string; items: MultiServiceOrderItemInput[] }) => apiFetch<MultiServiceOrderResult>('/customer/multi-service-orders', { method: 'POST', body: JSON.stringify(payload) }),
+  updateMultiServiceOrderItem: (orderId: string, itemId: string, payload: { location?: string; scheduledFor?: string; slot?: string; latitude?: number; longitude?: number }) => apiFetch<unknown>(`/customer/orders/${orderId}/items/${itemId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  cancelMultiServiceOrderItem: (orderId: string, itemId: string) => apiFetch<unknown>(`/customer/orders/${orderId}/items/${itemId}`, { method: 'DELETE' }),
+  requestMultiServiceDeliveryOtp: (orderId: string, fulfilmentId: string) => apiFetch<{ fulfilmentId: string; expiresAt: string; message: string }>(`/customer/orders/${orderId}/fulfilments/${fulfilmentId}/delivery-otp`, { method: 'POST' }),
+  rateMultiServiceFulfilment: (fulfilmentId: string, rating: number, review?: string) => apiFetch<unknown>(`/customer/multi-service-fulfilments/${fulfilmentId}/ratings`, { method: 'POST', body: JSON.stringify({ rating, review }) }),
   tracking: (orderId: string) => apiFetch<TrackingSnapshot>(`/customer/orders/${orderId}/tracking`),
   publicTracking: (token: string) => apiFetch<PublicTracking>(`/public/tracking/${encodeURIComponent(token)}`),
   requestDeliveryOtp: (orderId: string) => apiFetch<{ otp: string; expiresAt: string; smsSent: boolean }>(`/customer/orders/${orderId}/delivery-otp`, { method: 'POST' }),

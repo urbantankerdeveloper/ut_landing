@@ -10,6 +10,7 @@
     "help": "tsx src/scripts/help.ts",
     "db:backup": "tsx src/scripts/backup-postgres.ts",
     "db:reset": "tsx src/scripts/reset-database.ts",
+    "seed:multi-service-demo": "tsx src/scripts/seed-multi-service-demo.ts",
     "dev": "npm run db:check && tsx watch src/server.ts",
     "build": "tsc -p tsconfig.build.json",
     "package:hostinger": "node scripts/package-for-hostinger.mjs",

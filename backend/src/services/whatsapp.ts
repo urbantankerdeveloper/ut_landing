@@ -257,7 +257,7 @@ export function buildCombirdsCampaignPayload(
     ...body.matchAll(/\{\{(\w+)\}\}/g),
   ].map((match) => match[1]!)
 
-  const paramsFallbackValue = Object.fromEntries(placeholders.map((key) => {
+  const resolvedParams = placeholders.map((key) => {
     if (!(key in vars)) {
       throw new Error(
         `WhatsApp template is missing variable ${key}`,
@@ -272,11 +272,13 @@ export function buildCombirdsCampaignPayload(
       )
     }
 
-    return [toCombirdsAttributeName(key), value]
-  }))
-  const templateParams = placeholders.map(
-    (key) => `$${toCombirdsAttributeName(key)}`,
-  )
+    return { key, value }
+  })
+  const paramsFallbackValue = Object.fromEntries(resolvedParams.map(({ key, value }) => [
+    toCombirdsAttributeName(key),
+    value,
+  ]))
+  const templateParams = resolvedParams.map(({ value }) => value)
 
   return {
     apiKey,

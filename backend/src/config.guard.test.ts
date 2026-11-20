@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 
-const base = { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k', SUPABASE_DB_URL: '', OTP_HMAC_SECRET: 'x'.repeat(32), CORS_ORIGINS: '', REQUIRE_BOOKING_PHONE_VERIFICATION: '', PHONE_VERIFY_REQUIRED_AFTER: '', PHONE_VERIFY_DIALOG_ENABLED: 'false', TEST_PRICING_ENABLED: 'false' }
+const base = { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'k', SUPABASE_DB_URL: '', OTP_HMAC_SECRET: 'x'.repeat(32), CORS_ORIGINS: '', REQUIRE_BOOKING_PHONE_VERIFICATION: '', PHONE_VERIFY_REQUIRED_AFTER: '', PHONE_VERIFY_DIALOG_ENABLED: 'false', MULTI_SERVICE_ORDERS_ENABLED: 'false', TEST_PRICING_ENABLED: 'false' }
 
 describe('production configuration guards', () => {
   const original = { ...process.env }
@@ -41,6 +41,30 @@ describe('production configuration guards', () => {
 
     vi.resetModules()
     process.env.PHONE_VERIFY_REQUIRED_AFTER = 'next month'
+    await expect(import('./config.js')).rejects.toThrow('Invalid backend configuration')
+  })
+
+  it('keeps multi-service orders disabled by default and validates its configuration', async () => {
+    process.env = { ...original, ...base, NODE_ENV: 'test' }
+    const defaults = await import('./config.js')
+    expect(defaults.config.MULTI_SERVICE_ORDERS_ENABLED).toBe(false)
+    expect(defaults.config.MULTI_SERVICE_MAX_SERVICES).toBe(5)
+    expect(defaults.config.BUNDLE_PRIORITY_SECONDS).toBe(0)
+    expect(defaults.config.NO_VENDOR_ESCALATION_MINUTES).toBe(30)
+    expect(defaults.config.FULFILMENT_MINIMUM_CHARGE_PAISE).toBe(0)
+    expect(defaults.config.MULTI_SERVICE_MIN_APP_VERSION).toBe('1.1.0')
+
+    vi.resetModules()
+    process.env.MULTI_SERVICE_ORDERS_ENABLED = 'true'
+    process.env.MULTI_SERVICE_MAX_SERVICES = '7'
+    process.env.BUNDLE_PRIORITY_SECONDS = '45'
+    const enabled = await import('./config.js')
+    expect(enabled.config.MULTI_SERVICE_ORDERS_ENABLED).toBe(true)
+    expect(enabled.config.MULTI_SERVICE_MAX_SERVICES).toBe(7)
+    expect(enabled.config.BUNDLE_PRIORITY_SECONDS).toBe(45)
+
+    vi.resetModules()
+    process.env.MULTI_SERVICE_MAX_SERVICES = '0'
     await expect(import('./config.js')).rejects.toThrow('Invalid backend configuration')
   })
 

@@ -69,6 +69,9 @@ export const adminApi = {
     }
     return rows
   },
+  multiServiceOrders: () => apiFetch<Array<Record<string, unknown>>>('/admin/multi-service-orders'),
+  completeMultiServiceFulfilment: (id: string, reason: string) => apiFetch<unknown>(`/admin/multi-service-fulfilments/${id}/complete`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  reassignMultiServiceFulfilment: (id: string, vendorId: string, reason: string) => apiFetch<unknown>(`/admin/multi-service-fulfilments/${id}/reassign`, { method: 'POST', body: JSON.stringify({ vendorId, reason }) }),
   vendors: () => apiFetch<AdminVendor[]>('/admin/vendors'),
   customers: () => apiFetch<AdminCustomer[]>('/admin/customers'),
   createCustomer: (payload: { email: string; password: string; name: string; phone: string }) => apiFetch<AdminCustomer>('/admin/customers', { method: 'POST', body: JSON.stringify(payload) }),

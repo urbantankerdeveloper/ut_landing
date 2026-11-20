@@ -6,6 +6,7 @@ import { adminQueryKeys, useAdminBookings, useAdminDispatchSettings, useAdminOrd
 import { Modal } from '../components/Modal'
 import { adminOperationsContent as c } from '../content/admin-operations'
 import { useFeatureFlags } from '../hooks/useFeatureFlags'
+import { isMultiServiceOrdersEnabled } from '../constants/multiServiceOrders'
 
 type BookingServiceDetail = {
   serviceId?: string
@@ -39,11 +40,14 @@ type BookingRow = AdminOrder & {
   order_group_id?: string | null
   order_group_reference?: string | null
   order_group_size?: number | null
+  items?: { id?: string; service_type_id?: string; service_type_name?: string; status?: string; price_paise?: number; amount_paise?: number; service_details?: BookingServiceDetail }[]
+  fulfilments?: { id?: string; status?: string; vendor_name?: string; amount_paise?: number; item_ids?: string[] }[]
   created_at?: string
   updated_at?: string
 }
 
-const statusOptions = ['pending_vendor', 'vendor_assigned', 'accepted', 'en_route', 'arrived', 'delivered'] as const
+const statusOptions = ['pending_vendor', 'vendor_assigned', 'partially_accepted', 'accepted', 'in_progress', 'en_route', 'arrived', 'partially_completed', 'delivered', 'completed'] as const
+const multiServiceStatuses = new Set(['partially_accepted', 'in_progress', 'partially_completed', 'completed'])
 
 function formatDate(value?: string) {
   if (!value) return c.common.notProvided
@@ -74,6 +78,7 @@ function paymentLabel(value?: string) {
 export function AdminBookingOperationsScreen({ onNotice }: { onNotice: (message: string) => void }) {
   const query = useAdminBookings()
   const featureFlags = useFeatureFlags()
+  const multiServiceOrdersEnabled = isMultiServiceOrdersEnabled(featureFlags.data?.multi_service_orders_enabled)
   const boardQuery = useAdminOrdersBoard(featureFlags.data?.order_tracking_board_enabled === true)
   const mutations = useAdminOrderMutations()
   const dispatchSettingsQuery = useAdminDispatchSettings()
@@ -173,7 +178,7 @@ export function AdminBookingOperationsScreen({ onNotice }: { onNotice: (message:
         <div><p className="eyebrow">{c.bookings.eyebrow}</p><h2>{c.bookings.title}</h2></div>
         <button className="button button-quiet" onClick={() => query.refetch()} disabled={query.isFetching}><RefreshCw size={14} /> {c.common.refresh}</button>
         <div className="booking-table-tools">
-          <label>{c.bookings.filter}<select value={filter} onChange={(event) => { setFilter(event.target.value); setPage(1) }}><option value="all">{c.bookings.allStatuses}</option>{statusOptions.map((value) => <option value={value} key={value}>{c.bookings.statusLabels[value]}</option>)}<option value="cancelled">{c.bookings.statusLabels.cancelled}</option></select></label>
+          <label>{c.bookings.filter}<select value={filter} onChange={(event) => { setFilter(event.target.value); setPage(1) }}><option value="all">{c.bookings.allStatuses}</option>{statusOptions.filter((value) => multiServiceOrdersEnabled || !multiServiceStatuses.has(value)).map((value) => <option value={value} key={value}>{c.bookings.statusLabels[value as keyof typeof c.bookings.statusLabels] ?? formatStatus(value)}</option>)}<option value="cancelled">{c.bookings.statusLabels.cancelled}</option></select></label>
           <label>{c.bookings.sort}<select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value="recent">{c.bookings.sortOptions.recent}</option><option value="status">{c.bookings.sortOptions.status}</option><option value="amount">{c.bookings.sortOptions.amount}</option></select></label>
         </div>
       </div>
@@ -237,7 +242,15 @@ export function AdminBookingOperationsScreen({ onNotice }: { onNotice: (message:
           <div><span>{c.bookings.details.deliveryLocation}</span><strong>{selectedBooking.address_text || selectedBooking.location || c.common.notProvided}</strong></div>
         </div>
         {selectedBooking.cancellation_reason && <section><h3>{c.bookings.details.cancellationReason}</h3><p>{selectedBooking.cancellation_reason}</p></section>}
-        <section><h3>{c.bookings.details.serviceDetails}</h3>{selectedBooking.service_details?.length
+        {multiServiceOrdersEnabled && selectedBooking.items?.length
+          ? <section><h3>Order items</h3><ul>{selectedBooking.items.map((item, index) => <li key={item.id ?? index}>
+            <strong>{serviceLabel(item.service_type_name || item.service_type_id || item.service_details?.serviceId)}</strong>
+            <span> · {formatStatus(item.status || 'pending')}</span>
+            {item.service_details?.capacity && <p>{item.service_details.capacity}</p>}
+            {item.service_details?.details && <p>{item.service_details.details}</p>}
+            {(item.price_paise ?? item.amount_paise) !== undefined && <p>₹{(((item.price_paise ?? item.amount_paise) ?? 0) / 100).toLocaleString('en-IN')}</p>}
+          </li>)}</ul></section>
+          : <section><h3>{c.bookings.details.serviceDetails}</h3>{selectedBooking.service_details?.length
           ? <ul>{selectedBooking.service_details.map((service, index) => <li key={`${service.serviceId ?? 'service'}-${index}`}>
             <strong>{serviceLabel(service.serviceId || selectedBooking.service_code)}</strong>
             {service.capacity && <span>{c.common.separator}{service.capacity}</span>}
@@ -248,7 +261,14 @@ export function AdminBookingOperationsScreen({ onNotice }: { onNotice: (message:
             {service.latitude !== undefined && service.longitude !== undefined && <p>{c.bookings.details.coordinates(service.latitude, service.longitude)}</p>}
             <p>{service.details || c.bookings.details.noAdditionalServiceDetails}</p>
           </li>)}</ul>
-          : <p>{c.bookings.details.noServiceDetails}</p>}</section>
+          : <p>{c.bookings.details.noServiceDetails}</p>}</section>}
+        {multiServiceOrdersEnabled && selectedBooking.fulfilments?.length ? <section>
+          <h3>Fulfilments</h3><ul>{selectedBooking.fulfilments.map((fulfilment, index) => <li key={fulfilment.id ?? index}>
+            <strong>{formatStatus(fulfilment.status || 'pending_vendor')}</strong>
+            {fulfilment.vendor_name && <span> · {fulfilment.vendor_name}</span>}
+            <p>{fulfilment.item_ids?.length ?? 0} services{fulfilment.amount_paise !== undefined ? ` · ₹${(fulfilment.amount_paise / 100).toLocaleString('en-IN')}` : ''}</p>
+          </li>)}</ul>
+        </section> : null}
         <section><h3>{c.bookings.details.deliveryAccessNotes}</h3><p>{selectedBooking.access_notes || c.bookings.details.noAccessNotes}</p></section>
       </div>
     </Modal>}

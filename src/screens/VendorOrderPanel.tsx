@@ -8,9 +8,12 @@ import { vendorContent as c } from '../content/vendor'
 import { useVendorOrderRequestStore } from '../stores/vendorOrderRequestStore'
 import { dismissNotice } from '../utils/notify'
 import { useFeatureFlags } from '../hooks/useFeatureFlags'
+import { isMultiServiceOrdersEnabled } from '../constants/multiServiceOrders'
+import { MultiServiceVendorPanel } from '../components/vendor/MultiServiceVendorPanel'
 
 type OrderStatus = 'Available' | 'Assigned' | 'Accepted' | 'En route' | 'Arrived' | 'Delivered' | 'Rejected' | 'Unavailable'
-type VendorOrder = { id: string; reference?: string; orderGroupReference?: string; orderGroupSize?: number; service: string; serviceDetails?: { service: string; capacity?: string; waterType?: string; tankerCount?: string; details?: string; deliveryDate?: string; location?: string }[]; location: string; distance?: number | null; amount: string; status: OrderStatus; statusMessage?: string; vehicle?: string; driver?: string }
+type VendorOrderLine = { id: string; serviceId?: string; serviceName?: string; service_type_id?: string; service_type_name?: string; service_type?: { name?: string }; status?: string; amountPaise?: number; price_paise?: number; details?: Record<string, unknown>; service_details?: Record<string, unknown> }
+type VendorOrder = { id: string; reference?: string; orderGroupReference?: string; orderGroupSize?: number; service: string; serviceDetails?: { service: string; capacity?: string; waterType?: string; tankerCount?: string; details?: string; deliveryDate?: string; location?: string }[]; items?: VendorOrderLine[]; orderItems?: VendorOrderLine[]; fulfilments?: { id: string; status?: string; item_ids?: string[]; vendor_name?: string }[]; offerId?: string; fulfilmentId?: string; itemIds?: string[]; location: string; distance?: number | null; amount: string; status: OrderStatus; statusMessage?: string; vehicle?: string; driver?: string }
 type Props = { onNotice: (message: string) => void }
 const demoOrders: VendorOrder[] = demoDataEnabled ? [...c.orders.demo.orders] : []
 const demoVehicles = [...c.orders.demo.vehicles]
@@ -21,6 +24,7 @@ export default function VendorOrderPanel({ onNotice }: Props) {
   const [orders, setOrders] = useState(demoOrders)
   const ordersQuery = useVendorOrders()
   const featureFlags = useFeatureFlags()
+  const multiServiceOrdersEnabled = isMultiServiceOrdersEnabled(featureFlags.data?.multi_service_orders_enabled)
   const vehiclesQuery = useVendorVehicles()
   const driversQuery = useVendorDrivers()
   const orderMutation = useVendorOrderMutation()
@@ -100,6 +104,7 @@ export default function VendorOrderPanel({ onNotice }: Props) {
   if (!demoDataEnabled && (ordersQuery.isLoading || vehiclesQuery.isLoading || driversQuery.isLoading)) return <section className="workspace-view-panel vendor-order-panel" role="status"><p className="eyebrow">{c.orders.eyebrow}</p><h2>{c.orders.loading}</h2></section>
   if (!demoDataEnabled && (ordersQuery.isError || vehiclesQuery.isError || driversQuery.isError)) return <section className="workspace-view-panel vendor-order-panel" role="alert"><p className="eyebrow">{c.orders.eyebrow}</p><h2>{c.orders.unavailable.title}</h2><p>{c.orders.unavailable.body}</p><button className="button button-primary" onClick={() => { void ordersQuery.refetch(); void vehiclesQuery.refetch(); void driversQuery.refetch() }}>{c.common.retry}</button></section>
   return <section className="workspace-view-panel vendor-order-panel">
+    {multiServiceOrdersEnabled && <MultiServiceVendorPanel />}
     <div className="view-panel-heading"><div><p className="eyebrow">{c.orders.eyebrow}</p><h2>{c.orders.heading}</h2></div><div className="vendor-order-tools"><span className={offline ? 'offline-pill' : 'online-pill'}><i /> {offline ? c.orders.offlineDrafts : c.orders.online}</span><button className="button button-quiet" onClick={toggleOffline}>{offline ? c.orders.reconnect : c.orders.saveOfflineDraft}</button></div></div>
     <div className="vendor-order-filter"><label>{c.orders.filter.radiusLabel}<select value={radius} onChange={(event) => setRadius(event.target.value)}>{c.orders.filter.radiusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label><span>{c.orders.filter.requestsAvailable(filtered.length)}</span></div>
     {featureFlags.data?.order_tracking_board_enabled && <div className="order-tracking-columns vendor-order-board" aria-label="Vendor orders grouped by status">{(['Available', 'Assigned', 'Accepted', 'En route', 'Arrived', 'Delivered'] as const).map((status) => {
@@ -112,7 +117,15 @@ export default function VendorOrderPanel({ onNotice }: Props) {
         <b>{order.reference ?? 'Booking reference unavailable'}{c.common.separator}{order.service}</b>
         {order.orderGroupSize && order.orderGroupSize > 1 && <small>{order.orderGroupReference} · {order.orderGroupSize} tasks in this order</small>}
         <p><MapPin size={12} /> {order.location}{c.common.separator}{typeof order.distance === 'number' ? c.orders.distanceAway(order.distance) : c.orders.distanceUnavailable}{c.common.separator}{order.amount}</p>
-        {order.serviceDetails?.map((item) => <small key={item.service}>{item.service}{item.capacity ? c.orders.detail.capacity(item.capacity) : ''}{item.waterType ? c.orders.detail.waterType(item.waterType) : ''}{item.tankerCount ? c.orders.detail.tankers(item.tankerCount, item.tankerCount !== '1') : ''}{item.deliveryDate ? c.orders.detail.deliveryDate(item.deliveryDate) : ''}{item.location ? c.orders.detail.location(item.location) : ''}{item.details ? c.orders.detail.details(item.details) : ''}</small>)}
+        {(!multiServiceOrdersEnabled || !(order.orderItems ?? order.items)?.length) && order.serviceDetails?.map((item) => <small key={item.service}>{item.service}{item.capacity ? c.orders.detail.capacity(item.capacity) : ''}{item.waterType ? c.orders.detail.waterType(item.waterType) : ''}{item.tankerCount ? c.orders.detail.tankers(item.tankerCount, item.tankerCount !== '1') : ''}{item.deliveryDate ? c.orders.detail.deliveryDate(item.deliveryDate) : ''}{item.location ? c.orders.detail.location(item.location) : ''}{item.details ? c.orders.detail.details(item.details) : ''}</small>)}
+        {multiServiceOrdersEnabled && (order.orderItems ?? order.items)?.map((item) => {
+          const itemDetails = item.details ?? item.service_details ?? {}
+          const serviceName = item.serviceName ?? item.service_type_name ?? item.service_type?.name ?? item.serviceId ?? item.service_type_id ?? 'Service'
+          const itemStatus = item.status ?? 'pending'
+          const amountPaise = item.amountPaise ?? item.price_paise
+          return <small key={item.id}>{serviceName} · {itemStatus.replace(/_/g, ' ')}{amountPaise !== undefined ? ` · ₹${(amountPaise / 100).toLocaleString('en-IN')}` : ''}{typeof itemDetails.details === 'string' ? ` · ${itemDetails.details}` : ''}</small>
+        })}
+        {multiServiceOrdersEnabled && order.fulfilments?.map((fulfilment) => <small key={fulfilment.id}>Fulfilment · {(fulfilment.status ?? 'pending_vendor').replace(/_/g, ' ')}{fulfilment.vendor_name ? ` · ${fulfilment.vendor_name}` : ''}</small>)}
         {order.vehicle && <small><Truck size={12} /> {order.vehicle}{c.common.separator}<UserRound size={12} /> {order.driver}</small>}
         {order.statusMessage && <small className="vendor-order-taken-note">{order.statusMessage}</small>}
       </div>

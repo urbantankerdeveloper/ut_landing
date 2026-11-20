@@ -4,6 +4,7 @@ const featureFlagNames = [
   'duplicate_phone_check_enabled',
   'mpin_cooldown_enabled',
   'multi_service_tasks_enabled',
+  'multi_service_orders_enabled',
   'order_tracking_board_enabled',
   'vendor_earnings_realtime_enabled',
   'online_payment_enabled',
