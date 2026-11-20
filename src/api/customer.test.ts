@@ -58,6 +58,53 @@ describe('customerApi requests', () => {
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'POST' })
   })
 
+  it('normalizes parent orders with item and fulfilment detail', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      rows: [{
+        id: 'order-1',
+        reference: 'UT-ORDER-1',
+        status: 'partially_accepted',
+        total_paise: 8500,
+        items: [{
+          id: 'item-1',
+          service_type_id: 'water_tanker',
+          service_type: { name: 'Water delivery' },
+          status: 'accepted',
+          price_paise: 5000,
+          service_details: { serviceId: 'water_tanker', capacity: '5 KL' },
+        }],
+        fulfilments: [{
+          id: 'fulfilment-1',
+          status: 'accepted',
+          item_ids: ['item-1'],
+          amount_paise: 5000,
+          vendor_name: 'Vendor One',
+        }],
+      }],
+      nextOffset: null,
+    }, 200)))
+
+    await expect(customerApi.bookings()).resolves.toMatchObject({
+      rows: [{
+        id: 'order-1',
+        amount: 85,
+        status: 'partially_accepted',
+        orderItems: [{
+          id: 'item-1',
+          serviceName: 'Water delivery',
+          status: 'accepted',
+          amountPaise: 5000,
+        }],
+        fulfilments: [{
+          id: 'fulfilment-1',
+          vendorName: 'Vendor One',
+          itemIds: ['item-1'],
+        }],
+      }],
+      nextOffset: null,
+    })
+  })
+
   it('submits structured service enquiries and reports the admin notification result', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
       id: 'enquiry-1',

@@ -10,7 +10,7 @@
 - **Mobile:** `urban_tanker_app` builds native Android/iOS applications and uses `API_BASE_URL`/`SOCKET_URL` build configuration. Release signing credentials must remain outside source control. iOS release work requires macOS/Xcode.
 - **Database:** Supabase Auth, Postgres and private document storage. `backend/supabase/001_initial.sql` is destructive and must only be used for fresh/disposable installs.
 - **Web export dependencies:** Excel workbooks use a lazily loaded ExcelJS bundle; the web build requires development dependencies (including Vite and Sass). The ExcelJS UUID dependency is pinned to a patched compatible release.
-- **Incremental schema:** `backend/supabase/002_service_enquiries.sql` adds structured service enquiry fields/history; `003_partner_vehicle_details.sql` adds per-vehicle partner application data; `004_service_pricing_history.sql` adds administrator attribution and append-only price/config history; `006_phone_verification_hardening.sql` adds persistent account phone-verification lockouts. No migration runner is exposed in the repository; have an authorized operator review and apply the migrations in order to a disposable database first, then the target database before deploying dependent API code.
+- **Incremental schema:** `backend/supabase/002_service_enquiries.sql` adds structured service enquiry fields/history; `003_partner_vehicle_details.sql` adds per-vehicle partner application data; `004_service_pricing_history.sql` adds administrator attribution and append-only price/config history; `007_multi_service_orders.sql` adds the opt-in normalized order domain. Feature 1 phone-verification schema/functions are consolidated in `001_initial.sql`; the canonical file is destructive, not an upgrade path. No migration runner is exposed in the repository; have an authorized operator review additive migrations and test them on a disposable database before applying them to a target database.
 
 ## Configuration and operational dependencies
 
@@ -20,7 +20,7 @@ Hosting/provider environments (not source files) supply Supabase URL/service key
 
 1. Run targeted tests, lint/type checks and production builds for changed projects.
 2. Review web/API contract compatibility and mobile consumers; validate `002_service_enquiries.sql`, `003_partner_vehicle_details.sql`, and `004_service_pricing_history.sql` against a disposable copy.
-3. Apply an approved additive migration before enabling dependent behavior; never execute the reset schema installer against existing data.
+3. Apply an approved additive migration before enabling dependent behavior; leave `MULTI_SERVICE_ORDERS_ENABLED=false` until clients and migration are ready. Never execute the reset schema installer against existing data.
 4. Configure provider secrets and restrictions in the hosting control plane, verify HTTPS/CORS/CSP, and preserve a rollback path.
 5. Deploy API and web in a compatible order; confirm liveness/readiness and realtime scaling configuration.
 6. Smoke-test customer/vendor/admin/dispatcher roles and required notification/payment/map flows in staging before production rollout.

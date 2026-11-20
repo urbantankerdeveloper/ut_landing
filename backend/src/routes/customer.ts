@@ -105,7 +105,21 @@ function notifyNearbyVendors(vendors: Awaited<ReturnType<typeof findNearbyVendor
 async function loadServices() {
   const { data, error } = await supabase.from('service_catalog').select('code,name,description,base_price_paise,is_active,config').eq('is_active', true).order('name')
   if (error) throw error
-  return data ?? []
+  const rows = data ?? []
+  if (!config.MULTI_SERVICE_ORDERS_ENABLED || rows.length === 0) return rows
+  const { data: serviceTypes, error: serviceTypeError } = await supabase.from('service_types')
+    .select('code,min_quantity,max_quantity,quantity_unit,active').eq('active', true)
+  if (serviceTypeError) throw serviceTypeError
+  const quantities = new Map((serviceTypes ?? []).map((service) => [service.code, service]))
+  return rows.map((service) => {
+    const type = quantities.get(service.code)
+    return type ? {
+      ...service,
+      min_quantity: Number(type.min_quantity),
+      max_quantity: Number(type.max_quantity),
+      unit: type.quantity_unit,
+    } : service
+  })
 }
 async function loadOffers() {
   const { data, error } = await supabase.from('coupons').select('id,code,title,discount_type,discount_value,valid_until').eq('is_active', true).or('valid_until.is.null,valid_until.gte.' + new Date().toISOString()).order('created_at', { ascending: false })
@@ -191,8 +205,58 @@ router.get('/orders', async (request, response) => {
     error = result.error
   }
   if (error) return databaseFailure(response, 'customer.database_error', error, 500)
-  const rows = data ?? []
-  response.json({ rows: rows.slice(0, pageSize), nextOffset: rows.length > pageSize ? offset + pageSize : null })
+  const rows = (data ?? []) as Array<Record<string, unknown> & { id: string }>
+  const visibleRows = rows.slice(0, pageSize)
+  if (config.MULTI_SERVICE_ORDERS_ENABLED && visibleRows.length) {
+    const bookingIds = visibleRows.map((row) => row.id)
+    const [itemsResult, fulfilmentsResult] = await Promise.all([
+      supabase.from('order_items').select('*,service_types(code,name,quantity_unit)').in('legacy_booking_id', bookingIds),
+      supabase.from('order_fulfilments').select('id,order_id,legacy_booking_id,reference,status,vendor_id,latitude,longitude,delivered_at,created_at').in('legacy_booking_id', bookingIds),
+    ])
+    if (itemsResult.error || fulfilmentsResult.error) return databaseFailure(response, 'customer.multi_service_details_failed', itemsResult.error ?? fulfilmentsResult.error, 500)
+    const itemIds = (itemsResult.data ?? []).map((item) => item.id)
+    const linksResult = itemIds.length
+      ? await supabase.from('order_fulfilment_items').select('fulfilment_id,item_id').in('item_id', itemIds)
+      : { data: [], error: null }
+    if (linksResult.error) return databaseFailure(response, 'customer.multi_service_details_failed', linksResult.error, 500)
+    const fulfilmentByItem = new Map((linksResult.data ?? []).map((link) => [link.item_id, link.fulfilment_id]))
+    const itemIdsByFulfilment = new Map<string, string[]>()
+    for (const link of linksResult.data ?? []) {
+      const linkedItems = itemIdsByFulfilment.get(link.fulfilment_id) ?? []
+      linkedItems.push(link.item_id)
+      itemIdsByFulfilment.set(link.fulfilment_id, linkedItems)
+    }
+    const itemsByBooking = new Map<string, unknown[]>()
+    for (const item of itemsResult.data ?? []) {
+      if (!item.legacy_booking_id) continue
+      const bookingItems = itemsByBooking.get(item.legacy_booking_id) ?? []
+      bookingItems.push({ ...item, fulfilment_id: fulfilmentByItem.get(item.id) ?? null })
+      itemsByBooking.set(item.legacy_booking_id, bookingItems)
+    }
+    const fulfilmentsByBooking = new Map<string, unknown[]>()
+    const orderIdByBooking = new Map<string, string>()
+    for (const fulfilment of fulfilmentsResult.data ?? []) {
+      if (!fulfilment.legacy_booking_id) continue
+      const bookingFulfilments = fulfilmentsByBooking.get(fulfilment.legacy_booking_id) ?? []
+      bookingFulfilments.push({
+        ...fulfilment,
+        item_ids: itemIdsByFulfilment.get(fulfilment.id) ?? [],
+      })
+      fulfilmentsByBooking.set(fulfilment.legacy_booking_id, bookingFulfilments)
+      orderIdByBooking.set(fulfilment.legacy_booking_id, fulfilment.order_id)
+    }
+    response.json({
+      rows: visibleRows.map((row) => ({
+        ...row,
+        order_id: orderIdByBooking.get(row.id) ?? null,
+        items: itemsByBooking.get(row.id) ?? [],
+        fulfilments: fulfilmentsByBooking.get(row.id) ?? [],
+      })),
+      nextOffset: rows.length > pageSize ? offset + pageSize : null,
+    })
+    return
+  }
+  response.json({ rows: visibleRows, nextOffset: rows.length > pageSize ? offset + pageSize : null })
 })
 function getBookingServices(data: z.infer<typeof bookingSchema>) {
   const isLegacyPayload = !data.services?.length
@@ -484,7 +548,7 @@ export async function settleBookingCheckout(checkout: CheckoutRow, method: 'gate
   return { status: 'booked', booking: booking ?? await bookingSummary(bookingId), created }
 }
 // Returns the debit transaction id, or null when the wallet cannot cover the amount. The debit is written first, then the balance re-read, so concurrent debits cannot overspend.
-async function debitWalletForBooking(customerId: string, amountPaise: number): Promise<string | null> {
+export async function debitWalletForBooking(customerId: string, amountPaise: number): Promise<string | null> {
   const { data: debit, error } = await supabase.from('wallet_transactions').insert({ customer_id: customerId, type: 'debit', amount: amountPaise / 100, status: 'completed' }).select('id').single()
   if (error || !debit) throw error ?? new Error('Wallet debit could not be recorded')
   const { data: rows, error: balanceError } = await supabase.from('wallet_transactions').select('type,amount').eq('customer_id', customerId).eq('status', 'completed')

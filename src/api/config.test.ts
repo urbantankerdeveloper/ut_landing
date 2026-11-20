@@ -7,6 +7,7 @@ describe('parseFeatureFlags', () => {
       duplicate_phone_check_enabled: true,
       mpin_cooldown_enabled: true,
       multi_service_tasks_enabled: false,
+      multi_service_orders_enabled: false,
       order_tracking_board_enabled: false,
       vendor_earnings_realtime_enabled: false,
       online_payment_enabled: false,

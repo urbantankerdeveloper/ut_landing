@@ -37,6 +37,7 @@ import { setRealtimeServer } from './services/realtime.js'
 import { closeRedisPair, createRedisPair, rateLimitStoreFor, socketAdapterFor, warnIfSingleInstanceInProduction } from './services/scaling.js'
 import { requestObservability } from './middleware/observability.js'
 import { createHealthRouter } from './routes/health.js'
+import { multiServiceAdminRoutes, multiServiceCustomerRoutes, multiServiceVendorRoutes } from './routes/multiServiceOrders.js'
 const redis = await createRedisPair()
 const app = express(); const httpServer = createServer(app)
 // Keep-alive above the load balancer's idle timeout avoids reused-connection resets. The request timeout bounds slow clients.
@@ -74,7 +75,7 @@ app.use(helmet({
 })); app.use(cors(corsOptions)); app.use(compression()); app.use(rateLimit({ windowMs: 60_000, limit: 120, store: rateLimitStoreFor(redis), passOnStoreError: true, skip: (request) => request.path === '/health' || request.path === '/health/ready' || (request.method === 'GET' && !request.path.startsWith('/api/') && !request.path.startsWith('/socket.io')) })); app.use(express.json({ limit: '2mb', verify: (request, _response, buffer) => { (request as typeof request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer) } }))
 app.use(requestObservability(config.SLOW_REQUEST_MS))
 app.use(createHealthRouter({ redisConfigured: Boolean(config.REDIS_URL) }))
-app.use('/api/config', configRoutes); app.use('/api/auth', authRoutes); app.use('/api/devices', deviceRoutes); app.use('/api/public', publicTrackingRoutes); app.use('/api/service-enquiries', serviceEnquiryRoutes); app.use('/api/customer', customerRoutes); app.use('/api/customer', customerExtendedRoutes); app.use('/api/vendor', vendorRoutes); app.use('/api/vendor', vendorExtendedRoutes); app.use('/api/admin', adminRoutes); app.use('/api/admin', adminExtendedRoutes); app.use('/api/admin', adminSmsTemplateRoutes); app.use('/api/admin', adminWhatsAppTemplateRoutes); app.use('/api/payment', paymentRoutes); app.use('/api/uploads', uploadRoutes); app.use('/api/support', supportRoutes); app.use('/api/analytics', analyticsRoutes); app.use('/api/partner', partnerRoutes); app.use(errorHandler)
+app.use('/api/config', configRoutes); app.use('/api/auth', authRoutes); app.use('/api/devices', deviceRoutes); app.use('/api/public', publicTrackingRoutes); app.use('/api/service-enquiries', serviceEnquiryRoutes); app.use('/api/customer', customerRoutes); app.use('/api/customer', customerExtendedRoutes); app.use('/api/customer', multiServiceCustomerRoutes); app.use('/api/vendor', vendorRoutes); app.use('/api/vendor', vendorExtendedRoutes); app.use('/api/vendor', multiServiceVendorRoutes); app.use('/api/admin', adminRoutes); app.use('/api/admin', adminExtendedRoutes); app.use('/api/admin', multiServiceAdminRoutes); app.use('/api/admin', adminSmsTemplateRoutes); app.use('/api/admin', adminWhatsAppTemplateRoutes); app.use('/api/payment', paymentRoutes); app.use('/api/uploads', uploadRoutes); app.use('/api/support', supportRoutes); app.use('/api/analytics', analyticsRoutes); app.use('/api/partner', partnerRoutes); app.use(errorHandler)
 if (serveFrontend) app.use(express.static(frontendDist, { index: 'index.html', setHeaders: (response, filePath) => {
   if (filePath.endsWith('index.html')) {
     response.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')

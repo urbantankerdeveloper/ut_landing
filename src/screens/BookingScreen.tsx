@@ -5,7 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { ArrowLeft, ArrowRight, Banknote, Check, CreditCard, Crosshair, MapPin, Phone, Plus, Trash2, Wallet } from 'lucide-react'
 import { useAppNavigation } from '../routing/useAppNavigation'
-import { useCreateCustomerAddress, useCreateCustomerBooking, useCustomerAddresses, useCustomerOffers, useCustomerPhoneVerification, useCustomerPricing, useCustomerServices } from '../hooks/useCustomerData'
+import { useCreateCustomerAddress, useCreateCustomerBooking, useCreateMultiServiceOrder, useCustomerAddresses, useCustomerOffers, useCustomerPhoneVerification, useCustomerPricing, useCustomerServices } from '../hooks/useCustomerData'
 import { useCouponValidation, useRazorpayPayment } from '../hooks/useFrontendFeatures'
 import { useFeatureFlags } from '../hooks/useFeatureFlags'
 import { CheckoutError } from '../utils/razorpayCheckout'
@@ -13,8 +13,9 @@ import { PaymentReceiptCard } from '../components/PaymentReceiptCard'
 import { PhoneVerifyDialog } from '../components/PhoneVerifyDialog'
 import { authApi } from '../api/auth'
 import { useAuthStore } from '../stores/authStore'
-import { customerApi, type BookingPaymentMethod, type BookingServiceDetails, type CustomerBooking, type SavedAddress } from '../api/customer'
+import { customerApi, type BookingPaymentMethod, type BookingServiceDetails, type CustomerBooking, type CustomerService, type SavedAddress } from '../api/customer'
 import { customerDemoDataEnabled } from '../constants/demo'
+import { isMultiServiceOrdersEnabled } from '../constants/multiServiceOrders'
 import { useNavigationStore } from '../stores/navigationStore'
 import { trackEvent } from '../services/analytics'
 import type { LatLngLiteral } from 'leaflet'
@@ -70,6 +71,7 @@ type BookingDraft = {
   phoneChallenges?: Record<string, string>
   guestChallengeId?: string | null
   bookingId: string | null
+  paymentBookingId?: string | null
   quotedTotal: number | null
 }
 type CompletedBooking = {
@@ -84,6 +86,7 @@ type CompletedBooking = {
   phone: string
   notes: string
   paymentMethod?: BookingPaymentMethod
+  paymentBookingId?: string
   total: number
 }
 
@@ -91,7 +94,7 @@ function emptyServiceDraft(): ServiceDraft {
   return { capacity: '', waterType: 'Domestic water', tankerCount: '1', serviceType: '', quantity: '1', depth: '', grade: 'M10', pump: 'No', pickupLocation: '', materialType: '', notes: '', deliveryDate: '', location: '' }
 }
 
-function serviceDraftFor(serviceId: string): ServiceDraft {
+function serviceDraftFor(serviceId: string, minimumQuantity?: number): ServiceDraft {
   const draft = emptyServiceDraft()
   if (serviceId === 'water_tanker') return { ...draft, capacity: '3 KL', serviceType: 'Domestic water' }
   if (serviceId === 'sewage_tanker') return { ...draft, capacity: '3 KL', serviceType: 'Septic tank cleaning' }
@@ -100,10 +103,11 @@ function serviceDraftFor(serviceId: string): ServiceDraft {
   if (serviceId === 'tank_cleaning') return { ...draft, serviceType: 'Overhead tank' }
   if (serviceId === 'borewell_service') return { ...draft, serviceType: 'New drilling' }
   if (serviceId === 'empty_tanker') return { ...draft, capacity: '6 KL' }
+  if (minimumQuantity !== undefined) draft.quantity = String(minimumQuantity)
   return draft
 }
 
-function serviceItemErrors(serviceId: string, values: ServiceDraft): ServiceFieldErrors {
+function serviceItemErrors(serviceId: string, values: ServiceDraft, serviceOption?: CustomerService): ServiceFieldErrors {
   const errors: ServiceFieldErrors = {}
   if (serviceId === 'water_tanker') {
     if (!values.capacity) errors.capacity = c.validation.capacity
@@ -127,8 +131,16 @@ function serviceItemErrors(serviceId: string, values: ServiceDraft): ServiceFiel
     if (!values.tankerCount || Number(values.tankerCount) < 1 || Number(values.tankerCount) > 5) errors.tankerCount = c.validation.tankerCount
     if (!values.pickupLocation.trim()) errors.pickupLocation = c.validation.pickupAddress
     if (!values.materialType.trim()) errors.materialType = c.validation.materialType
-  } else if (values.notes.trim().length < 3) {
-    errors.notes = c.validation.serviceNotesMin
+  } else {
+    if (serviceOption?.min_quantity !== undefined || serviceOption?.max_quantity !== undefined) {
+      const quantity = Number(values.quantity)
+      if (!values.quantity || !Number.isFinite(quantity)
+        || quantity < (serviceOption.min_quantity ?? 1)
+        || quantity > (serviceOption.max_quantity ?? Number.MAX_SAFE_INTEGER)) {
+        errors.quantity = c.validation.quantity
+      }
+    }
+    if (values.notes.trim().length < 3) errors.notes = c.validation.serviceNotesMin
   }
   if (values.notes.length > 1000) errors.notes = c.validation.serviceNotesMax
   return errors
@@ -314,7 +326,10 @@ export default function BookingScreen() {
   const { navigate } = useAppNavigation()
   const setBookingCompleted = useNavigationStore((state) => state.setBookingCompleted)
   const createBooking = useCreateCustomerBooking()
+  const createMultiServiceOrder = useCreateMultiServiceOrder()
   const featureFlags = useFeatureFlags()
+  const multiServiceUiEnabled = isMultiServiceOrdersEnabled(featureFlags.data?.multi_service_orders_enabled)
+  const groupedServiceTasksEnabled = multiServiceUiEnabled || featureFlags.data?.multi_service_tasks_enabled === true
   const walletEnabled = featureFlags.data?.wallet_enabled === true
   const onlinePaymentEnabled = featureFlags.data?.online_payment_enabled === true
   const servicesQuery = useCustomerServices()
@@ -336,7 +351,15 @@ export default function BookingScreen() {
   const signIn = useAuthStore((state) => state.signIn)
   const offersQuery = useCustomerOffers()
   const serviceCatalog = useMemo(() => servicesQuery.data ?? [], [servicesQuery.data])
-  const options = useMemo(() => serviceCatalog.map((service) => ({ code: service.code, label: service.name, price: service.base_price_paise / 100, optionSurchargesPaise: service.config?.optionSurchargesPaise })), [serviceCatalog])
+  const options = useMemo(() => serviceCatalog.map((service) => ({
+    code: service.code,
+    label: service.name,
+    price: service.base_price_paise / 100,
+    minQuantity: multiServiceUiEnabled ? service.min_quantity ?? service.service_type?.min_quantity : undefined,
+    maxQuantity: multiServiceUiEnabled ? service.max_quantity ?? service.service_type?.max_quantity : undefined,
+    unit: multiServiceUiEnabled ? service.unit ?? service.service_type?.unit : undefined,
+    optionSurchargesPaise: service.config?.optionSurchargesPaise,
+  })), [multiServiceUiEnabled, serviceCatalog])
   const { control, register, handleSubmit, setValue, getValues, watch, reset, formState: { errors } } = useForm<BookingFormValues>({
     resolver: zodResolver(bookingFormSchema),
     mode: 'onChange',
@@ -399,6 +422,7 @@ export default function BookingScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const bookingSubmitInProgress = useRef(false)
   const [bookingId, setBookingId] = useState<string | null>(draft.bookingId ?? null)
+  const [paymentBookingId, setPaymentBookingId] = useState<string | null>(draft.paymentBookingId ?? draft.bookingId ?? null)
   const [bookingReference, setBookingReference] = useState<string | null>(null)
   const [quotedTotal, setQuotedTotal] = useState<number | null>(draft.quotedTotal ?? null)
   const [successBooking, setSuccessBooking] = useState<CompletedBooking | null>(null)
@@ -461,7 +485,11 @@ export default function BookingScreen() {
     && activeServiceEntries.every((entry) => {
       const values = serviceDetails[entry.id]
       const isChennai = locationEligibility[entry.id] === true || isChennaiDeliveryAddress(sharedLocation)
-      return Boolean(values && !Object.keys(serviceItemErrors(entry.serviceId, values)).length && values.capacity.trim().length <= 100 && isChennai)
+      const service = serviceCatalog.find((candidate) => candidate.code === entry.serviceId)
+      const dynamicService = multiServiceUiEnabled && service
+        ? { ...service, min_quantity: service.min_quantity ?? service.service_type?.min_quantity, max_quantity: service.max_quantity ?? service.service_type?.max_quantity }
+        : undefined
+      return Boolean(values && !Object.keys(serviceItemErrors(entry.serviceId, values, dynamicService)).length && values.capacity.trim().length <= 100 && isChennai)
     })
     && /^\d{10}$/.test(phone.replace(/\D/g, '').slice(-10))
     && isPhoneVerified(phone)
@@ -472,11 +500,11 @@ export default function BookingScreen() {
       return
     }
     const timer = window.setTimeout(() => {
-      const bookingDraft: BookingDraft = { idempotencyKey, selectedServices, serviceEntries, serviceItemsInitialized: hasInitializedServiceEntries, serviceDetails, capacity, step, details: { notes: getValues('notes') ?? '' }, locationAddress: sharedLocation, coordinates: sharedCoordinates ? { latitude: sharedCoordinates.lat, longitude: sharedCoordinates.lng } : null, region, addressLabel, addressCity, addressPincode, saveAddress: saveAddressForFuture, savedAddressId, sharedDate, preferredTime, phone, paymentMethod, couponCode, couponDiscount, guestName, phoneChallenges,       bookingId, quotedTotal }
+      const bookingDraft: BookingDraft = { idempotencyKey, selectedServices, serviceEntries, serviceItemsInitialized: hasInitializedServiceEntries, serviceDetails, capacity, step, details: { notes: getValues('notes') ?? '' }, locationAddress: sharedLocation, coordinates: sharedCoordinates ? { latitude: sharedCoordinates.lat, longitude: sharedCoordinates.lng } : null, region, addressLabel, addressCity, addressPincode, saveAddress: saveAddressForFuture, savedAddressId, sharedDate, preferredTime, phone, paymentMethod, couponCode, couponDiscount, guestName, phoneChallenges, bookingId, paymentBookingId, quotedTotal }
       sessionStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify(bookingDraft))
     }, DRAFT_PERSIST_DELAY_MS)
     return () => window.clearTimeout(timer)
-  }, [idempotencyKey, selectedServices, serviceEntries, hasInitializedServiceEntries, serviceDetails, capacity, step, getValues, sharedLocation, sharedCoordinates, sharedDate, region, addressLabel, addressCity, addressPincode, saveAddressForFuture, savedAddressId, preferredTime, phone, paymentMethod, couponCode, couponDiscount, guestName, phoneChallenges, bookingId, quotedTotal])
+  }, [idempotencyKey, selectedServices, serviceEntries, hasInitializedServiceEntries, serviceDetails, capacity, step, getValues, sharedLocation, sharedCoordinates, sharedDate, region, addressLabel, addressCity, addressPincode, saveAddressForFuture, savedAddressId, preferredTime, phone, paymentMethod, couponCode, couponDiscount, guestName, phoneChallenges, bookingId, paymentBookingId, quotedTotal])
   useEffect(() => {
     let timer: number | undefined
     const subscription = watch((values) => {
@@ -517,7 +545,7 @@ export default function BookingScreen() {
     const entry = { id: createServiceEntryId(), serviceId }
     setServiceToAdd(serviceId)
     setServiceEntries([entry])
-    setServiceDetails((current) => ({ ...current, [entry.id]: serviceDraftFor(serviceId) }))
+    setServiceDetails((current) => ({ ...current, [entry.id]: serviceDraftFor(serviceId, options.find((option) => option.code === serviceId)?.minQuantity) }))
     const coupon = new URLSearchParams(window.location.search).get('coupon')
     if (coupon && !getValues('couponCode')) setValue('couponCode', coupon)
   }, [hasInitializedServiceEntries, options, getValues, setValue])
@@ -532,14 +560,14 @@ export default function BookingScreen() {
     const entry = { id: createServiceEntryId(), serviceId }
     pendingServiceFocusId.current = entry.id
     setServiceEntries((current) => [...current, entry])
-    setServiceDetails((current) => ({ ...current, [entry.id]: serviceDraftFor(serviceId) }))
+    setServiceDetails((current) => ({ ...current, [entry.id]: serviceDraftFor(serviceId, options.find((option) => option.code === serviceId)?.minQuantity) }))
     setServiceToAdd(serviceId)
     setError(null)
   }
   const changeServiceEntry = useCallback((entryId: string, serviceId: string) => {
     if (!options.some((option) => option.code === serviceId)) return
     setServiceEntries((current) => current.map((entry) => entry.id === entryId ? { ...entry, serviceId } : entry))
-    setServiceDetails((current) => ({ ...current, [entryId]: serviceDraftFor(serviceId) }))
+    setServiceDetails((current) => ({ ...current, [entryId]: serviceDraftFor(serviceId, options.find((option) => option.code === serviceId)?.minQuantity) }))
     setServiceFieldErrors((current) => { const next = { ...current }; delete next[entryId]; return next })
     setError(null)
   }, [options])
@@ -661,7 +689,11 @@ export default function BookingScreen() {
     const normalizedPhone = values.phone.replace(/\D/g, '').slice(-10)
     for (const entry of activeServiceEntries) {
       const values = serviceDetails[entry.id] ?? emptyServiceDraft()
-      const errors = serviceItemErrors(entry.serviceId, values)
+      const service = serviceCatalog.find((candidate) => candidate.code === entry.serviceId)
+      const dynamicService = multiServiceUiEnabled && service
+        ? { ...service, min_quantity: service.min_quantity ?? service.service_type?.min_quantity, max_quantity: service.max_quantity ?? service.service_type?.max_quantity }
+        : undefined
+      const errors = serviceItemErrors(entry.serviceId, values, dynamicService)
       if (!isValidDeliveryDate(sharedDate)) errors.deliveryDate = sharedDate < today ? c.validation.deliveryDatePast : c.validation.deliveryDateInvalid
       if (Object.keys(errors).length) fieldErrors[entry.id] = errors
     }
@@ -741,11 +773,11 @@ export default function BookingScreen() {
     trackEvent('booking.created', { service: servicesForQuote.join(','), capacity: Number(capacity) || 0, paymentMethod, bookingId: createdBookingId, locationDetected: Boolean(serviceItems[0]?.latitude) })
   }
 
-  function finishBooking(createdBookingId: string | null, finalTotal: number, finalPaymentMethod = paymentMethod, finalReference = bookingReference) {
+  function finishBooking(createdBookingId: string | null, paymentId: string | null, finalTotal: number, finalPaymentMethod = paymentMethod, finalReference = bookingReference) {
     setSuccessBooking({
       id: createdBookingId,
       reference: finalReference,
-      taskCount: featureFlags.data?.multi_service_tasks_enabled ? activeServiceEntries.length : 1,
+      taskCount: groupedServiceTasksEnabled ? activeServiceEntries.length : 1,
       services: serviceItems.map((item) => ({ ...item })),
       location: sharedDeliveryAddress,
       deliveryDate: sharedDate,
@@ -754,6 +786,7 @@ export default function BookingScreen() {
       phone,
       notes: details.notes,
       paymentMethod: finalPaymentMethod,
+      paymentBookingId: paymentId ?? undefined,
       total: finalTotal,
     })
     setBookingCompleted(true)
@@ -785,6 +818,7 @@ export default function BookingScreen() {
     setOtpMessages({})
     setOtpPendingPhone(null)
     setBookingId(null)
+    setPaymentBookingId(null)
     setBookingReference(null)
     setQuotedTotal(null)
     setError(null)
@@ -821,10 +855,37 @@ export default function BookingScreen() {
         setSaveAddressForFuture(false)
       }
       let currentBookingId = bookingId
+      let currentPaymentBookingId = paymentBookingId
       let currentBookingReference = bookingReference
       let payableTotal = quotedTotal ?? total
       if (!customerDemoDataEnabled && !currentBookingId) {
-        const booking = await createBooking.mutateAsync({
+        const booking = multiServiceUiEnabled
+          ? await createMultiServiceOrder.mutateAsync({
+            idempotencyKey,
+            paymentMethod,
+            phone: normalizedPhone,
+            phoneVerificationChallengeId: phoneChallenges[normalizedPhone],
+            couponCode: couponCode || undefined,
+            items: serviceItems.map((item) => {
+              const serviceOption = serviceCatalog.find((service) => service.code === item.serviceId)
+              const quantity = Number.parseInt(item.tankerCount ?? item.quantity ?? '1', 10)
+              return {
+                serviceId: item.serviceId,
+                quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 1,
+                quantityUnit: serviceOption?.unit ?? serviceOption?.service_type?.unit,
+                location: item.location ?? sharedDeliveryAddress,
+                deliveryDate: item.deliveryDate ?? primaryDeliveryDate,
+                slot: item.preferredTime,
+                latitude: item.latitude,
+                longitude: item.longitude,
+                capacity: item.capacity,
+                waterType: item.waterType,
+                serviceType: item.serviceType,
+                details: { ...item },
+              }
+            }),
+          })
+          : await createBooking.mutateAsync({
           idempotencyKey,
           serviceId: primaryService.serviceId,
           services: serviceItems,
@@ -841,28 +902,33 @@ export default function BookingScreen() {
           paymentMethod,
         })
         currentBookingId = booking.id
+        currentPaymentBookingId = 'legacyBookingId' in booking && typeof booking.legacyBookingId === 'string'
+          ? booking.legacyBookingId
+          : booking.id
         currentBookingReference = booking.reference ?? booking.order_group_reference ?? null
         setBookingReference(currentBookingReference)
         payableTotal = Number(booking.quote?.totalPaise ?? booking.quoted_amount_paise ?? 0) / 100 || total
         setQuotedTotal(payableTotal)
         setBookingId(currentBookingId)
+        setPaymentBookingId(currentPaymentBookingId)
         trackBookingCreated(currentBookingId)
       }
-      if (!customerDemoDataEnabled && paymentMethod === 'gateway' && currentBookingId) {
+      if (!customerDemoDataEnabled && paymentMethod === 'gateway' && currentPaymentBookingId) {
         try {
-          await razorpay.pay(payableTotal, { bookingId: currentBookingId }, { name: user?.name ?? (guestName || 'Urban Tanker customer'), email: user?.username, phone: `+91${normalizedPhone}` })
+          await razorpay.pay(payableTotal, { bookingId: currentPaymentBookingId }, { name: user?.name ?? (guestName || 'Urban Tanker customer'), email: user?.username, phone: `+91${normalizedPhone}` })
         } catch (paymentError) {
           // Closing Razorpay without paying removes the booking, so the customer starts clean on the next attempt.
           if (paymentError instanceof CheckoutError && paymentError.kind === 'cancelled') {
-            await customerApi.cancelOnlinePayment(currentBookingId, couponCode || undefined)
+            await customerApi.cancelOnlinePayment(currentPaymentBookingId, couponCode || undefined)
             setBookingId(null)
+            setPaymentBookingId(null)
             setError(c.errors.paymentCancelled)
             return
           }
           throw paymentError
         }
       }
-      finishBooking(currentBookingId, payableTotal, paymentMethod, currentBookingReference)
+      finishBooking(currentBookingId, currentPaymentBookingId, payableTotal, paymentMethod, currentBookingReference)
     } catch (paymentError) {
       if (paymentError instanceof CheckoutError) setPaymentFailure(paymentError)
       else setError(paymentError instanceof Error ? paymentError.message : c.errors.bookingFailed)
@@ -881,7 +947,7 @@ export default function BookingScreen() {
       const verified = await razorpay.verifyPending(paymentFailure.pending)
       trackBookingCreated(verified.orderId)
       setPaymentFailure(null)
-      finishBooking(verified.orderId, quotedTotal ?? total)
+      finishBooking(bookingId, paymentBookingId ?? verified.orderId, quotedTotal ?? total)
     } catch (verifyError) {
       if (verifyError instanceof CheckoutError) setPaymentFailure(verifyError)
       else setError(verifyError instanceof Error ? verifyError.message : c.errors.bookingFailed)
@@ -889,14 +955,14 @@ export default function BookingScreen() {
   }
 
   async function payOnDeliveryInstead() {
-    if (!bookingId) return
+    if (!bookingId || !paymentBookingId) return
     setIsSubmitting(true)
     setError(null)
     try {
-      await customerApi.switchBookingToCashOnDelivery(bookingId)
+      await customerApi.switchBookingToCashOnDelivery(paymentBookingId)
       setValue('paymentMethod', 'cod')
       setPaymentFailure(null)
-      finishBooking(bookingId, quotedTotal ?? total, 'cod')
+      finishBooking(bookingId, paymentBookingId, quotedTotal ?? total, 'cod')
     } catch (switchError) {
       setError(switchError instanceof Error ? switchError.message : c.errors.bookingFailed)
     } finally { setIsSubmitting(false) }
@@ -922,7 +988,7 @@ export default function BookingScreen() {
           <div>
             <p className="eyebrow">{c.success.eyebrow}</p>
             <h1>{successBooking && successBooking.services.length > 1 ? c.success.combinedHeading : c.success.heading}</h1>
-            {featureFlags.data?.multi_service_tasks_enabled && successBooking && successBooking.taskCount > 1 && <p>{successBooking.taskCount} tasks in this order</p>}
+            {groupedServiceTasksEnabled && successBooking && successBooking.taskCount > 1 && <p>{successBooking.taskCount} {multiServiceUiEnabled ? 'services' : 'tasks'} in this order</p>}
             <p className="booking-success-reference">
               <span>{c.success.referenceLead}</span>
               <strong>{successBooking?.reference ?? c.success.referenceFallback}</strong>
@@ -930,7 +996,7 @@ export default function BookingScreen() {
             </p>
           </div>
         </div>
-        {successBooking?.id && !customerDemoDataEnabled && successBooking.paymentMethod === 'gateway' && <PaymentReceiptCard bookingId={successBooking.id} />}
+        {successBooking?.paymentBookingId && !customerDemoDataEnabled && successBooking.paymentMethod === 'gateway' && <PaymentReceiptCard bookingId={successBooking.paymentBookingId} />}
         <div className="booking-success-details">
           <section>
             <h3>{c.success.detailsHeading}</h3>

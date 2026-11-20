@@ -1,7 +1,9 @@
 import { apiFetch } from './client'
 
 export type VendorOrderStatus = 'Available' | 'Assigned' | 'Accepted' | 'En route' | 'Arrived' | 'Delivered' | 'Rejected' | 'Unavailable'
-export type VendorOrder = { id: string; reference?: string; service: string; serviceDetails?: { service: string; capacity?: string; waterType?: string; tankerCount?: string; details?: string; deliveryDate?: string; location?: string }[]; location: string; latitude?: number | null; longitude?: number | null; distance?: number | null; statusMessage?: string; amount: string; status: VendorOrderStatus; vehicle?: string; driver?: string; scheduledFor?: string; createdAt?: string }
+export type VendorOrder = { id: string; reference?: string; service: string; serviceDetails?: { service: string; capacity?: string; waterType?: string; tankerCount?: string; details?: string; deliveryDate?: string; location?: string }[]; items?: { id: string; service_type_id?: string; service_type_name?: string; service_type?: { name?: string }; status?: string; price_paise?: number; service_details?: Record<string, unknown> }[]; orderItems?: { id: string; serviceId?: string; serviceName?: string; status?: string; amountPaise?: number; details?: Record<string, unknown> }[]; fulfilments?: { id: string; status?: string; item_ids?: string[]; vendor_name?: string }[]; offerId?: string; fulfilmentId?: string; itemIds?: string[]; location: string; latitude?: number | null; longitude?: number | null; distance?: number | null; statusMessage?: string; amount: string; status: VendorOrderStatus; vehicle?: string; driver?: string; scheduledFor?: string; createdAt?: string }
+export type MultiServiceOffer = { id: string; order_id: string; item_ids: string[]; is_bundle: boolean; expires_at: string; order?: { reference?: string; total_paise?: number }; items: Array<{ id: string; location?: string; scheduled_for?: string; locked_price_paise?: number; service_details?: Record<string, unknown>; service_types?: { code?: string; name?: string } }> }
+export type MultiServiceFulfilment = { id: string; order_id: string; reference: string; status: string; latitude?: number | null; longitude?: number | null; orders?: { reference?: string }; order_fulfilment_items?: Array<{ order_items?: { id?: string; location?: string; scheduled_for?: string; locked_price_paise?: number; service_details?: Record<string, unknown>; service_types?: { code?: string; name?: string } } }> }
 export type VendorDashboard = { orders: VendorOrder[]; vehicles: VendorVehicle[]; drivers: VendorDriver[] }
 export type VendorProfileLocation = { id: string; business_name: string; service_zone: string; latitude: number | null; longitude: number | null }
 export type VendorOrderPage = { rows: VendorOrder[]; nextOffset: number | null }
@@ -23,6 +25,14 @@ export const vendorApi = {
     const response = await apiFetch<VendorOrderPage | VendorOrder[]>(path)
     return Array.isArray(response) ? { rows: response, nextOffset: null } : response
   },
+  multiServiceOffers: () => apiFetch<MultiServiceOffer[]>('/vendor/multi-service-orders/offers'),
+  acceptMultiServiceOffer: (offerId: string) => apiFetch<{ accepted: boolean; idempotent: boolean; orderId: string }>(`/vendor/multi-service-orders/offers/${offerId}/accept`, { method: 'POST' }),
+  rejectMultiServiceOffer: (offerId: string) => apiFetch<unknown>(`/vendor/multi-service-orders/offers/${offerId}/reject`, { method: 'POST' }),
+  multiServiceFulfilments: () => apiFetch<MultiServiceFulfilment[]>('/vendor/multi-service-fulfilments'),
+  transitionMultiServiceFulfilment: (id: string, status: 'en_route' | 'arrived') => apiFetch<unknown>(`/vendor/multi-service-fulfilments/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+  updateMultiServiceFulfilmentLocation: (id: string, payload: { latitude: number; longitude: number }) => apiFetch<unknown>(`/vendor/multi-service-fulfilments/${id}/location`, { method: 'POST', body: JSON.stringify(payload) }),
+  dropMultiServiceFulfilment: (id: string) => apiFetch<unknown>(`/vendor/multi-service-fulfilments/${id}/drop`, { method: 'POST' }),
+  verifyMultiServiceFulfilmentDelivery: (id: string, otp: string) => apiFetch<unknown>(`/vendor/multi-service-fulfilments/${id}/delivery/verify`, { method: 'POST', body: JSON.stringify({ otp }) }),
   mutateOrder: (payload: VendorOrderMutation) => apiFetch<VendorOrder>(`/vendor/orders/${payload.orderId}/transition`, { method: 'PATCH', body: JSON.stringify(payload) }),
   vehicles: () => apiFetch<VendorVehicle[]>('/vendor/vehicles'),
   drivers: () => apiFetch<VendorDriver[]>('/vendor/drivers'),

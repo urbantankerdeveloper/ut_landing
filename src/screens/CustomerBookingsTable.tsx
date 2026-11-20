@@ -10,6 +10,7 @@ import { CheckoutError, type CheckoutSuccess } from '../utils/razorpayCheckout'
 import { Modal } from '../components/Modal'
 import { customerContent as c } from '../content/customer'
 import { useFeatureFlags } from '../hooks/useFeatureFlags'
+import { isMultiServiceOrdersEnabled } from '../constants/multiServiceOrders'
 
 type Props = { onNavigate: (screen: 'booking' | 'bookings' | 'offers' | 'home') => void }
 // Statuses before the driver collects cash. Matches the backend codSwitchStatuses.
@@ -40,9 +41,17 @@ function paymentLabel(value?: CustomerBooking['paymentMethod']) {
   return c.common.notProvided
 }
 
+function progressStatus(status: string) {
+  if (status === 'partially_accepted') return 'accepted'
+  if (status === 'in_progress') return 'en_route'
+  if (status === 'partially_completed' || status === 'completed') return 'delivered'
+  return status
+}
+
 export function CustomerBookingsTable({ onNavigate }: Props) {
   const query = useCustomerBookings()
   const featureFlags = useFeatureFlags()
+  const multiServiceOrdersEnabled = isMultiServiceOrdersEnabled(featureFlags.data?.multi_service_orders_enabled)
   const cancellation = useCustomerCancel()
   const deliveryOtp = useCustomerDeliveryOtp()
   const [filter, setFilter] = useState('all')
@@ -176,7 +185,7 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
             <td><button className="customer-booking-id" type="button" onClick={() => { setPayState({ kind: 'idle' }); setCancelError(null); setDeliveryOtpResult(null); setDeliveryOtpError(null); deliveryOtp.reset(); setSelectedBookingId(booking.id) }}>{booking.reference ?? 'Booking reference unavailable'}</button>{booking.orderGroupSize && booking.orderGroupSize > 1 && <small className="customer-booking-group-label">{booking.orderGroupReference} · {booking.orderGroupSize} tasks in this order</small>}</td>
             <td>{booking.service}</td>
             <td>{booking.location}</td>
-            <td><span className={`status-tag ${booking.status.toLowerCase() === 'delivered' ? '' : 'pending'}`}>{booking.status}</span>{featureFlags.data?.order_tracking_board_enabled && <div className="customer-order-progress" aria-label={`Order progress: ${booking.status}`}><progress max={orderProgressStatuses.length - 1} value={Math.max(0, orderProgressStatuses.indexOf(booking.status.toLowerCase()))} /><small>{booking.status.toLowerCase() === 'cancelled' ? 'Cancelled' : `${Math.max(1, orderProgressStatuses.indexOf(booking.status.toLowerCase()) + 1)} of ${orderProgressStatuses.length} stages`}</small></div>}</td>
+            <td><span className={`status-tag ${['delivered', 'completed', 'partially_completed'].includes(booking.status.toLowerCase()) ? '' : 'pending'}`}>{booking.status}</span>{featureFlags.data?.order_tracking_board_enabled && <div className="customer-order-progress" aria-label={`Order progress: ${booking.status}`}><progress max={orderProgressStatuses.length - 1} value={Math.max(0, orderProgressStatuses.indexOf(progressStatus(booking.status.toLowerCase())))} /><small>{booking.status.toLowerCase() === 'cancelled' ? 'Cancelled' : `${Math.max(1, orderProgressStatuses.indexOf(progressStatus(booking.status.toLowerCase())) + 1)} of ${orderProgressStatuses.length} stages`}</small></div>}</td>
             <td>{c.common.rupee(booking.amount.toLocaleString('en-IN'))}</td>
           </tr>)}</tbody>
         </table>
@@ -224,9 +233,25 @@ export function CustomerBookingsTable({ onNavigate }: Props) {
           </>}
           {payState.kind === 'error' && <p role="alert">{payState.message}</p>}
         </section>}
-        <section><h3>{c.bookingsTable.serviceDetails}</h3>{selectedBooking.services.length
-          ? <ul>{selectedBooking.services.map((service) => <li key={service.serviceId}><strong>{serviceLabel(service.serviceId)}</strong>{service.capacity && <span>{c.bookingsTable.capacitySeparator}{service.capacity}</span>}{service.deliveryDate && <p>{c.bookingsTable.preferredDate(formatDate(service.deliveryDate))}</p>}<p>{service.details || c.bookingsTable.noAdditionalDetails}</p></li>)}</ul>
-          : <p>{c.bookingsTable.noServiceDetails}</p>}</section>
+        {multiServiceOrdersEnabled && selectedBooking.orderItems?.length
+          ? <section><h3>Services in this order</h3><ul>{selectedBooking.orderItems.map((item) => <li key={item.id}>
+            <strong>{item.serviceName}</strong><span> · {item.status.replace(/_/g, ' ')}</span>
+            <p>{item.details.capacity || item.details.quantity || item.details.details || c.bookingsTable.noAdditionalDetails}</p>
+            {item.amountPaise > 0 && <p>{c.common.rupee((item.amountPaise / 100).toLocaleString('en-IN'))}</p>}
+            {(item.scheduledAt || item.location) && <small>{item.location ?? selectedBooking.location}{item.scheduledAt ? ` · ${formatDate(item.scheduledAt)}` : ''}</small>}
+          </li>)}</ul></section>
+          : <section><h3>{c.bookingsTable.serviceDetails}</h3>{selectedBooking.services.length
+            ? <ul>{selectedBooking.services.map((service) => <li key={service.serviceId}><strong>{serviceLabel(service.serviceId)}</strong>{service.capacity && <span>{c.bookingsTable.capacitySeparator}{service.capacity}</span>}{service.deliveryDate && <p>{c.bookingsTable.preferredDate(formatDate(service.deliveryDate))}</p>}<p>{service.details || c.bookingsTable.noAdditionalDetails}</p></li>)}</ul>
+            : <p>{c.bookingsTable.noServiceDetails}</p>}</section>}
+        {multiServiceOrdersEnabled && selectedBooking.fulfilments?.length ? <section>
+          <h3>Fulfilments</h3>
+          <ul>{selectedBooking.fulfilments.map((fulfilment) => <li key={fulfilment.id}>
+            <strong>{fulfilment.status.replace(/_/g, ' ')}</strong>
+            {fulfilment.vendorName && <span> · {fulfilment.vendorName}</span>}
+            <p>{fulfilment.itemIds.length} service{fulfilment.itemIds.length === 1 ? '' : 's'} · {fulfilment.location ?? selectedBooking.location}</p>
+            {fulfilment.scheduledAt && <small>{formatDate(fulfilment.scheduledAt)}</small>}
+          </li>)}</ul>
+        </section> : null}
         <section><h3>{c.bookingsTable.accessNotes}</h3><p>{selectedBooking.notes || c.bookingsTable.noAccessNotes}</p></section>
           {cancelError && <p className="booking-cancel-error" role="alert">{cancelError}</p>}
           {(selectedBooking.status.toLowerCase() === 'delivered' || (!customerDemoDataEnabled && customerCancellableStatuses.includes(selectedBooking.status.toLowerCase()))) && <div className="action-row">

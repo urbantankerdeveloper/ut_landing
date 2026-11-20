@@ -11,6 +11,7 @@ router.get('/flags', async (_request, response) => {
     response.json({
       ...config.featureFlags,
       manual_assignment_mode_enabled: await getManualAssignmentModeEnabled(),
+      multi_service_orders_enabled: config.MULTI_SERVICE_ORDERS_ENABLED,
     })
   } catch (error) {
     databaseFailure(response, 'config.feature_flags_lookup_failed', error, 500)
