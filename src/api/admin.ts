@@ -23,6 +23,21 @@ export type AdminEnquiryHistoryRecord = {
 export type AdminSystemHealth = { ok: boolean; migrations: Array<{ table: string; applied: boolean; error?: string }>; configuration: Record<string, boolean>; checkedAt: string }
 export type AdminNotification = { id: string; title: string; event_type: string; payload?: { detail?: string; bookingId?: string; reference?: string; status?: string }; read_at?: string; created_at: string }
 export type AdminSmsTemplate = { templateKey: string; body: string; variables: string[]; isActive: boolean; msg91TemplateId: string | null; updatedAt: string; isBuiltIn: boolean; allowedVariables: string[] | null }
+export type AdminWhatsAppTemplate = {
+  templateKey: string
+  body: string
+  variables: string[]
+  isActive: boolean
+  updatedAt: string
+  campaignName: string | null
+  isBuiltIn: boolean
+  allowedVariables: string[] | null
+  requiredVariables: string[]
+  canDeactivate: boolean
+  provider: 'combirds-whatsapp'
+  bodyUsedByProvider: false
+  providerNote: string
+}
 export type AdminAnalyticsSummary = { days: number; from: string; to: string; total: number; byEvent: Record<string, number>; funnel: { login: number; bookingStarted: number; bookingCreated: number; vendorAccepted: number; delivered: number; rates: Record<string, number> } }
 export type AdminDashboardSummary = {
   activeOrdersByStatus: Record<string, number>
@@ -104,6 +119,9 @@ export const adminApi = {
   complaints: async () => (await apiFetch<{ rows: unknown[] }>('/admin/complaints')).rows,
   updateComplaint: (id: string, payload: { status: string; resolution?: string }) => apiFetch<unknown>(`/admin/complaints/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   alerts: () => apiFetch<unknown[]>('/admin/alerts'),
+  whatsappTemplates: async () => (await apiFetch<{ rows: AdminWhatsAppTemplate[] }>('/admin/whatsapp-templates')).rows,
+  createWhatsAppTemplate: (payload: { templateKey: string; body: string; isActive: boolean }) => apiFetch<AdminWhatsAppTemplate>('/admin/whatsapp-templates', { method: 'POST', body: JSON.stringify(payload) }),
+  updateWhatsAppTemplate: (key: string, payload: { body?: string; isActive?: boolean }) => apiFetch<AdminWhatsAppTemplate>(`/admin/whatsapp-templates/${encodeURIComponent(key)}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   smsTemplates: async () => (await apiFetch<{ rows: AdminSmsTemplate[] }>('/admin/sms-templates')).rows,
   createSmsTemplate: (payload: { templateKey: string; body: string; isActive: boolean; msg91TemplateId: string }) => apiFetch<AdminSmsTemplate>('/admin/sms-templates', { method: 'POST', body: JSON.stringify(payload) }),
   updateSmsTemplate: (key: string, payload: { body: string; isActive: boolean; msg91TemplateId: string }) => apiFetch<AdminSmsTemplate>(`/admin/sms-templates/${encodeURIComponent(key)}`, { method: 'PATCH', body: JSON.stringify(payload) }),

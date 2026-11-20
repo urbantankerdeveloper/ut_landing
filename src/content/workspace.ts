@@ -112,6 +112,7 @@ export const workspaceContent = {
       complaints: 'Complaints',
       alerts: 'Alerts',
       coupons: 'Coupons',
+      whatsappTemplates: 'WhatsApp templates',
       smsTemplates: 'SMS templates',
       systemHealth: 'System health',
     },

@@ -10,6 +10,8 @@ import { useCouponValidation, useRazorpayPayment } from '../hooks/useFrontendFea
 import { useFeatureFlags } from '../hooks/useFeatureFlags'
 import { CheckoutError } from '../utils/razorpayCheckout'
 import { PaymentReceiptCard } from '../components/PaymentReceiptCard'
+import { PhoneVerifyDialog } from '../components/PhoneVerifyDialog'
+import { authApi } from '../api/auth'
 import { useAuthStore } from '../stores/authStore'
 import { customerApi, type BookingPaymentMethod, type BookingServiceDetails, type CustomerBooking, type SavedAddress } from '../api/customer'
 import { customerDemoDataEnabled } from '../constants/demo'
@@ -305,6 +307,7 @@ function isValidDeliveryDate(value: string) {
 }
 
 const DRAFT_PERSIST_DELAY_MS = 300
+const phoneVerifyDialogEnabled = import.meta.env.VITE_PHONE_VERIFY_DIALOG_ENABLED === 'true'
 
 export default function BookingScreen() {
   const [draft] = useState(loadBookingDraft)
@@ -319,6 +322,7 @@ export default function BookingScreen() {
   const [paymentFailure, setPaymentFailure] = useState<CheckoutError | null>(null)
   const couponValidation = useCouponValidation()
   const user = useAuthStore((state) => state.user)
+  const setAuthUser = useAuthStore((state) => state.setUser)
   const isRegisteredCustomer = Boolean(user && !user.username.startsWith('guest_'))
   const pricingQuery = useCustomerPricing(isRegisteredCustomer)
   const gstPercentage = pricingQuery.data?.gstPercentage
@@ -385,7 +389,9 @@ export default function BookingScreen() {
   const [couponDiscount, setCouponDiscount] = useState(draft.couponDiscount ?? 0)
   const [couponMessage, setCouponMessage] = useState<string | null>(null)
   const [phoneChallenges, setPhoneChallenges] = useState<Record<string, string>>(draft.phoneChallenges ?? {})
+  const [phoneVerifyDialogOpen, setPhoneVerifyDialogOpen] = useState(false)
   const [otpChallenges, setOtpChallenges] = useState<Record<string, string>>({})
+  const [otpChannels, setOtpChannels] = useState<Record<string, 'whatsapp' | 'sms'>>({})
   const [otpValues, setOtpValues] = useState<Record<string, string>>({})
   const [otpMessages, setOtpMessages] = useState<Record<string, string>>({})
   const [otpPendingPhone, setOtpPendingPhone] = useState<string | null>(null)
@@ -398,7 +404,12 @@ export default function BookingScreen() {
   const [idempotencyKey] = useState(() => draft.idempotencyKey ?? crypto.randomUUID())
   const selectedServices = useMemo(() => serviceEntries.map((entry) => entry.serviceId), [serviceEntries])
   const activeServiceEntries = useMemo(() => serviceEntries.filter((entry) => options.some((option) => option.code === entry.serviceId)), [serviceEntries, options])
-  const availableServiceOptions = useMemo(() => options.filter((option) => !activeServiceEntries.some((entry) => entry.serviceId === option.code)), [activeServiceEntries, options])
+  const availableServiceOptions = useMemo(() => options.sort((a, b) => {
+      if (a.code === 'water_tanker') return -1
+      if (b.code === 'water_tanker') return 1
+      return 0
+    })
+    .filter((option) => !activeServiceEntries.some((entry) => entry.serviceId === option.code)), [activeServiceEntries, options])
   const addServiceLabel = activeServiceEntries.length ? c.selectServices.addAnotherService : c.selectServices.addService
   const selectedServiceToAdd = availableServiceOptions.some((option) => option.code === serviceToAdd)
     ? serviceToAdd
@@ -643,7 +654,10 @@ export default function BookingScreen() {
     const normalized = phoneValue.replace(/\D/g, '').slice(-10)
     const guestPhone = user?.username.startsWith('guest_') ? user.username.slice('guest_'.length).replace(/\D/g, '').slice(-10) : ''
     const savedVerifiedPhone = phoneVerificationQuery.data?.verified ? phoneVerificationQuery.data.phone.replace(/\D/g, '').slice(-10) : ''
-    return Boolean(normalized && (phoneChallenges[normalized] !== undefined || guestPhone === normalized || savedVerifiedPhone === normalized))
+    const savedChallenge = phoneVerificationQuery.data?.challengeId
+    const profilePhone = user?.phone?.replace(/\D/g, '').slice(-10)
+    const profileChallenge = user?.phoneVerified === true && profilePhone === normalized && Boolean(savedChallenge)
+    return Boolean(normalized && (phoneChallenges[normalized] !== undefined || guestPhone === normalized || savedVerifiedPhone === normalized || profileChallenge))
   }
   function review(values: BookingFormValues) {
     const today = currentDateInputValue()
@@ -666,6 +680,11 @@ export default function BookingScreen() {
     setServiceFieldErrors(fieldErrors)
     if (Object.keys(fieldErrors).length) {
       setError(c.errors.correctServiceDetails)
+      return
+    }
+    if (isRegisteredCustomer && phoneVerifyDialogEnabled && (user?.phoneVerified !== true || !isPhoneVerified(normalizedPhone))) {
+      setError(null)
+      setPhoneVerifyDialogOpen(true)
       return
     }
     if (!isPhoneVerified(normalizedPhone)) {
@@ -694,8 +713,9 @@ export default function BookingScreen() {
     try {
       const result = await customerApi.requestGuestOtp(normalizedPhone)
       setOtpChallenges((current) => ({ ...current, [normalizedPhone]: result.challengeId }))
+      setOtpChannels((current) => ({ ...current, [normalizedPhone]: result.channel }))
       setOtpValues((current) => ({ ...current, [normalizedPhone]: '' }))
-      setOtpMessages((current) => ({ ...current, [normalizedPhone]: c.otp.codeSent }))
+      setOtpMessages((current) => ({ ...current, [normalizedPhone]: `We sent a code via ${result.channel === 'whatsapp' ? 'WhatsApp' : 'SMS'} to +91 ${normalizedPhone}.` }))
     } catch (otpError) {
       setOtpMessages((current) => ({ ...current, [normalizedPhone]: otpError instanceof Error ? otpError.message : c.otp.sendFailed }))
     } finally { setOtpPendingPhone(null) }
@@ -817,7 +837,9 @@ export default function BookingScreen() {
           notes: details.notes,
           couponCode,
           phone: normalizedPhone,
-          phoneVerificationChallengeId: phoneChallenges[normalizedPhone],
+          phoneVerificationChallengeId: phoneChallenges[normalizedPhone]
+            ?? phoneVerificationQuery.data?.challengeId
+            ?? undefined,
           latitude: sharedCoordinates?.lat,
           longitude: sharedCoordinates?.lng,
           paymentMethod,
@@ -1019,7 +1041,7 @@ export default function BookingScreen() {
               {isPhoneVerified(phone) ? <p className="verification-success">{c.verification.verifiedShared}</p> : <>
                 {user && phoneVerificationQuery.isError && <p className="booking-field-error" role="alert">{c.verification.savedNumberCheckFailed}</p>}
                 <p>{c.verification.verifyPrompt}</p>
-                <div className="guest-otp-row"><input value={otpValues[phone.replace(/\D/g, '').slice(-10)] ?? ''} onChange={(event) => setOtpValues((current) => ({ ...current, [phone.replace(/\D/g, '').slice(-10)]: event.target.value.replace(/\D/g, '').slice(0, 6) }))} inputMode="numeric" placeholder={c.verification.codePlaceholder} aria-label={c.verification.codeLabel} /><button className="button button-quiet" type="button" title={c.verification.sendOrResendLabel} onClick={() => void requestGuestOtp()} disabled={otpPendingPhone !== null}><Phone size={16} /><span>{otpChallenges[phone.replace(/\D/g, '').slice(-10)] ? c.verification.resendCode : c.verification.sendCode}</span></button><button className="button button-quiet" type="button" aria-label={c.verification.verifyCodeLabel} title={c.verification.verifyCodeLabel} onClick={() => void verifyGuestOtp()} disabled={otpPendingPhone !== null || !otpChallenges[phone.replace(/\D/g, '').slice(-10)]}><Check size={16} /><span>{c.verification.verify}</span></button></div>
+                <div className="guest-otp-row"><input value={otpValues[phone.replace(/\D/g, '').slice(-10)] ?? ''} onChange={(event) => setOtpValues((current) => ({ ...current, [phone.replace(/\D/g, '').slice(-10)]: event.target.value.replace(/\D/g, '').slice(0, 6) }))} inputMode="numeric" autoComplete={otpChannels[phone.replace(/\D/g, '').slice(-10)] === 'sms' ? 'one-time-code' : 'off'} maxLength={6} placeholder={c.verification.codePlaceholder} aria-label={c.verification.codeLabel} /><button className="button button-quiet" type="button" title={c.verification.sendOrResendLabel} onClick={() => void requestGuestOtp()} disabled={otpPendingPhone !== null}><Phone size={16} /><span>{otpChallenges[phone.replace(/\D/g, '').slice(-10)] ? c.verification.resendCode : c.verification.sendCode}</span></button><button className="button button-quiet" type="button" aria-label={c.verification.verifyCodeLabel} title={c.verification.verifyCodeLabel} onClick={() => void verifyGuestOtp()} disabled={otpPendingPhone !== null || !otpChallenges[phone.replace(/\D/g, '').slice(-10)]}><Check size={16} /><span>{c.verification.verify}</span></button></div>
                 {otpMessages[phone.replace(/\D/g, '').slice(-10)] && <p className="verification-message" role="status">{otpMessages[phone.replace(/\D/g, '').slice(-10)]}</p>}
               </>}
             </div>
@@ -1039,5 +1061,23 @@ export default function BookingScreen() {
       </form>
     </div>
     {locationModalOpen && <Suspense fallback={<div className="surface booking-map-loading" role="status">{c.location.loadingMap}</div>}><LocationPickerModal value={sharedCoordinates} addressGeocodingEnabled={featureFlags.data?.address_geocoding_enabled === true} onChange={(point, address) => updateMapLocation('shared', point, address)} onClose={() => setLocationModalOpen(false)} /></Suspense>}
+    {phoneVerifyDialogEnabled && phoneVerifyDialogOpen && <PhoneVerifyDialog
+      initialPhone={phone || user?.phone}
+      allowSkip={false}
+      onClose={() => setPhoneVerifyDialogOpen(false)}
+      onVerified={async (result) => {
+        setValue('phone', result.phone, { shouldDirty: true, shouldValidate: true })
+        setPhoneChallenges((current) => ({ ...current, [result.phone]: result.challengeId }))
+        const current = useAuthStore.getState().user
+        if (current) setAuthUser({ ...current, phone: result.phone, phoneVerified: true })
+        setError(null)
+        try {
+          const profile = await authApi.me()
+          setAuthUser(profile.user)
+        } catch (profileError) {
+          setError(profileError instanceof Error ? profileError.message : 'Your profile could not be refreshed.')
+        }
+      }}
+    />}
   </section>
 }

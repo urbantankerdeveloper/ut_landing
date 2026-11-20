@@ -1,7 +1,7 @@
 # Database changes
 
-**Status:** Migrations 002–004 applied and schema-verified on the configured development PostgreSQL database only; production application remains unverified.
-**Updated:** 2026-11-18
+**Status:** Canonical schema reset on the explicitly confirmed disposable test project on 2026-11-20; PostgreSQL connectivity check passed. All 17 Auth users and 8 Storage objects were removed; 2 buckets remain empty. No production project was accessed.
+**Updated:** 2026-11-20
 
 ## Current database
 
@@ -14,6 +14,8 @@
 
 | Date | Change | Migration / data safety |
 | --- | --- | --- |
+| 2026-11-20 | Consolidated the phone-verification schema updates into `backend/supabase/001_initial.sql`; this remains the canonical fresh-install/reset script. | The schema updates are already present in `001_initial.sql`. The file is destructive and must only be run against the explicitly approved disposable test project; it is not an incremental production migration. |
+| 2026-11-20 | Reinstalled the canonical schema from `001_initial.sql` on the explicitly confirmed disposable test project; deleted all Auth users and emptied Storage. | Reset ran with `NODE_ENV=test` and an explicit project allowlist; `npm run db:check` passed. Removed 17 Auth users and 8 objects; both Storage buckets remain configured and empty. Canonical install seed rows remain. No production project was accessed. |
 | 2026-11-18 | Applied migrations 002–004 sequentially to the configured development PostgreSQL database and verified expected schema objects, RLS, triggers, and indexes; `npm run db:check` passed afterward. | Development only; no production database was accessed. Migration 003 preflight found no duplicate active-phone groups or unsupported partner statuses. The SQL was applied through the existing `pg` connection pool because `psql` and the Supabase CLI were unavailable. |
 | 2026-11-18 | Added `backend/supabase/002_service_enquiries.sql`: structured contact/service/date fields on existing enquiries, an indexed append-only `enquiry_history` table, and a trigger that records submissions and admin status/response changes. | Additive/idempotent; applied and verified on development only. Existing enquiries are not backfilled, and history begins after migration. |
 | 2026-11-18 | Added `backend/supabase/003_partner_vehicle_details.sql`: per-vehicle JSONB details, a partial unique index for active applications by mobile number, append-only application review history, and the `additional_info_required` status. | Additive/transactional; applied and verified on development only. Existing rows retain legacy fields and receive an empty vehicle array; history starts with post-migration activity. Incomplete historic vehicle data is not fabricated. |

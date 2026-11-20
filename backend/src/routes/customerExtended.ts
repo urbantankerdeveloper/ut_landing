@@ -7,7 +7,7 @@ import { z } from 'zod'
 import { requireAuth } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 import { notifyCustomer } from '../services/customerNotifications.js'
-import { sendTemplateSms } from '../services/sms.js'
+import { sendTemplateWhatsApp } from '../services/whatsapp.js'
 import { canCustomerCancelBooking, transitionBooking } from '../services/bookingLifecycle.js'
 import { signaturesMatch } from '../services/paymentSecurity.js'
 import { hashOtp } from '../services/otp.js'
@@ -66,7 +66,7 @@ router.post('/orders/:orderId/delivery-otp', deliveryOtpLimit, async (request, r
   if (profileError) {
     smsFailureReason = 'Customer phone number could not be loaded.'
   } else if (customerPhone) {
-    const delivery = await sendTemplateSms('delivery_otp', customerPhone, {
+    const delivery = await sendTemplateWhatsApp('delivery_otp', customerPhone, {
       reference: bookingReference,
       otp,
     })
@@ -75,12 +75,12 @@ router.post('/orders/:orderId/delivery-otp', deliveryOtpLimit, async (request, r
       smsFailureReason =
         'reason' in delivery && typeof delivery.reason === 'string'
           ? delivery.reason
-          : 'SMS was not queued.'
+          : 'WhatsApp message was not queued.'
     }
   }
 
   if (!smsSent) {
-    logger.warn('customer.delivery_otp_sms_failed', {
+    logger.warn('customer.delivery_otp_whatsapp_failed', {
       bookingId: booking.id,
       reason: smsFailureReason,
     })
@@ -101,7 +101,7 @@ router.post('/orders/:orderId/delivery-otp', deliveryOtpLimit, async (request, r
     return response.status(409).json({ error: 'A newer delivery OTP was issued. Request it again.' })
   }
 
-  response.status(201).json({ otp, expiresAt, smsSent })
+  response.status(201).json({ otp, expiresAt, whatsappSent: smsSent, smsSent })
 })
 router.patch('/orders/:orderId/reschedule', async (request, response) => { const parsed = z.object({ scheduledFor: z.string().datetime() }).safeParse(request.body); if (!parsed.success || new Date(parsed.data.scheduledFor).getTime() <= Date.now()) return response.status(400).json({ error: 'Scheduled time must be a valid future datetime' }); const { data, error } = await supabase.from('bookings').update({ scheduled_for: parsed.data.scheduledFor, updated_at: new Date().toISOString() }).eq('id', request.params.orderId).eq('customer_id', request.authUser!.id).in('status', ['pending_vendor', 'vendor_assigned', 'accepted']).select().maybeSingle(); if (error) return databaseFailure(response, 'customerExtended.database_error', error, 400); if (!data) return response.status(409).json({ error: 'Booking cannot be rescheduled in its current state' }); response.json(data) })
 router.patch('/orders/:orderId/status', async (request, response) => {

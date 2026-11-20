@@ -5,7 +5,7 @@ import { requireAuth, requireRole } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 import { emitBookingLifecycleEvent, emitRealtime, emitRealtimeToBooking, emitRealtimeToUser, emitRealtimeToVendor } from '../services/realtime.js'
 import { notifyCustomer } from '../services/customerNotifications.js'
-import { notifyCustomerOfAssignment, notifyCustomerSmsById } from '../services/bookingNotifications.js'
+import { notifyCustomerOfAssignment, notifyCustomerWhatsAppById } from '../services/bookingNotifications.js'
 import { transitionBooking, type BookingStatus } from '../services/bookingLifecycle.js'
 import { analyticsEventNames, recordAnalyticsEvent } from '../lib/analytics.js'
 import { failure } from '../lib/httpErrors.js'
@@ -249,7 +249,7 @@ router.post('/orders/:id/delivery/verify', async (request, response) => {
       detail: 'Your Urban Tanker delivery is complete.',
       bookingId: booking.id,
     })
-    void notifyCustomerSmsById(booking.customer_id, 'delivery_confirmation', {
+    void notifyCustomerWhatsAppById(booking.customer_id, 'delivery_confirmation', {
       reference: booking.reference ?? booking.id,
     })
   }

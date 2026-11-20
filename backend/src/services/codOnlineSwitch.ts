@@ -2,7 +2,7 @@ import { logger } from '../lib/logger.js'
 import { supabase } from '../supabase.js'
 import { emitRealtimeToVendor } from './realtime.js'
 import { sendPushNotification } from './pushNotifications.js'
-import { sendTemplateSms, type SmsTemplateKey } from './sms.js'
+import { sendTemplateWhatsApp, type SmsTemplateKey } from './whatsapp.js'
 
 // Statuses before the driver starts the trip, so cash has not been collected yet.
 export const codSwitchStatuses: string[] = ['pending_vendor', 'vendor_assigned', 'accepted']
@@ -44,7 +44,7 @@ async function alertVendorAndDriver(booking: AlertTarget, alert: Alert) {
 
   const recipients = [vendor?.phone_e164, driverResult.data?.mobile_e164].filter((phone): phone is string => Boolean(phone))
   await Promise.all(recipients.map((phone) =>
-    sendTemplateSms(alert.smsTemplate, phone, { reference }).catch((smsError) => logger.warn('cod_online.sms_failed', { bookingId: booking.id, error: smsError instanceof Error ? smsError.message : 'unknown' })),
+    sendTemplateWhatsApp(alert.smsTemplate, phone, { reference }).catch((smsError) => logger.warn('cod_online.whatsapp_failed', { bookingId: booking.id, error: smsError instanceof Error ? smsError.message : 'unknown' })),
   ))
 }
 

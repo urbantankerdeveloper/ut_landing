@@ -30,6 +30,8 @@ const rules: WriteRule[] = [
   { method: 'PATCH', route: '/admin/enquiries/:id', message: 'Enquiry updated.' },
   { method: 'POST', route: '/admin/payouts/settle', message: 'Payout settled.' },
   { method: 'PATCH', route: '/admin/complaints/:id', message: 'Complaint updated.' },
+  { method: 'POST', route: '/admin/whatsapp-templates', message: 'WhatsApp template created.' },
+  { method: 'PATCH', route: '/admin/whatsapp-templates/:key', message: 'WhatsApp template updated.' },
   { method: 'POST', route: '/admin/sms-templates', message: 'SMS template created.' },
   { method: 'PATCH', route: '/admin/sms-templates/:key', message: 'SMS template updated.' },
   { method: 'POST', route: '/payment/payments/:id/refund', message: 'Refund issued.' },

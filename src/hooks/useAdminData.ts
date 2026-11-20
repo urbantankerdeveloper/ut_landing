@@ -3,7 +3,7 @@ import { adminApi, type AdminReportRequest } from '../api/admin'
 import { demoDataEnabled } from '../constants/demo'
 import { useRealtimeInvalidation } from './useRealtimeInvalidation'
 
-export const adminQueryKeys = { orders: ['admin', 'orders'], dashboardSummary: ['admin', 'dashboard-summary'], availabilityByArea: ['admin', 'availability-by-area'], vendors: ['admin', 'vendors'], customers: ['admin', 'customers'], vehicles: ['admin', 'vehicles'], drivers: ['admin', 'drivers'], services: ['admin', 'services'], payments: ['admin', 'payments'], payouts: ['admin', 'payouts'], complaints: ['admin', 'complaints'], alerts: ['admin', 'alerts'], notifications: ['admin', 'notifications'], coupons: ['admin', 'coupons'], auditLogs: ['admin', 'audit-logs'], flags: ['admin', 'feature-flags'], dispatchSettings: ['admin', 'dispatch-settings'], smsTemplates: ['admin', 'sms-templates'] } as const
+export const adminQueryKeys = { orders: ['admin', 'orders'], dashboardSummary: ['admin', 'dashboard-summary'], availabilityByArea: ['admin', 'availability-by-area'], vendors: ['admin', 'vendors'], customers: ['admin', 'customers'], vehicles: ['admin', 'vehicles'], drivers: ['admin', 'drivers'], services: ['admin', 'services'], payments: ['admin', 'payments'], payouts: ['admin', 'payouts'], complaints: ['admin', 'complaints'], alerts: ['admin', 'alerts'], notifications: ['admin', 'notifications'], coupons: ['admin', 'coupons'], auditLogs: ['admin', 'audit-logs'], flags: ['admin', 'feature-flags'], dispatchSettings: ['admin', 'dispatch-settings'], smsTemplates: ['admin', 'sms-templates'], whatsappTemplates: ['admin', 'whatsapp-templates'] } as const
 const liveOptions = { enabled: !demoDataEnabled, staleTime: 30_000 }
 export function useAdminOrders() { const query = useQuery({ queryKey: adminQueryKeys.orders, queryFn: adminApi.orders, ...liveOptions }); useRealtimeInvalidation(adminQueryKeys.orders); return query }
 export function useAdminDashboardSummary() { const query = useQuery({ queryKey: adminQueryKeys.dashboardSummary, queryFn: adminApi.dashboardSummary, ...liveOptions, refetchInterval: 60_000 }); useRealtimeInvalidation(adminQueryKeys.dashboardSummary); return query }
@@ -14,6 +14,7 @@ export function useAdminVendors() { return useQuery({ queryKey: adminQueryKeys.v
 export function useAdminCustomers() { return useQuery({ queryKey: adminQueryKeys.customers, queryFn: adminApi.customers, ...liveOptions }) }
 export function useAdminVehicles() { return useQuery({ queryKey: adminQueryKeys.vehicles, queryFn: adminApi.vehicles, ...liveOptions }) }
 export function useAdminDrivers() { return useQuery({ queryKey: adminQueryKeys.drivers, queryFn: adminApi.drivers, ...liveOptions }) }
+export function useAdminWhatsAppTemplates() { return useQuery({ queryKey: adminQueryKeys.whatsappTemplates, queryFn: adminApi.whatsappTemplates, ...liveOptions }) }
 export function useAdminSmsTemplates() { return useQuery({ queryKey: adminQueryKeys.smsTemplates, queryFn: adminApi.smsTemplates, ...liveOptions }) }
 export function useAdminServices() { return useQuery({ queryKey: adminQueryKeys.services, queryFn: adminApi.services, ...liveOptions }) }
 export function useAdminSubscriptions() { return useQuery({ queryKey: ['admin', 'subscriptions'], queryFn: adminApi.subscriptions, ...liveOptions }) }

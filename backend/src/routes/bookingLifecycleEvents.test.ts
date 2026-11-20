@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   otpMatches: vi.fn(),
   deliveryVerificationMethod: vi.fn(),
   notifyCustomer: vi.fn(),
-  notifyCustomerSmsById: vi.fn(),
+  notifyCustomerWhatsAppById: vi.fn(),
   notifyCustomerOfAssignment: vi.fn(),
   recordAnalyticsEvent: vi.fn(),
   emitRealtime: vi.fn(),
@@ -66,7 +66,7 @@ vi.mock('../services/bookingLifecycle.js', () => ({ transitionBooking: mocks.tra
 vi.mock('../services/customerNotifications.js', () => ({ notifyCustomer: mocks.notifyCustomer }))
 vi.mock('../services/bookingNotifications.js', () => ({
   notifyCustomerOfAssignment: mocks.notifyCustomerOfAssignment,
-  notifyCustomerSmsById: mocks.notifyCustomerSmsById,
+  notifyCustomerWhatsAppById: mocks.notifyCustomerWhatsAppById,
 }))
 vi.mock('../services/otp.js', () => ({ otpMatches: mocks.otpMatches }))
 vi.mock('../services/deliveryVerification.js', () => ({ deliveryVerificationMethod: mocks.deliveryVerificationMethod }))

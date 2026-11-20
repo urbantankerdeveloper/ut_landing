@@ -44,7 +44,7 @@ vi.mock('express-rate-limit', () => ({
 }))
 vi.mock('../services/scaling.js', () => ({ limiterStore: () => undefined }))
 vi.mock('../lib/logger.js', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }))
-vi.mock('../services/sms.js', () => ({ sendTemplateSms: vi.fn(async () => undefined) }))
+vi.mock('../services/whatsapp.js', () => ({ sendTemplateWhatsApp: vi.fn(async () => undefined) }))
 vi.mock('../services/pushNotifications.js', () => ({ sendPushNotification: vi.fn(async () => undefined) }))
 vi.mock('../services/realtime.js', () => ({ emitRealtimeToVendor: vi.fn() }))
 vi.mock('../services/customerNotifications.js', () => ({ notifyCustomer: vi.fn() }))
@@ -52,7 +52,7 @@ vi.mock('../services/customerNotifications.js', () => ({ notifyCustomer: vi.fn()
 import { logger } from '../lib/logger.js'
 import { sendPushNotification } from './pushNotifications.js'
 import { emitRealtimeToVendor } from './realtime.js'
-import { sendTemplateSms } from './sms.js'
+import { sendTemplateWhatsApp } from './whatsapp.js'
 import { notifyPaidOnlineAfterCodSwitch, notifyRevertedToCash } from './codOnlineSwitch.js'
 import customerRouter from '../routes/customerExtended.js'
 
@@ -80,7 +80,7 @@ beforeEach(() => {
   state.calls.length = 0
   config.featureFlags.online_payment_enabled = true
   config.featureFlags.wallet_enabled = false
-  vi.mocked(sendTemplateSms).mockClear()
+  vi.mocked(sendTemplateWhatsApp).mockClear()
   vi.mocked(sendPushNotification).mockClear()
   vi.mocked(emitRealtimeToVendor).mockClear()
   vi.mocked(logger.error).mockClear()
@@ -95,8 +95,8 @@ describe('notifyPaidOnlineAfterCodSwitch', () => {
 
     await notifyPaidOnlineAfterCodSwitch(BOOKING_ID)
 
-    expect(vi.mocked(sendTemplateSms).mock.calls.map((call) => call[1])).toEqual(['+919000000001', '+919000000002'])
-    expect(vi.mocked(sendTemplateSms).mock.calls[0]).toEqual(['cod_switched_to_online', '+919000000001', { reference: 'REF-1' }])
+    expect(vi.mocked(sendTemplateWhatsApp).mock.calls.map((call) => call[1])).toEqual(['+919000000001', '+919000000002'])
+    expect(vi.mocked(sendTemplateWhatsApp).mock.calls[0]).toEqual(['cod_switched_to_online', '+919000000001', { reference: 'REF-1' }])
     expect(vi.mocked(sendPushNotification).mock.calls[0]?.[0]).toMatchObject({ recipientId: 'owner-1' })
     expect(vi.mocked(emitRealtimeToVendor)).toHaveBeenCalledWith('vendor-1', 'booking.updated', { bookingId: BOOKING_ID })
   })
@@ -106,7 +106,7 @@ describe('notifyPaidOnlineAfterCodSwitch', () => {
 
     await notifyPaidOnlineAfterCodSwitch(BOOKING_ID)
 
-    expect(vi.mocked(sendTemplateSms)).not.toHaveBeenCalled()
+    expect(vi.mocked(sendTemplateWhatsApp)).not.toHaveBeenCalled()
     expect(updatePayloads('bookings')).toHaveLength(0)
   })
 
@@ -115,7 +115,7 @@ describe('notifyPaidOnlineAfterCodSwitch', () => {
 
     await notifyPaidOnlineAfterCodSwitch(BOOKING_ID)
 
-    expect(vi.mocked(sendTemplateSms)).not.toHaveBeenCalled()
+    expect(vi.mocked(sendTemplateWhatsApp)).not.toHaveBeenCalled()
   })
 
   it('never throws when the booking lookup fails', async () => {
@@ -130,10 +130,10 @@ describe('notifyPaidOnlineAfterCodSwitch', () => {
     setResults('vendors', { data: { owner_profile_id: 'owner-1', phone_e164: '+919000000001' }, error: null })
     setResults('drivers', { data: { mobile_e164: '+919000000002' }, error: null })
     setResults('notifications', { data: null, error: null })
-    vi.mocked(sendTemplateSms).mockRejectedValueOnce(new Error('MSG91 unavailable'))
+    vi.mocked(sendTemplateWhatsApp).mockRejectedValueOnce(new Error('Combirds WhatsApp unavailable'))
 
     await expect(notifyPaidOnlineAfterCodSwitch(BOOKING_ID)).resolves.toBeUndefined()
-    expect(vi.mocked(sendTemplateSms)).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(sendTemplateWhatsApp)).toHaveBeenCalledTimes(2)
   })
 })
 
@@ -146,7 +146,7 @@ describe('notifyRevertedToCash', () => {
 
     await notifyRevertedToCash(BOOKING_ID)
 
-    expect(vi.mocked(sendTemplateSms).mock.calls.map((call) => call[0])).toEqual(['cod_reverted_to_cash', 'cod_reverted_to_cash'])
+    expect(vi.mocked(sendTemplateWhatsApp).mock.calls.map((call) => call[0])).toEqual(['cod_reverted_to_cash', 'cod_reverted_to_cash'])
     expect(vi.mocked(sendPushNotification).mock.calls[0]?.[0]).toMatchObject({ recipientId: 'owner-1', title: 'Booking is cash on delivery' })
   })
 
@@ -154,7 +154,7 @@ describe('notifyRevertedToCash', () => {
     setResults('bookings', { data: null, error: { message: 'db down' } })
 
     await expect(notifyRevertedToCash(BOOKING_ID)).resolves.toBeUndefined()
-    expect(vi.mocked(sendTemplateSms)).not.toHaveBeenCalled()
+    expect(vi.mocked(sendTemplateWhatsApp)).not.toHaveBeenCalled()
   })
 })
 
