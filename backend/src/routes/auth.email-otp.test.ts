@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   deleteUser: vi.fn(),
   updateUserById: vi.fn(),
   generateLink: vi.fn(),
+  getUserById: vi.fn(),
   verifyOtp: vi.fn(),
   signInWithPassword: vi.fn(),
   isEmailConfigured: vi.fn(() => true),
@@ -49,7 +50,7 @@ vi.mock('../supabase.js', () => ({
         deleteUser: (...args: unknown[]) => mocks.deleteUser(...args),
         updateUserById: (...args: unknown[]) => mocks.updateUserById(...args),
         generateLink: (...args: unknown[]) => mocks.generateLink(...args),
-        getUserById: vi.fn(),
+        getUserById: (...args: unknown[]) => mocks.getUserById(...args),
       },
       verifyOtp: (...args: unknown[]) => mocks.verifyOtp(...args),
       signInWithPassword: (...args: unknown[]) => mocks.signInWithPassword(...args),
@@ -133,6 +134,8 @@ beforeEach(() => {
   mocks.updateUserById.mockResolvedValue({ data: { user: { id: 'user-1', email: 'new@example.com' } }, error: null })
   mocks.generateLink.mockReset()
   mocks.generateLink.mockResolvedValue({ data: { properties: { hashed_token: 'magic-token' } }, error: null })
+  mocks.getUserById.mockReset()
+  mocks.getUserById.mockResolvedValue({ data: { user: { email: 'member@example.com' } }, error: null })
   mocks.verifyOtp.mockReset()
   mocks.verifyOtp.mockResolvedValue({ data: { session: { access_token: 'access-token', refresh_token: 'refresh-token' }, user: { id: 'user-1', email: 'new@example.com' } }, error: null })
   mocks.signInWithPassword.mockReset()
@@ -523,6 +526,45 @@ describe('POST /guest/verify-phone (booking, signed in)', () => {
 })
 
 describe('POST /guest/verify-otp', () => {
+  it('signs into the existing customer account when the verified phone is already registered', async () => {
+    const profile = {
+      id: 'existing-customer',
+      role: 'customer',
+      full_name: 'Existing Customer',
+      username: 'customer-one',
+      phone_e164: '+919876543210',
+      phone_verified: true,
+      phone_verified_at: '2026-01-01T00:00:00.000Z',
+      theme_mode: 'dark',
+      selfie_required: false,
+    }
+    mocks.rpc.mockImplementation(async (procedure: string) => {
+      if (procedure === 'consume_guest_otp_attempt') return { data: [{ otp_hash: hashOtp('123456') }], error: null }
+      return { data: null, error: null }
+    })
+    mocks.respond.mockImplementation((table, ops) => {
+      const last = ops[ops.length - 1]?.name
+      if (table === 'guest_otp_challenges' && last === 'maybeSingle') return { data: { id: CHALLENGE }, error: null }
+      if (table === 'profiles' && last === 'maybeSingle') return { data: profile, error: null }
+      return { data: null, error: null }
+    })
+
+    const response = await request(buildApp()).post('/guest/verify-otp').send({
+      challengeId: CHALLENGE,
+      phone: PHONE,
+      otp: '123456',
+      name: 'Existing Customer',
+    })
+
+    expect(response.status).toBe(200)
+    expect(response.body.user).toMatchObject({ id: 'existing-customer', username: 'customer-one', name: 'Existing Customer', role: 'customer' })
+    expect(response.body.accessToken).toBe('access-token')
+    expect(mocks.createUser).not.toHaveBeenCalled()
+    expect(mocks.getUserById).toHaveBeenCalledWith('existing-customer')
+    expect(mocks.generateLink).toHaveBeenCalledWith({ type: 'magiclink', email: 'member@example.com' })
+    expect(mocks.verifyOtp).toHaveBeenCalledWith({ token_hash: 'magic-token', type: 'magiclink' })
+  })
+
   it('signs in a guest with the email code alone when SMS is off', async () => {
     mocks.rpc.mockResolvedValue({ data: [{ otp_hash: hashOtp('123456'), purpose: 'booking', user_id: null }], error: null })
     const response = await request(buildApp()).post('/guest/verify-otp').send({

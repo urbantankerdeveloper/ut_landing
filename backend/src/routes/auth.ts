@@ -563,15 +563,88 @@ router.post('/guest/verify-otp', async (request, response) => {
   if (parsed.data.challengeId && !(await markChallengeVerified(response, parsed.data.challengeId))) return
   if (parsed.data.emailChallengeId && !(await markEmailChallengeVerified(response, parsed.data.emailChallengeId))) return
 
+  const name = parsed.data.name ?? 'Guest customer'
+  if (parsed.data.challengeId) {
+    const { data: matchedProfile, error: profileLookupError } = await supabase
+      .from('profiles')
+      .select('id,role,full_name,username,phone_e164,phone_verified,phone_verified_at,theme_mode,selfie_required')
+      .eq('phone_e164', phone)
+      .maybeSingle()
+    if (profileLookupError) {
+      logFailure('guest.profile_lookup_failed', response.locals.requestId, profileLookupError.message)
+      return response.status(500).json({ error: 'The phone account could not be checked.' })
+    }
+
+    if (matchedProfile) {
+      const profile = matchedProfile as ProfileRow
+      if (profile.role !== 'customer') {
+        return response.status(409).json({ error: 'This phone number is linked to a non-customer account.' })
+      }
+
+      if (!profile.phone_verified || !profile.phone_verified_at) {
+        const { data: verifiedProfile, error: verifyProfileError } = await supabase
+          .from('profiles')
+          .update({ phone_verified: true, phone_verified_at: new Date().toISOString() })
+          .eq('id', profile.id)
+          .select('id,role,full_name,username,phone_e164,phone_verified,phone_verified_at,theme_mode,selfie_required')
+          .single()
+        if (verifyProfileError || !verifiedProfile) {
+          logFailure('guest.profile_verify_failed', response.locals.requestId, verifyProfileError?.message)
+          return response.status(500).json({ error: 'The phone account could not be verified.' })
+        }
+        Object.assign(profile, verifiedProfile)
+      }
+
+      const { data: existingUser, error: userError } = await authSupabase.auth.admin.getUserById(profile.id)
+      if (userError || !existingUser.user?.email) {
+        logFailure('guest.user_lookup_failed', response.locals.requestId, userError?.message)
+        return response.status(403).json({ error: 'The phone account is unavailable.' })
+      }
+      const { data: link, error: linkError } = await authSupabase.auth.admin.generateLink({
+        type: 'magiclink',
+        email: existingUser.user.email,
+      })
+      const tokenHash = link?.properties?.hashed_token
+      if (linkError || !tokenHash) {
+        logFailure('guest.magiclink_failed', response.locals.requestId, linkError?.message)
+        return response.status(500).json({ error: 'A phone sign-in session could not be created.' })
+      }
+      const { data: verified, error: verifyError } = await authSupabase.auth.verifyOtp({
+        token_hash: tokenHash,
+        type: 'magiclink',
+      })
+      if (verifyError || !verified.session || !verified.user) {
+        logFailure('guest.magiclink_verify_failed', response.locals.requestId, verifyError?.message)
+        return response.status(500).json({ error: 'A phone sign-in session could not be created.' })
+      }
+      setRefreshCookie(response, verified.session.refresh_token)
+      return response.json({
+        accessToken: verified.session.access_token,
+        ...refreshTokenForClient(request.header('x-client-platform'), verified.session.refresh_token),
+        user: {
+          id: profile.id,
+          email: verified.user.email,
+          username: profile.username ?? profile.phone_e164 ?? parsed.data.phone,
+          name: profile.full_name,
+          role: 'customer',
+          themeMode: profile.theme_mode ?? 'system',
+          selfieRequired: profile.selfie_required === true,
+          ...phoneProfileFields(profile),
+        },
+      })
+    }
+  }
+
   const password = crypto.randomBytes(24).toString('base64url')
   const email = `guest-${parsed.data.phone}-${crypto.randomBytes(6).toString('hex')}@guest.urbantanker.local`
-  const name = parsed.data.name ?? 'Guest customer'
-  const { data: created, error: createError } = await authSupabase.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { full_name: name, phone }, app_metadata: { role: 'customer' } })
+  const phoneVerified = Boolean(parsed.data.challengeId)
+  const username = `guest_${parsed.data.phone}_${crypto.randomBytes(3).toString('hex')}`
+  const { data: created, error: createError } = await authSupabase.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { full_name: name, ...(phoneVerified ? { phone } : {}) }, app_metadata: { role: 'customer' } })
   if (createError || !created.user) {
     logFailure('guest.user_create_failed', response.locals.requestId, createError?.message)
     return response.status(500).json({ error: 'Guest account could not be created.' })
   }
-  const { error: profileError } = await supabase.from('profiles').upsert({ id: created.user.id, full_name: name, phone_e164: phone, phone_verified: true, phone_verified_at: new Date().toISOString(), username: `guest_${parsed.data.phone}`, role: 'customer' })
+  const { error: profileError } = await supabase.from('profiles').upsert({ id: created.user.id, full_name: name, phone_e164: phoneVerified ? phone : null, phone_verified: phoneVerified, phone_verified_at: phoneVerified ? new Date().toISOString() : null, username, role: 'customer' })
   if (profileError) {
     logFailure('guest.profile_failed', response.locals.requestId, profileError.message)
     const { error: rollbackError } = await authSupabase.auth.admin.deleteUser(created.user.id)
@@ -584,7 +657,7 @@ router.post('/guest/verify-otp', async (request, response) => {
     return response.status(500).json({ error: 'Guest session could not be created.' })
   }
   setRefreshCookie(response, session.session.refresh_token)
-  response.json({ accessToken: session.session.access_token, ...refreshTokenForClient(request.header('x-client-platform'), session.session.refresh_token), user: { username: `guest_${parsed.data.phone}`, name, role: 'customer' } })
+  response.json({ accessToken: session.session.access_token, ...refreshTokenForClient(request.header('x-client-platform'), session.session.refresh_token), user: { username, name, role: 'customer' } })
 })
 
 router.post('/guest/verify-phone', requireAuth, async (request, response) => {
