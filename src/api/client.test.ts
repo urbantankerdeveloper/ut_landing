@@ -80,6 +80,31 @@ describe('apiFetch', () => {
     expect(requestHeaders.get('Content-Type')).toBe('application/json')
   })
 
+  it('allows registration requests to outlast the default request timeout', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true })
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const request = apiFetch('/auth/signup', {
+      method: 'POST',
+      timeoutMs: 30_000,
+      silent: true,
+    })
+    const requestRejection = expect(request).rejects.toMatchObject({ name: 'TimeoutError' })
+    await Promise.resolve()
+    const signal = fetchMock.mock.calls[0]?.[1]?.signal
+    expect(signal).toBeDefined()
+
+    await vi.advanceTimersByTimeAsync(12_000)
+    expect(signal?.aborted).toBe(false)
+    await vi.advanceTimersByTimeAsync(18_000)
+    await requestRejection
+    vi.useRealTimers()
+  })
+
   it('returns undefined for successful no-content responses', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204 })))
 

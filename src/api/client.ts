@@ -8,7 +8,7 @@ export { ApiError }
 
 // silent: true skips the toast for calls whose failure the screen handles itself (for example, a session check).
 // successMessage overrides the default saved text for a write that succeeds.
-export type ApiRequestInit = RequestInit & { silent?: boolean; successMessage?: string }
+export type ApiRequestInit = RequestInit & { silent?: boolean; successMessage?: string; timeoutMs?: number }
 type PhoneVerificationHandler = () => Promise<boolean>
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api'
@@ -33,9 +33,9 @@ function authHeaders() {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
-function createTimedSignal(externalSignal?: AbortSignal | null) {
+function createTimedSignal(externalSignal?: AbortSignal | null, timeoutMs = REQUEST_TIMEOUT_MS) {
   const controller = new AbortController()
-  const timeout = window.setTimeout(() => controller.abort(new DOMException('Request timed out', 'TimeoutError')), REQUEST_TIMEOUT_MS)
+  const timeout = window.setTimeout(() => controller.abort(new DOMException('Request timed out', 'TimeoutError')), timeoutMs)
   const relayAbort = () => controller.abort(externalSignal?.reason)
   if (externalSignal?.aborted) relayAbort()
   else externalSignal?.addEventListener('abort', relayAbort, { once: true })
@@ -93,18 +93,18 @@ function waitBeforeRetry(delayMs: number, signal?: AbortSignal | null) {
 }
 
 export async function apiFetch<T>(path: string, init: ApiRequestInit = {}, retry = true): Promise<T> {
-  const { silent, successMessage, ...requestInit } = init
+  const { silent, successMessage, timeoutMs, ...requestInit } = init
   const method = (requestInit.method ?? 'GET').toUpperCase()
   const write = method !== 'GET' ? resolveWriteMessage(method, path) : undefined
   try {
     let result: T
     try {
-      result = await requestWithRetries<T>(path, requestInit, retry)
+      result = await requestWithRetries<T>(path, requestInit, retry, timeoutMs)
     } catch (error) {
       if (!(error instanceof ApiError) || error.code !== 'PHONE_NOT_VERIFIED' || path.startsWith('/auth/') || !phoneVerificationHandler) throw error
       const verified = await phoneVerificationHandler()
       if (!verified) throw error
-      result = await requestWithRetries<T>(path, requestInit, retry)
+      result = await requestWithRetries<T>(path, requestInit, retry, timeoutMs)
     }
     // Successful writes confirm to the user for every role. Reads stay quiet.
     if (write && !write.silent && !silent) notifySuccess(successMessage ?? write.message)
@@ -116,7 +116,7 @@ export async function apiFetch<T>(path: string, init: ApiRequestInit = {}, retry
   }
 }
 
-async function requestWithRetries<T>(path: string, init: RequestInit, retry: boolean): Promise<T> {
+async function requestWithRetries<T>(path: string, init: RequestInit, retry: boolean, timeoutMs?: number): Promise<T> {
   const isIdempotent = (init.method ?? 'GET').toUpperCase() === 'GET'
   let slow = false
   const slowTimer = window.setTimeout(() => {
@@ -126,7 +126,7 @@ async function requestWithRetries<T>(path: string, init: RequestInit, retry: boo
   try {
     for (let attempt = 1; ; attempt += 1) {
       try {
-        return await apiFetchOnce<T>(path, init, retry)
+        return await apiFetchOnce<T>(path, init, retry, timeoutMs)
       } catch (error) {
         const canRetry = isIdempotent && attempt < MAX_GET_ATTEMPTS && isNetworkFailure(error) && !init.signal?.aborted
         if (!canRetry) throw error
@@ -139,8 +139,8 @@ async function requestWithRetries<T>(path: string, init: RequestInit, retry: boo
   }
 }
 
-async function apiFetchOnce<T>(path: string, init: RequestInit, retry: boolean): Promise<T> {
-  const timed = createTimedSignal(init.signal)
+async function apiFetchOnce<T>(path: string, init: RequestInit, retry: boolean, timeoutMs?: number): Promise<T> {
+  const timed = createTimedSignal(init.signal, timeoutMs)
   try {
     const headers = new Headers(init.headers)
     if (typeof init.body === 'string' && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
@@ -149,7 +149,7 @@ async function apiFetchOnce<T>(path: string, init: RequestInit, retry: boolean):
     const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers, credentials: 'include', signal: timed.signal })
     if (response.status === 401 && retry && !path.startsWith('/auth/')) {
       try {
-        if (await refreshSession()) return await apiFetchOnce<T>(path, init, false)
+        if (await refreshSession()) return await apiFetchOnce<T>(path, init, false, timeoutMs)
       } catch (error) {
         if (timed.signal.aborted) throw timed.signal.reason ?? error
         // Preserve the original authorization response if refresh fails.

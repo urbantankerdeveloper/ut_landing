@@ -52,7 +52,7 @@ vi.mock('../services/sms.js', () => ({
   sendTemplateSms: vi.fn(async () => ({ queued: false })),
 }))
 
-import authRouter from './auth.js'
+import authRouter, { createAuthRateLimit } from './auth.js'
 
 function buildApp() {
   const app = express()
@@ -62,6 +62,26 @@ function buildApp() {
 }
 
 describe('OTP request rate limits', () => {
+  it('disables auth throttling in development while retaining limits elsewhere', async () => {
+    const app = express()
+    app.get(
+      '/development',
+      createAuthRateLimit({ windowMs: 60_000, limit: 1 }, 'development'),
+      (_request, response) => response.sendStatus(200),
+    )
+    app.get(
+      '/production',
+      createAuthRateLimit({ windowMs: 60_000, limit: 1 }, 'production'),
+      (_request, response) => response.sendStatus(200),
+    )
+
+    expect((await request(app).get('/development')).status).toBe(200)
+    expect((await request(app).get('/development')).status).toBe(200)
+    expect((await request(app).get('/development')).status).toBe(200)
+    expect((await request(app).get('/production')).status).toBe(200)
+    expect((await request(app).get('/production')).status).toBe(429)
+  })
+
   it('enforces the per-phone and per-IP limits on the WhatsApp send route', async () => {
     state.challengeId = 0
     const app = buildApp()
