@@ -3,7 +3,7 @@ import { lazyWithRetry } from '../utils/lazyWithRetry'
 import { Controller, useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { ArrowLeft, ArrowRight, Banknote, Check, CreditCard, Crosshair, MapPin, Phone, Plus, Trash2, Wallet } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Banknote, Check, CheckCircle2, CreditCard, Crosshair, MapPin, Phone, Plus, Trash2, Wallet } from 'lucide-react'
 import { useAppNavigation } from '../routing/useAppNavigation'
 import { useCreateCustomerAddress, useCreateCustomerBooking, useCreateMultiServiceOrder, useCustomerAddresses, useCustomerOffers, useCustomerPhoneVerification, useCustomerPricing, useCustomerServices } from '../hooks/useCustomerData'
 import { useCouponValidation, useRazorpayPayment } from '../hooks/useFrontendFeatures'
@@ -11,6 +11,7 @@ import { useFeatureFlags } from '../hooks/useFeatureFlags'
 import { CheckoutError } from '../utils/razorpayCheckout'
 import { PaymentReceiptCard } from '../components/PaymentReceiptCard'
 import { PhoneVerifyDialog } from '../components/PhoneVerifyDialog'
+import { BookingPhoneCodeDialog } from '../components/BookingPhoneCodeDialog'
 import { authApi } from '../api/auth'
 import { useAuthStore } from '../stores/authStore'
 import { customerApi, type BookingPaymentMethod, type BookingServiceDetails, type CustomerBooking, type CustomerService, type SavedAddress } from '../api/customer'
@@ -402,6 +403,10 @@ export default function BookingScreen() {
   const [addressPincode, setAddressPincode] = useState(draft.addressPincode ?? '')
   const [saveAddressForFuture, setSaveAddressForFuture] = useState(draft.saveAddress ?? false)
   const [savedAddressId, setSavedAddressId] = useState(draft.savedAddressId ?? new URLSearchParams(window.location.search).get('address') ?? '')
+  const hasSavedAddresses = isRegisteredCustomer && Boolean(addressesQuery.data?.length)
+  const selectedSavedAddressExists = isRegisteredCustomer && Boolean(
+    savedAddressId && addressesQuery.data?.some((address) => address.id === savedAddressId),
+  )
   const [sharedCoordinates, setSharedCoordinates] = useState<LatLngLiteral | null>(draft.coordinates ? { lat: draft.coordinates.latitude, lng: draft.coordinates.longitude } : null)
   const [reviewConsent, setReviewConsent] = useState(false)
   const [serviceFieldErrors, setServiceFieldErrors] = useState<Record<string, ServiceFieldErrors>>({})
@@ -414,10 +419,9 @@ export default function BookingScreen() {
   const [phoneChallenges, setPhoneChallenges] = useState<Record<string, string>>(draft.phoneChallenges ?? {})
   const [phoneVerifyDialogOpen, setPhoneVerifyDialogOpen] = useState(false)
   const [otpChallenges, setOtpChallenges] = useState<Record<string, string>>({})
-  const [otpChannels, setOtpChannels] = useState<Record<string, 'whatsapp' | 'sms'>>({})
-  const [otpValues, setOtpValues] = useState<Record<string, string>>({})
   const [otpMessages, setOtpMessages] = useState<Record<string, string>>({})
   const [otpPendingPhone, setOtpPendingPhone] = useState<string | null>(null)
+  const [bookingCodeDialog, setBookingCodeDialog] = useState<{ phone: string; channel: 'whatsapp' | 'sms' } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const bookingSubmitInProgress = useRef(false)
@@ -505,6 +509,9 @@ export default function BookingScreen() {
     }, DRAFT_PERSIST_DELAY_MS)
     return () => window.clearTimeout(timer)
   }, [idempotencyKey, selectedServices, serviceEntries, hasInitializedServiceEntries, serviceDetails, capacity, step, getValues, sharedLocation, sharedCoordinates, sharedDate, region, addressLabel, addressCity, addressPincode, saveAddressForFuture, savedAddressId, preferredTime, phone, paymentMethod, couponCode, couponDiscount, guestName, phoneChallenges, bookingId, paymentBookingId, quotedTotal])
+  useEffect(() => () => {
+    sessionStorage.removeItem(BOOKING_DRAFT_KEY)
+  }, [])
   useEffect(() => {
     let timer: number | undefined
     const subscription = watch((values) => {
@@ -723,7 +730,7 @@ export default function BookingScreen() {
       setError(c.errors.customerNameRequired)
       return
     }
-    if (saveAddressForFuture && isRegisteredCustomer && !savedAddressId && (!addressLabel.trim() || addressCity.trim().length < 2 || !/^\d{4,12}$/.test(addressPincode.trim()))) {
+    if (saveAddressForFuture && isRegisteredCustomer && !selectedSavedAddressExists && (!addressLabel.trim() || addressCity.trim().length < 2 || !/^\d{4,12}$/.test(addressPincode.trim()))) {
       setError(c.errors.addressDetailsRequired)
       return
     }
@@ -741,18 +748,15 @@ export default function BookingScreen() {
     try {
       const result = await customerApi.requestGuestOtp(normalizedPhone)
       setOtpChallenges((current) => ({ ...current, [normalizedPhone]: result.challengeId }))
-      setOtpChannels((current) => ({ ...current, [normalizedPhone]: result.channel }))
-      setOtpValues((current) => ({ ...current, [normalizedPhone]: '' }))
       setOtpMessages((current) => ({ ...current, [normalizedPhone]: `We sent a code via ${result.channel === 'whatsapp' ? 'WhatsApp' : 'SMS'} to +91 ${normalizedPhone}.` }))
+      setBookingCodeDialog({ phone: normalizedPhone, channel: result.channel })
     } catch (otpError) {
       setOtpMessages((current) => ({ ...current, [normalizedPhone]: otpError instanceof Error ? otpError.message : c.otp.sendFailed }))
     } finally { setOtpPendingPhone(null) }
   }
-  async function verifyGuestOtp() {
-    const normalizedPhone = getValues('phone').replace(/\D/g, '').slice(-10)
+  async function verifyGuestOtp(normalizedPhone: string, otp: string) {
     const challengeId = otpChallenges[normalizedPhone]
-    const otp = otpValues[normalizedPhone] ?? ''
-    if (!challengeId || !/^\d{6}$/.test(otp)) { setOtpMessages((current) => ({ ...current, [normalizedPhone]: c.otp.codeRequired })); return }
+    if (!challengeId || !/^\d{6}$/.test(otp)) throw new Error(c.otp.codeRequired)
     setOtpPendingPhone(normalizedPhone)
     setOtpMessages((current) => ({ ...current, [normalizedPhone]: '' }))
     try {
@@ -765,8 +769,9 @@ export default function BookingScreen() {
       }
       setPhoneChallenges((current) => ({ ...current, [normalizedPhone]: challengeId }))
       setOtpMessages((current) => ({ ...current, [normalizedPhone]: c.otp.verified }))
+      setBookingCodeDialog(null)
     } catch (otpError) {
-      setOtpMessages((current) => ({ ...current, [normalizedPhone]: otpError instanceof Error ? otpError.message : c.otp.verifyFailed }))
+      throw new Error(otpError instanceof Error ? otpError.message : c.otp.verifyFailed, { cause: otpError })
     } finally { setOtpPendingPhone(null) }
   }
   function trackBookingCreated(createdBookingId: string) {
@@ -814,7 +819,6 @@ export default function BookingScreen() {
     setLocationEligibility({})
     setPhoneChallenges({})
     setOtpChallenges({})
-    setOtpValues({})
     setOtpMessages({})
     setOtpPendingPhone(null)
     setBookingId(null)
@@ -850,7 +854,7 @@ export default function BookingScreen() {
       if (!/^\d{10}$/.test(normalizedPhone) || !isPhoneVerified(normalizedPhone)) throw new Error(c.errors.verifyPhoneBeforeConfirm)
       const primaryDeliveryDate = primaryService.deliveryDate
       if (!primaryDeliveryDate) throw new Error(c.errors.deliveryDateRequired)
-      if (saveAddressForFuture && isRegisteredCustomer && !savedAddressId && !customerDemoDataEnabled) {
+      if (saveAddressForFuture && isRegisteredCustomer && !selectedSavedAddressExists && !customerDemoDataEnabled) {
         await createAddress.mutateAsync({ label: addressLabel.trim(), address: sharedLocation.trim(), city: addressCity.trim(), pincode: addressPincode.trim(), latitude: sharedCoordinates?.lat, longitude: sharedCoordinates?.lng })
         setSaveAddressForFuture(false)
       }
@@ -1095,12 +1099,16 @@ export default function BookingScreen() {
 
           <BookingSection number="02" title={c.sections.contact.title} description={c.sections.contact.description}>
             <label className="field">{c.contact.customerName}<input {...register('guestName')} required minLength={2} maxLength={60} placeholder={c.contact.customerNamePlaceholder} /></label>
-            <Controller control={control} name="phone" render={({ field }) => <label className="field">{c.contact.mobileNumber}<span className="input-with-icon"><Phone size={16} /><input {...field} value={field.value ?? ''} aria-invalid={Boolean(errors.phone)} onChange={(event) => { field.onChange(event.target.value.replace(/\D/g, '').slice(0, 10)); setError(null) }} inputMode="numeric" type="tel" required placeholder={c.contact.mobileNumberPlaceholder} /></span>{errors.phone?.message && <small className="booking-field-error" role="alert">{errors.phone.message}</small>}</label>} />
-            {isRegisteredCustomer && <label className="field">{c.contact.savedAddress}<select value={savedAddressId} onChange={(event) => selectSavedAddress(event.target.value)}><option value="">{c.contact.newAddressOption}</option>{(addressesQuery.data ?? []).map((address) => <option value={address.id} key={address.id}>{c.contact.savedAddressOption(address.label, address.address)}</option>)}</select></label>}
+            <Controller control={control} name="phone" render={({ field }) => {
+              const normalized = (field.value ?? '').replace(/\D/g, '').slice(-10)
+              const verified = isPhoneVerified(field.value ?? '')
+              return <label className="field">{c.contact.mobileNumber}<span className={`booking-phone-input ${verified ? 'is-verified' : ''}`}><span className="booking-phone-input-value"><Phone size={16} /><input {...field} value={field.value ?? ''} aria-invalid={Boolean(errors.phone)} onChange={(event) => { field.onChange(event.target.value.replace(/\D/g, '').slice(0, 10)); setError(null) }} inputMode="numeric" type="tel" required placeholder={c.contact.mobileNumberPlaceholder} /></span><button className="button button-quiet" type="button" onClick={() => void requestGuestOtp()} disabled={otpPendingPhone !== null || normalized.length !== 10 || verified}>{verified ? <><CheckCircle2 size={16} /> Verified</> : <span>{otpChallenges[normalized] ? c.verification.resendCode : c.verification.sendCode}</span>}</button></span>{errors.phone?.message && <small className="booking-field-error" role="alert">{errors.phone.message}</small>}{otpMessages[normalized] && <small className="verification-message" role="status">{otpMessages[normalized]}</small>}</label>
+            }} />
+            {hasSavedAddresses && <label className="field">{c.contact.savedAddress}<select value={selectedSavedAddressExists ? savedAddressId : ''} onChange={(event) => selectSavedAddress(event.target.value)}><option value="">{c.contact.newAddressOption}</option>{(addressesQuery.data ?? []).map((address) => <option value={address.id} key={address.id}>{c.contact.savedAddressOption(address.label, address.address)}</option>)}</select></label>}
             {isRegisteredCustomer && addressesQuery.isLoading && <p className="booking-address-status" role="status">{c.contact.savedAddressesLoading}</p>}
             {isRegisteredCustomer && addressesQuery.isError && <p className="booking-address-status" role="alert">{c.contact.savedAddressesError}</p>}
-            {savedAddressId && <p className="saved-location-preview">{c.contact.savedAddressPreview(sharedLocation, addressCity, addressPincode)}</p>}
-            {!savedAddressId && <div className="booking-manual-location">
+            {selectedSavedAddressExists && <p className="saved-location-preview">{c.contact.savedAddressPreview(sharedLocation, addressCity, addressPincode)}</p>}
+            {!selectedSavedAddressExists && <div className="booking-manual-location">
               <div className="split-fields"><label className="field">{c.contact.serviceRegion}<select value={region} onChange={(event) => setRegion(event.target.value)}>{c.contact.regions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label><label className="field">{c.contact.addressLabel}<input value={addressLabel} onChange={(event) => setAddressLabel(event.target.value)} placeholder={c.contact.addressLabelPlaceholder} /></label></div>
               <label className="field">{c.contact.fullAddress}<textarea rows={3} required value={sharedLocation} onBlur={() => activeServiceEntries.forEach((entry) => validateDeliveryAddress(entry.id, sharedLocation))} onChange={(event) => updateSharedLocation(event.target.value)} placeholder={c.contact.fullAddressPlaceholder} /></label>
               <div className="booking-location-tools"><button className="button button-quiet" type="button" title={c.contact.chooseOnMapLabel} onClick={() => setLocationModalOpen(true)}><MapPin size={17} /> <span>{c.contact.chooseOnMap}</span></button><button className="button button-quiet" type="button" aria-label={c.contact.useCurrentLocation} title={c.contact.useCurrentLocation} onClick={() => detectLocation('shared')}><Crosshair size={17} /> <span>{c.contact.useCurrentLocation}</span></button></div>
@@ -1114,8 +1122,6 @@ export default function BookingScreen() {
               {isPhoneVerified(phone) ? <p className="verification-success">{c.verification.verifiedShared}</p> : <>
                 {user && phoneVerificationQuery.isError && <p className="booking-field-error" role="alert">{c.verification.savedNumberCheckFailed}</p>}
                 <p>{c.verification.verifyPrompt}</p>
-                <div className="guest-otp-row"><input value={otpValues[phone.replace(/\D/g, '').slice(-10)] ?? ''} onChange={(event) => setOtpValues((current) => ({ ...current, [phone.replace(/\D/g, '').slice(-10)]: event.target.value.replace(/\D/g, '').slice(0, 6) }))} inputMode="numeric" autoComplete={otpChannels[phone.replace(/\D/g, '').slice(-10)] === 'sms' ? 'one-time-code' : 'off'} maxLength={6} placeholder={c.verification.codePlaceholder} aria-label={c.verification.codeLabel} /><button className="button button-quiet" type="button" title={c.verification.sendOrResendLabel} onClick={() => void requestGuestOtp()} disabled={otpPendingPhone !== null}><Phone size={16} /><span>{otpChallenges[phone.replace(/\D/g, '').slice(-10)] ? c.verification.resendCode : c.verification.sendCode}</span></button><button className="button button-quiet" type="button" aria-label={c.verification.verifyCodeLabel} title={c.verification.verifyCodeLabel} onClick={() => void verifyGuestOtp()} disabled={otpPendingPhone !== null || !otpChallenges[phone.replace(/\D/g, '').slice(-10)]}><Check size={16} /><span>{c.verification.verify}</span></button></div>
-                {otpMessages[phone.replace(/\D/g, '').slice(-10)] && <p className="verification-message" role="status">{otpMessages[phone.replace(/\D/g, '').slice(-10)]}</p>}
               </>}
             </div>
           </BookingSection>
@@ -1150,6 +1156,13 @@ export default function BookingScreen() {
           setError(profileError instanceof Error ? profileError.message : 'Your profile could not be refreshed.')
         }
       }}
+    />}
+    {bookingCodeDialog && <BookingPhoneCodeDialog
+      phone={bookingCodeDialog.phone}
+      channel={bookingCodeDialog.channel}
+      busy={otpPendingPhone === bookingCodeDialog.phone}
+      onClose={() => setBookingCodeDialog(null)}
+      onVerify={(otp) => verifyGuestOtp(bookingCodeDialog.phone, otp)}
     />}
   </section>
 }

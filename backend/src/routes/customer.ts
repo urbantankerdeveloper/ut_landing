@@ -1,5 +1,4 @@
 import crypto from 'node:crypto'
-import { createClient } from '@supabase/supabase-js'
 import express, { Router, type Request, type Response } from 'express'
 import rateLimit from 'express-rate-limit'
 import { z } from 'zod'
@@ -44,11 +43,6 @@ async function consumeRecentPhoneVerification(challengeId: string | undefined, p
     .select('id')
     .maybeSingle()
   return { verified: Boolean(data), error }
-}
-async function passwordIsCorrect(email: string, password: string) {
-  const verifier = createClient(config.SUPABASE_URL, config.SUPABASE_SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } })
-  const { error } = await verifier.auth.signInWithPassword({ email, password })
-  return !error
 }
 function pushVendorOrder(ownerId: string, bookingId: string, reference: string) {
   void sendPushNotification({
@@ -855,14 +849,16 @@ router.get('/profile/selfie', async (request, response) => {
 router.patch('/profile', async (request, response) => {
   const parsed = z.object({
     name: z.string().min(2).max(60),
-    email: z.string().email(),
+    email: z.string().trim().toLowerCase().email(),
     phone: z.string().regex(/^\d{10}$/).optional(),
     phoneVerificationChallengeId: z.string().uuid().optional(),
-    currentPassword: z.string().min(1).max(200).optional(),
+    emailVerificationChallengeId: z.string().uuid().optional(),
   }).safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Invalid profile' })
   const userId = request.authUser!.id
-  const currentEmail = request.authUser!.email
+  const { data: authAccount, error: authLookupError } = await supabase.auth.admin.getUserById(userId)
+  if (authLookupError || !authAccount.user) return response.status(500).json({ error: 'The current account could not be checked.' })
+  const currentEmail = authAccount.user.email ?? request.authUser!.email
   const emailChanged = currentEmail !== undefined && currentEmail !== parsed.data.email
   const profileUpdate: Record<string, unknown> = { full_name: parsed.data.name }
   let phoneChange: { phone: string; hadExistingPhone: boolean } | null = null
@@ -882,9 +878,21 @@ router.patch('/profile', async (request, response) => {
     }
   }
   if (emailChanged) {
-    if (!parsed.data.currentPassword) return response.status(400).json({ error: 'Enter your current password to change your email.' })
-    if (!(await passwordIsCorrect(currentEmail, parsed.data.currentPassword))) return response.status(400).json({ error: 'The current password is incorrect.' })
-    const { error } = await supabase.auth.admin.updateUserById(userId, { email: parsed.data.email })
+    if (!parsed.data.emailVerificationChallengeId) return response.status(400).json({ error: 'Verify the new email address before saving.' })
+    const { data: emailChallenge, error: emailChallengeError } = await supabase
+      .from('email_otp_challenges')
+      .delete()
+      .eq('id', parsed.data.emailVerificationChallengeId)
+      .eq('email', parsed.data.email)
+      .eq('purpose', 'link')
+      .eq('user_id', userId)
+      .not('verified_at', 'is', null)
+      .gt('expires_at', new Date().toISOString())
+      .select('id')
+      .maybeSingle()
+    if (emailChallengeError) return databaseFailure(response, 'customer.email_verification_failed', emailChallengeError, 500)
+    if (!emailChallenge) return response.status(400).json({ error: 'Verify the new email address before saving.' })
+    const { error } = await supabase.auth.admin.updateUserById(userId, { email: parsed.data.email, email_confirm: true })
     if (error) return failure(response, 400, 'This email address cannot be used.', 'customer.email_update_failed', error)
   }
   const { data, error } = await supabase.from('profiles').update(profileUpdate).eq('id', userId).select().single()

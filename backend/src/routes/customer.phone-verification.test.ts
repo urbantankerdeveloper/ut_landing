@@ -4,9 +4,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   userId: 'customer-phone-user',
+  currentEmail: 'customer@example.com',
   phoneProfile: { phone_e164: null as string | null, phone_verified: false, phone_verified_at: null as string | null },
   bookingChallengeAvailable: false,
   bookingChallengeConsumed: false,
+  emailChallengeAvailable: false,
+  emailChallengeConsumed: false,
+  emailUpdates: [] as Array<{ email: string; email_confirm: boolean }>,
   calls: [] as Array<{ table: string; operations: Array<{ name: string; args: unknown[] }> }>,
   respond: vi.fn<(table: string, operations: Array<{ name: string; args: unknown[] }>) => unknown>(),
 }))
@@ -26,6 +30,15 @@ function chain(table: string, operations: Array<{ name: string; args: unknown[] 
 vi.mock('../supabase.js', () => ({
   supabase: {
     from: (table: string) => chain(table),
+    auth: {
+      admin: {
+        getUserById: async () => ({ data: { user: { email: mocks.currentEmail } }, error: null }),
+        updateUserById: async (_userId: string, attributes: { email: string; email_confirm: boolean }) => {
+          mocks.emailUpdates.push(attributes)
+          return { error: null }
+        },
+      },
+    },
   },
 }))
 vi.mock('../middleware/auth.js', () => ({
@@ -51,8 +64,12 @@ beforeEach(() => {
   config.PHONE_VERIFY_REQUIRED_AFTER = undefined
   config.REQUIRE_BOOKING_PHONE_VERIFICATION = true
   mocks.phoneProfile = { phone_e164: null, phone_verified: false, phone_verified_at: null }
+  mocks.currentEmail = 'customer@example.com'
   mocks.bookingChallengeAvailable = false
   mocks.bookingChallengeConsumed = false
+  mocks.emailChallengeAvailable = false
+  mocks.emailChallengeConsumed = false
+  mocks.emailUpdates = []
   mocks.calls = []
   mocks.respond.mockReset()
   mocks.respond.mockImplementation((table, operations) => {
@@ -75,6 +92,13 @@ beforeEach(() => {
           : { id: '11111111-1111-4111-8111-111111111111' },
         error: null,
       }
+    }
+    if (table === 'email_otp_challenges' && operations.some((operation) => operation.name === 'delete')) {
+      if (!mocks.emailChallengeAvailable || mocks.emailChallengeConsumed) {
+        return { data: null, error: null }
+      }
+      mocks.emailChallengeConsumed = true
+      return { data: { id: '22222222-2222-4222-8222-222222222222' }, error: null }
     }
     return { data: null, error: null }
   })
@@ -159,6 +183,38 @@ describe('account phone verification on customer orders', () => {
     expect(mocks.calls.some(({ table, operations }) =>
       table === 'profiles' && operations.some((operation) => operation.name === 'update'),
     )).toBe(false)
+  })
+
+  it('requires a verified email challenge before changing the account email', async () => {
+    const response = await request(buildApp()).patch('/profile').send({
+      name: 'Customer Name',
+      email: 'new@example.com',
+    })
+
+    expect(response.status).toBe(400)
+    expect(response.body.error).toContain('Verify the new email address')
+    expect(mocks.emailUpdates).toEqual([])
+    expect(mocks.calls.some(({ table, operations }) =>
+      table === 'profiles' && operations.some((operation) => operation.name === 'update'),
+    )).toBe(false)
+  })
+
+  it('consumes a verified email challenge before saving an account email change', async () => {
+    mocks.emailChallengeAvailable = true
+
+    const response = await request(buildApp()).patch('/profile').send({
+      name: 'Customer Name',
+      email: 'new@example.com',
+      emailVerificationChallengeId: '22222222-2222-4222-8222-222222222222',
+    })
+
+    expect(response.status).toBe(200)
+    expect(response.body.email).toBe('new@example.com')
+    expect(mocks.emailChallengeConsumed).toBe(true)
+    expect(mocks.emailUpdates).toEqual([{ email: 'new@example.com', email_confirm: true }])
+    expect(mocks.calls.some(({ table, operations }) =>
+      table === 'profiles' && operations.some((operation) => operation.name === 'update'),
+    )).toBe(true)
   })
 
   it('consumes a verified booking OTP so a second order must request a new one', async () => {

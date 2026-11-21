@@ -1,0 +1,272 @@
+.workspace-profile-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.workspace-profile-trigger:focus-visible {
+  outline: 2px solid #007c91;
+  outline-offset: 4px;
+  border-radius: 999px;
+}
+
+.workspace-avatar-new {
+  overflow: hidden;
+}
+
+.workspace-avatar-new img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+.profile-dialog-modal {
+  width: min(100%, 400px);
+}
+
+.profile-dialog-modal h2 {
+  font-size: 24px;
+}
+
+.profile-dialog {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.profile-dialog-photo {
+  display: grid;
+  place-items: center;
+  width: 88px;
+  height: 88px;
+  object-fit: cover;
+  color: #005c6c;
+  background: #e2f5f5;
+  border-radius: 50%;
+}
+
+.profile-dialog-photo-fallback {
+  border: 1px solid #cdebf0;
+}
+
+.profile-dialog-role {
+  color: #567073;
+  text-transform: capitalize;
+}
+
+.profile-dialog-form {
+  display: grid;
+  width: 100%;
+  gap: 12px;
+  margin-top: 12px;
+  text-align: left;
+}
+
+.profile-dialog-form > label {
+  display: grid;
+  gap: 6px;
+  color: #456b67;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.profile-dialog-form input:not([type="file"]) {
+  min-width: 0;
+  padding: 10px;
+  color: #163b40;
+  background: #fff;
+  border: 1px solid #cbded8;
+  border-radius: 8px;
+}
+
+.profile-dialog-form input:disabled {
+  color: #567073;
+  background: #f3f7f6;
+}
+
+.profile-dialog-input-action {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.profile-dialog-input-action input {
+  flex: 1;
+}
+
+.profile-dialog-prefix {
+  color: #567073;
+}
+
+.profile-dialog-input-action .button {
+  flex: none;
+  padding: 9px;
+  font-size: 11px;
+}
+
+.profile-dialog-photo-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #005c6c;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.profile-dialog-photo-picker input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
+.profile-dialog-code {
+  display: grid;
+  width: 100%;
+  gap: 10px;
+  padding: 12px;
+  background: #f3f7f6;
+  border-radius: 10px;
+}
+
+.profile-dialog-code p {
+  margin: 0;
+  color: #567073;
+  font-size: 12px;
+}
+
+.profile-dialog-otp,
+.booking-phone-code-inputs {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.profile-dialog-otp input,
+.booking-phone-code-inputs input {
+  min-width: 0;
+  height: 46px;
+  padding: 4px;
+  text-align: center;
+  font-size: 19px;
+  font-weight: 800;
+}
+
+.profile-dialog-readonly {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  gap: 10px;
+  color: #567073;
+  font-size: 12px;
+}
+
+.profile-dialog-readonly b {
+  overflow-wrap: anywhere;
+  color: #163b40;
+}
+
+.profile-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.profile-dialog-notice {
+  margin: 0;
+  color: #276b59;
+  font-size: 12px;
+}
+
+.profile-dialog-error {
+  margin: 0;
+  color: #b8432f;
+  font-size: 12px;
+}
+
+.profile-dialog dl {
+  display: grid;
+  width: 100%;
+  gap: 12px;
+  padding: 16px 0;
+  margin: 8px 0 0;
+  border-top: 1px solid #dce9e8;
+  text-align: left;
+}
+
+.profile-dialog dl div {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.profile-dialog dt {
+  color: #567073;
+}
+
+.profile-dialog dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.booking-phone-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.booking-phone-input-value {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.booking-phone-input-value input {
+  flex: 1;
+  min-width: 0;
+}
+
+.booking-phone-input.is-verified {
+  color: #276b59;
+}
+
+.booking-phone-input > .button {
+  flex: none;
+  min-height: 42px;
+  padding: 8px 11px;
+}
+
+.booking-phone-code-content {
+  display: grid;
+  gap: 16px;
+}
+
+.booking-phone-code-content .otp-delivery {
+  margin: 0;
+}
+
+@media (max-width: 760px) {
+  .profile-dialog-modal {
+    padding: 25px 20px;
+  }
+
+  .booking-phone-input {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .booking-phone-input-value {
+    flex-basis: 100%;
+  }
+}

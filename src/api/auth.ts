@@ -11,8 +11,16 @@ export type SignupVerificationResponse = { accessToken?: string; token?: string;
 export const authApi = {
   login: (username: string, password: string) => apiFetch<AuthResponse>('/auth/login', { method: 'POST', successMessage: feedbackContent.success.signedIn, body: JSON.stringify(username.includes('@') ? { email: username, password } : { username, password }) }),
   me: () => apiFetch<AuthResponse>('/auth/me', { method: 'GET', silent: true }),
+  profileSelfie: () => apiFetch<{ url: string; expiresInSeconds: number }>('/customer/profile/selfie', { method: 'GET', silent: true }),
   requestPhoneVerification: (phone: string) => apiFetch<PhoneVerifyChallenge>('/auth/phone/verify/request', { method: 'POST', silent: true, body: JSON.stringify({ phone }) }),
   confirmPhoneVerification: (phone: string, code: string) => apiFetch<PhoneVerifyResult>('/auth/phone/verify/confirm', { method: 'POST', silent: true, body: JSON.stringify({ phone, code }) }),
+  requestEmailLinkCode: (email: string) => apiFetch<{ challengeId: string }>('/auth/email/link/request-otp', { method: 'POST', silent: true, body: JSON.stringify({ email }) }),
+  confirmEmailLinkCode: (payload: { email: string; challengeId: string; otp: string }) => apiFetch<{ email: string; challengeId: string }>('/auth/email/link/verify-otp', { method: 'POST', silent: true, body: JSON.stringify(payload) }),
+  uploadProfileSelfie: (photo: Uint8Array) => {
+    const body = new ArrayBuffer(photo.byteLength)
+    new Uint8Array(body).set(photo)
+    return apiFetch<{ capturedAt: string }>('/customer/profile/selfie', { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body })
+  },
   signup: (payload: { email: string; password: string; name: string; phone: string; role: 'customer' | 'vendor' | 'admin'; businessName?: string; serviceZone?: string; latitude?: number; longitude?: number; selfieJpegBase64?: string }) => apiFetch<SignupResponse>('/auth/signup', { method: 'POST', timeoutMs: 30_000, body: JSON.stringify(payload) }),
   requestSignupEmailCode: (email: string) => apiFetch<{ challengeId: string }>('/auth/email/request-otp', { method: 'POST', silent: true, body: JSON.stringify({ email }) }),
   verifySignupEmail: (payload: { email: string; challengeId: string; otp: string; name: string; phone?: string; phoneChallengeId?: string; phoneOtp?: string }) => apiFetch<SignupVerificationResponse>('/auth/email/verify-otp', { method: 'POST', silent: true, body: JSON.stringify(payload) }),

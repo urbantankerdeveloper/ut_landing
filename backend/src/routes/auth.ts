@@ -1140,12 +1140,7 @@ router.post('/email/link/verify-otp', requireAuth, emailOtpVerifyLimit, async (r
   }
   if (lookup.user && lookup.user.id !== userId) return response.status(400).json({ error: 'This email address cannot be used.' })
   if (!(await markEmailChallengeVerified(response, challengeId))) return
-  const { error: updateError } = await authSupabase.auth.admin.updateUserById(userId, { email, email_confirm: true })
-  if (updateError) {
-    logFailure('email.link_update_failed', response.locals.requestId, updateError.message)
-    return response.status(400).json({ error: 'This email address cannot be used.' })
-  }
-  response.json({ email })
+  response.json({ email, challengeId })
 })
 
 router.post('/login', loginLimit, loginAccountLimit, async (request, response) => {

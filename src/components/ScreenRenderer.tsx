@@ -17,7 +17,7 @@ export function ScreenRenderer({ screen }: { screen: ScreenId }) {
 		: screen.endsWith('-workspace')
 			? <ScreenSkeleton workspace />
 			: <ScreenSkeleton workspace={false} />
-	return <Suspense fallback={fallback}><Screen /></Suspense>
+	return <Suspense fallback={fallback}><Screen key={screen} /></Suspense>
 }
 
 // Workspaces belong to one signed-in role. Anyone else is sent to the home page, or to their own workspace.

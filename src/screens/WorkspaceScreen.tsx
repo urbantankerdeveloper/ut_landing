@@ -1,11 +1,12 @@
 import { Suspense, useCallback, useEffect, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { lazyWithRetry } from '../utils/lazyWithRetry'
 import { BarChart3, Bell, CalendarCheck, ChevronDown, CircleDollarSign, ClipboardList, FileText, Gauge, House, LayoutDashboard, LogOut, MapPin, Menu, MessageSquare, PanelLeftClose, PanelLeftOpen, Receipt, Repeat, Settings2, Tag, Truck, UserRound, UserPlus, Users, Wallet, X } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
 import { type WorkspaceRole } from '../stores/navigationStore'
 import { useAppNavigation } from '../routing/useAppNavigation'
 import { WorkspaceContentSkeleton } from '../components/ScreenSkeleton'
+import { ProfileDialog } from '../components/ProfileDialog'
 import { useVendorOfflineSync } from '../hooks/useVendorData'
 import { useFeatureFlags } from '../hooks/useFeatureFlags'
 import { authApi } from '../api/auth'
@@ -16,6 +17,7 @@ import { realtimeContent } from '../content/realtime'
 import { useRealtimeNotificationStore } from '../stores/realtimeNotificationStore'
 import { useVendorOrderRequestStore } from '../stores/vendorOrderRequestStore'
 const WorkspaceContent = lazyWithRetry(() => import('./WorkspaceContent').then(({ WorkspaceContent: content }) => ({ default: content })))
+const profileMenuEnabled = import.meta.env.VITE_PROFILE_MENU_ENABLED === 'true'
 
 type NavItem = { label: string; icon: typeof House; key: string }
 type NavGroup = { label: string; icon: typeof House; keys: string[] }
@@ -49,12 +51,20 @@ export default function WorkspaceScreen() {
   const user = useAuthStore((state) => state.user)
   const signOut = useAuthStore((state) => state.signOut)
   const queryClient = useQueryClient()
+  const profilePhotoQuery = useQuery({
+    queryKey: ['profile-selfie', user?.id],
+    queryFn: async () => (await authApi.profileSelfie()).url,
+    enabled: Boolean(user),
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  })
   const featureFlags = useFeatureFlags()
   const walletEnabled = featureFlags.data?.wallet_enabled === true
   const data = roleData[activeRole]
-  const navItems = activeRole === 'customer' && !walletEnabled
-    ? data.nav.filter((item) => item.key !== 'wallet')
-    : data.nav
+  const navItems = data.nav.filter((item) =>
+    (item.key !== 'wallet' || activeRole !== 'customer' || walletEnabled)
+      && (item.key !== 'profile' || profileMenuEnabled),
+  )
   const [activeItem, setActiveItem] = useState(() => (activeRole === 'vendor' && useVendorOrderRequestStore.getState().request ? 'orders' : 'overview'))
   const visibleActiveItem = activeRole === 'customer' && activeItem === 'wallet' && !walletEnabled
     ? 'overview'
@@ -62,6 +72,8 @@ export default function WorkspaceScreen() {
   const unreadRealtime = useRealtimeNotificationStore((state) => state.unread)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
+  const [failedProfilePhotoUrl, setFailedProfilePhotoUrl] = useState<string | null>(null)
   const [expandedAdminGroups, setExpandedAdminGroups] = useState<Set<string>>(() => new Set())
   const [notices, setNotices] = useState<Array<{ id: number; message: string }>>([])
   const displayName = user?.name ?? (activeRole === 'admin' ? w.shell.displayName.admin : activeRole === 'dispatcher' ? w.shell.displayName.dispatcher : activeRole === 'vendor' ? w.shell.displayName.vendor : w.shell.displayName.customer)
@@ -93,7 +105,7 @@ export default function WorkspaceScreen() {
     navigate('home')
   }
   const showWorkspaceOverview = useCallback(() => navigate('home'), [navigate])
-  const renderNavItem = ({ label, icon: Icon, key }: NavItem) => <button className={visibleActiveItem === key ? 'is-active' : ''} aria-current={visibleActiveItem === key ? 'page' : undefined} key={key} onClick={() => selectItem(key)} title={sidebarCollapsed ? label : undefined}><Icon size={16} /><span>{label}</span>{key === 'notifications' && unreadRealtime > 0 && <span className="nav-unread-badge" aria-label={realtimeContent.unreadLabel(unreadRealtime)}>{unreadRealtime}</span>}</button>
+  const renderNavItem = ({ label, icon: Icon, key }: NavItem) => <button className={visibleActiveItem === key ? 'is-active' : ''} aria-current={visibleActiveItem === key ? 'page' : undefined} key={key} onClick={() => key === 'profile' ? setProfileOpen(true) : selectItem(key)} title={sidebarCollapsed ? label : undefined}><Icon size={16} /><span>{label}</span>{key === 'notifications' && unreadRealtime > 0 && <span className="nav-unread-badge" aria-label={realtimeContent.unreadLabel(unreadRealtime)}>{unreadRealtime}</span>}</button>
   const renderNavGroups = (groups: NavGroup[]) => <>
     {navItems.filter((item) => item.key === 'overview').map(renderNavItem)}
     {groups.map((group) => {
@@ -128,7 +140,7 @@ export default function WorkspaceScreen() {
         <span className="topbar-title">{visibleActiveItem === 'overview' ? data.title : data.nav.find((item) => item.key === visibleActiveItem)?.label}</span>
         <div className="topbar-identity">
           <button className="topbar-home" onClick={showWorkspaceOverview}>{w.shell.home}</button>
-          <span className="workspace-avatar-new">{displayName.slice(0, 1)}</span><span className="topbar-person">{displayName}</span>
+          <button className="workspace-profile-trigger" type="button" onClick={() => setProfileOpen(true)} aria-label={`Open ${displayName}'s profile`}><span className="workspace-avatar-new">{profilePhotoQuery.data && failedProfilePhotoUrl !== profilePhotoQuery.data ? <img src={profilePhotoQuery.data} alt="" onError={() => setFailedProfilePhotoUrl(profilePhotoQuery.data ?? null)} /> : displayName.slice(0, 1)}</span><span className="topbar-person">{displayName}</span></button>
           <button className="button button-quiet topbar-logout" onClick={logout}><LogOut size={14} /> {w.shell.logOut}</button>
         </div>
       </header>
@@ -138,5 +150,6 @@ export default function WorkspaceScreen() {
         {notices.length > 0 && <div className="workspace-notice-stack" aria-live="polite">{notices.map((notice) => <p className="workspace-notice-global" role="status" key={notice.id}>{notice.message}</p>)}</div>}
       </div>
     </main>
+    {profileOpen && user && <ProfileDialog user={user} initialPhotoUrl={profilePhotoQuery.data} onClose={() => setProfileOpen(false)} />}
   </section>
 }
