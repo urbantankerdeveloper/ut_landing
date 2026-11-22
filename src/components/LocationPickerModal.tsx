@@ -3,7 +3,7 @@ import type { LatLngLiteral } from 'leaflet'
 import { MapPin } from 'lucide-react'
 import { LocationPicker } from './LocationPicker'
 import { Modal } from './Modal'
-import { lookupDeliveryPoint } from '../services/geocoding'
+import { isChennaiDeliveryPoint, lookupDeliveryPoint } from '../services/geocoding'
 import { locationContent } from '../content/location'
 
 type Props = { value: LatLngLiteral | null; addressGeocodingEnabled: boolean; onChange: (value: LatLngLiteral, address: string) => void; onClose: () => void }
@@ -31,8 +31,9 @@ export function LocationPickerModal({ value, addressGeocodingEnabled, onChange, 
     } catch (error) {
       if (requestId !== latestRequest.current) return
       const message = error instanceof Error ? error.message : 'Location name lookup failed'
-      setLookupError(locationContent.modal.lookupFailed)
-      setCandidateIsInChennai(false)
+      const pointIsInChennai = isChennaiDeliveryPoint(point)
+      setLookupError(pointIsInChennai ? null : locationContent.modal.outsideChennai)
+      setCandidateIsInChennai(pointIsInChennai)
       setSelectedAddress(locationContent.modal.selectedArea(point.lat.toFixed(5), point.lng.toFixed(5)))
       console.warn(JSON.stringify({ event: 'location.reverse_geocode_failed', error: message }))
     } finally {

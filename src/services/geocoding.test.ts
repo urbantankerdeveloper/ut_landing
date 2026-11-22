@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { lookupDeliveryPoint } from './geocoding'
+import { isChennaiDeliveryPoint, lookupDeliveryPoint } from './geocoding'
 
 vi.mock('../constants/env', () => ({ googleMapsApiKey: 'test-key' }))
 vi.mock('../utils/googleMapsApi', () => ({
@@ -20,6 +20,16 @@ describe('lookupDeliveryPoint with Google geocoding', () => {
         },
         GeocoderStatus: { OK: 'OK' },
       },
+    })
+  })
+
+  describe('isChennaiDeliveryPoint', () => {
+    it('accepts the reported central Chennai map point', () => {
+      expect(isChennaiDeliveryPoint({ lat: 13.07727, lng: 80.28371 })).toBe(true)
+    })
+
+    it('rejects points outside the Chennai service bounds', () => {
+      expect(isChennaiDeliveryPoint({ lat: 13.36, lng: 80.28371 })).toBe(false)
     })
   })
 

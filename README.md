@@ -58,6 +58,16 @@ The current topology is split: the frontend is served by Hostinger from `public_
 - Node 22 is pinned in `.nvmrc`, `engines`, and `render.yaml`.
 - CI (`.github/workflows/ci.yml`) runs lint, tests, both builds, and a high-severity production audit for both packages.
 
+## Maps
+
+Google Maps is the primary web map when `VITE_GOOGLE_MAPS_API_KEY` is
+configured. Leaflet/OpenStreetMap is used if the key is missing or Google Maps
+fails to load. Set the key as a GitHub Actions secret for manual deploys or in
+ignored `.env.local` for local work. Restrict this public client key to
+approved HTTP referrers and the Maps JavaScript API. The Flutter app also uses
+Google Maps first with OpenStreetMap fallback; its native key setup is
+documented in `../urban_tanker_app/README.md`.
+
 ## Customer email confirmation
 
 All application email (registration confirmation, password reset, and notifications) is sent by the backend through Gmail SMTP. Configure `SMTP_USER` with the Gmail address and `SMTP_PASSWORD` with its Google app password. The defaults are `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=465`, and `SMTP_SECURE=true`; set `MAIL_FROM` only if you use an address authorized by that Gmail account. Add `${FRONTEND_ORIGIN}/login` to the Supabase Auth redirect allow list.

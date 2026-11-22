@@ -62,7 +62,7 @@
         <li>Screens are lazy-loaded. A chunk-reload guard now handles stale chunks after a deploy.</li>
         <li>Data comes from React Query over a typed API client (<code>src/api</code>). Realtime uses socket.io-client with a reconnecting client (<code>src/services/realtime.ts</code>).</li>
         <li>Auth state lives in a Zustand store. The refresh token is an HttpOnly cookie.</li>
-        <li>Leaflet and OpenStreetMap for maps and geocoding. Razorpay checkout is loaded from its CDN.</li>
+        <li>Google Maps is primary when configured; Leaflet/OpenStreetMap is the fallback for maps. Razorpay checkout is loaded from its CDN.</li>
         <li>Offline support: a service worker and a vendor mutation queue (<code>src/services/offlineMutationQueue.ts</code>).</li>
         <li>Styling is SCSS, split across roughly 30 partials, several of them with minified one-line rules.</li>
       </ul>

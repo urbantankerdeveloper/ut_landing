@@ -11,7 +11,7 @@
 | Customer website and web workspaces | React 19, TypeScript 6, Vite 8, React Router 7, TanStack Query, Zustand, React Hook Form/Zod, and SCSS in `src/`. The public website and customer/vendor/admin/dispatcher workspaces share one application. |
 | API | Node.js 22, Express 5, TypeScript, Zod request validation, Supabase JS, and a PostgreSQL connection pool in `backend/src/`. |
 | Persistence and identity | Supabase Auth and PostgreSQL. The canonical schema is `backend/supabase/001_initial.sql`; it is a destructive fresh-install/reset script, not a safe production migration. |
-| Realtime and maps | Socket.IO server/client with optional Redis adapter; Leaflet/OpenStreetMap is available, with optional Google Maps integrations. Vendor location updates are persisted by the API. |
+| Realtime and maps | Socket.IO server/client with optional Redis adapter; Google Maps is primary when configured, with Leaflet/OpenStreetMap fallback. Vendor location updates are persisted by the API. |
 | Native mobile / Admin App | The separate Flutter application in `urban_tanker_app` (Dart SDK `>=3.4.0`), with Riverpod, a shared API client, secure token storage, Socket.IO, maps, and customer/vendor/admin/dispatcher screens. This is the only Admin mobile codebase found in the workspace; no other Admin App repository or contract was supplied. |
 | Deployment | Web build uploaded to Hostinger `public_html`; API deployed separately on Render using `render.yaml`; mobile builds require platform tooling/signing. |
 

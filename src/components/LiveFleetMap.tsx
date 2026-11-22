@@ -63,6 +63,8 @@ function GoogleMapView({ vehicle, destination, trail, onMapClick, resolver }: Ma
   const [hasPanned, setHasPanned] = useState(false)
   const dragListenerRef = useRef<google.maps.MapsEventListener | null>(null)
   const clickListenerRef = useRef<google.maps.MapsEventListener | null>(null)
+  const tilesLoadedListenerRef = useRef<google.maps.MapsEventListener | null>(null)
+  const tileLoadTimeoutRef = useRef<number | null>(null)
   const vehicleMarkerRef = useRef<google.maps.Marker | null>(null)
   const destinationMarkerRef = useRef<google.maps.Marker | null>(null)
   const trailLineRef = useRef<google.maps.Polyline | null>(null)
@@ -98,6 +100,17 @@ function GoogleMapView({ vehicle, destination, trail, onMapClick, resolver }: Ma
           fullscreenControl: false,
           clickableIcons: false,
         })
+        tilesLoadedListenerRef.current = instance.addListener('tilesloaded', () => {
+          if (tileLoadTimeoutRef.current !== null) {
+            window.clearTimeout(tileLoadTimeoutRef.current)
+            tileLoadTimeoutRef.current = null
+          }
+          tilesLoadedListenerRef.current?.remove()
+          tilesLoadedListenerRef.current = null
+        })
+        tileLoadTimeoutRef.current = window.setTimeout(() => {
+          resolver.markUnavailable(new Error('Google Maps tiles did not load within 15 seconds'))
+        }, 15_000)
         dragListenerRef.current = instance.addListener('dragstart', () => {
           followVehicleRef.current = false
           hasPannedRef.current = true
@@ -117,8 +130,14 @@ function GoogleMapView({ vehicle, destination, trail, onMapClick, resolver }: Ma
 
     return () => {
       disposed = true
+      if (tileLoadTimeoutRef.current !== null) {
+        window.clearTimeout(tileLoadTimeoutRef.current)
+        tileLoadTimeoutRef.current = null
+      }
       dragListenerRef.current?.remove()
       clickListenerRef.current?.remove()
+      tilesLoadedListenerRef.current?.remove()
+      tilesLoadedListenerRef.current = null
       vehicleMarkerRef.current?.setMap(null)
       destinationMarkerRef.current?.setMap(null)
       trailLineRef.current?.setMap(null)

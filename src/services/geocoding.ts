@@ -6,6 +6,13 @@ type NominatimResponse = { display_name?: string; address?: Record<string, strin
 
 export type DeliveryLocationLookup = { address: string; isInChennai: boolean }
 
+export function isChennaiDeliveryPoint(point: LatLngLiteral) {
+  return point.lat >= 12.75 &&
+    point.lat <= 13.35 &&
+    point.lng >= 79.85 &&
+    point.lng <= 80.45
+}
+
 function approximateName(result: NominatimResponse, point: LatLngLiteral) {
   const address = result.address ?? {}
   const locality = address.suburb ?? address.neighbourhood ?? address.city_district ?? address.town ?? address.city ?? address.village

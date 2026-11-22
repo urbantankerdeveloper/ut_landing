@@ -26,7 +26,7 @@ Read-only audit, 2026-11-03. Sources:
 
 Read-only Phase 0 audit. File paths are relative to `D:\urban\ut_landing\src\` unless stated. Format of "Called at": `api/<module>.ts:<line>` is where the endpoint is defined, `hooks/<file>.ts:<line>` is the React Query hook, and `screens/...` or `components/...` is the consumer. Rows tagged NOT REACHABLE are included for completeness but have no caller in the routed UI. The "Defined but not reachable" section lists every such endpoint once. Demo flags are off (`constants/demo.ts:2-3`), so demo branches are not live.
 
-Counts: 132 live backend HTTP endpoints (method + path), 11 defined but not reachable, 14 socket events listened for, 3 socket emits, 3 fixed third-party hosts (Nominatim, OpenStreetMap tiles, Razorpay checkout) plus the upload host returned by the backend.
+Counts: 132 live backend HTTP endpoints (method + path), 11 defined but not reachable, 14 socket events listened for, 3 socket emits, 3 fixed third-party hosts (Nominatim, OpenStreetMap tiles, Razorpay checkout), the conditional Google Maps JavaScript API, plus the upload host returned by the backend.
 
 ### Domain: auth
 
@@ -270,7 +270,8 @@ Connection lifecycle: `io(url, { auth: callback returning accessToken, reconnect
 | Method | Path | Called at (file:line) | Request fields | Response fields read | Pagination | Caching/polling | Notes |
 |---|---|---|---|---|---|---|---|
 | GET | https://nominatim.openstreetmap.org/reverse (third-party) | services/geocoding.ts:33 (fetchDeliveryLookup); callers: screens/HomeScreen.tsx:39, screens/BookingScreen.tsx:553, components/LocationPickerModal.tsx:26 | lat, lon, format=jsonv2, addressdetails=1, zoom=14 | display_name, address.(suburb, neighbourhood, city_district, town, city, village, state_district, state, municipality, county) | n/a | 500 ms debounce (geocoding.ts:26); in-memory cache, max 50 entries (geocoding.ts:27) | No AbortSignal on the request. Device coordinates leave the app for this host. Sends no Authorization header. |
-| GET | OpenStreetMap tile server (Leaflet TileLayer, third-party) | components/LiveTrackingMap.tsx:38; components/PublicTrackingMap.tsx:6; components/LocationPicker.tsx:22 | tile coordinates | n/a | n/a | n/a | Third-party tile host. |
+| GET | Google Maps JavaScript API (conditional, primary when configured) | utils/googleMapsApi.ts; components/LiveFleetMap.tsx; services/geocoding.ts | restricted API key, map options, coordinates for reverse geocoding | map tiles, map events, formatted address | n/a | loaded once per page; falls back to Leaflet/OpenStreetMap on load/auth/tile timeout | Configure `VITE_GOOGLE_MAPS_API_KEY`; restrict to approved HTTP referrers. |
+| GET | OpenStreetMap tile server (Leaflet fallback, third-party) | components/LiveFleetMap.tsx; components/PublicTrackingMap.tsx; components/LocationPicker.tsx | tile coordinates | n/a | n/a | used when Google is not configured or unavailable | Fallback tile host. |
 | GET | https://checkout.razorpay.com/v1/checkout.js (third-party script) | hooks/useFrontendFeatures.ts:45 (loadRazorpayWidget) | none | n/a | n/a | loaded once per page | Injected script tag. |
 | GET | navigator.geolocation (device API, not network) | hooks/useFrontendFeatures.ts:12; hooks/useVendorData.ts:42; components/VendorLocationPanel.tsx:39 | none | coords | n/a | watchPosition with maximumAge 15s | Listed for completeness. |
 

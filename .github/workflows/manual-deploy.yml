@@ -5,7 +5,7 @@
 #
 # One-time setup in GitHub (Settings):
 #   Variables (Actions):   HOSTINGER_FTP_PROTOCOL   optional: ftps (default) or ftp, as shown in hPanel
-#   Secrets (Actions):     VITE_GOOGLE_MAPS_API_KEY Web Maps JavaScript API key (without it the site falls back to OpenStreetMap)
+#   Secrets (Actions):     VITE_GOOGLE_MAPS_API_KEY Web Maps JavaScript API key (Google primary; OSM fallback)
 #                          HOSTINGER_FTP_SERVER     FTP host from hPanel → Files → FTP Accounts
 #                          HOSTINGER_FTP_USERNAME   FTP username
 #                          HOSTINGER_FTP_PASSWORD   FTP password
