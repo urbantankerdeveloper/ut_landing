@@ -121,6 +121,19 @@ function mailErrorCode(error: unknown) {
   const code = (error as { code?: unknown } | null)?.code
   return typeof code === 'string' ? code : 'unknown'
 }
+function mailFailureFields(error: unknown) {
+  const details = error && typeof error === 'object'
+    ? error as { responseCode?: unknown; command?: unknown }
+    : {}
+  return {
+    smtpHost: config.SMTP_HOST,
+    smtpPort: config.SMTP_PORT,
+    smtpSecure: config.SMTP_SECURE,
+    errorCode: mailErrorCode(error),
+    smtpResponseCode: typeof details.responseCode === 'number' ? details.responseCode : undefined,
+    smtpCommand: typeof details.command === 'string' ? details.command : undefined,
+  }
+}
 
 const phoneSchema = z.string().regex(/^\d{10}$/)
 const duplicatePhoneMessage = 'This mobile number is already registered. Try signing in instead.'
@@ -372,8 +385,17 @@ async function issueEmailCode(requestId: unknown, email: string, purpose: EmailC
     const delivery = await sendEmail(email, template.subject, template.html)
     if (!delivery.queued) throw new Error(delivery.reason)
   } catch (deliveryError) {
-    await supabase.from('email_otp_challenges').delete().eq('id', challenge.id)
-    logFailure('email.delivery_failed', requestId, deliveryError instanceof Error ? deliveryError.message : undefined)
+    const { error: cleanupError } = await supabase.from('email_otp_challenges').delete().eq('id', challenge.id)
+    if (cleanupError) {
+      logger.error('email.challenge_cleanup_failed', {
+        requestId,
+        errorCode: typeof cleanupError.code === 'string' ? cleanupError.code : 'unknown',
+      })
+    }
+    logger.error('email.delivery_failed', {
+      requestId,
+      ...mailFailureFields(deliveryError),
+    })
     return { ok: false, status: 502, error: 'The verification email could not be sent. Try again shortly.' }
   }
   return { ok: true, challengeId: challenge.id }
@@ -1415,7 +1437,10 @@ function deliverPasswordReset(email: string, requestId: unknown) {
       const delivery = await sendEmail(email, reset.subject, reset.html)
       if (!delivery.queued) throw new Error(delivery.reason)
     } catch (deliveryError) {
-      logFailure('auth.password_reset_email_failed', requestId, mailErrorCode(deliveryError))
+      logger.error('auth.password_reset_email_failed', {
+        requestId,
+        ...mailFailureFields(deliveryError),
+      })
     }
   })()
 }

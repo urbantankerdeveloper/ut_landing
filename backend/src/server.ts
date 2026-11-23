@@ -188,6 +188,13 @@ const shutdown = (signal: string) => {
 }
 process.once('SIGTERM', () => shutdown('SIGTERM'))
 process.once('SIGINT', () => shutdown('SIGINT'))
+process.on('uncaughtExceptionMonitor', (error, origin) => {
+  logger.error('process.uncaught_exception', {
+    origin,
+    error: error.message,
+    stack: error.stack,
+  })
+})
 process.on('unhandledRejection', (reason) => {
   logger.error('process.unhandled_rejection', { error: reason instanceof Error ? reason.message : String(reason) })
 })

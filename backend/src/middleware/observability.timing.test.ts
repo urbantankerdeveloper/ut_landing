@@ -8,6 +8,31 @@ afterEach(() => {
 })
 
 describe('requestObservability timing', () => {
+  it('logs failed response details while redacting sensitive values', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const app = express()
+    app.use(requestObservability(0))
+    app.get('/failure', (_request, response) => response.status(502).json({
+      error: 'Delivery failed for alex@example.com, code 123456, phone +14155552671',
+      code: 'DELIVERY_FAILED',
+    }))
+
+    await request(app).get('/failure')
+
+    const event = error.mock.calls
+      .map(([line]) => JSON.parse(String(line)))
+      .find(({ event: name }) => name === 'http.request')
+    expect(event).toMatchObject({
+      event: 'http.request',
+      status: 502,
+      errorCode: 'DELIVERY_FAILED',
+      error: 'Delivery failed for [redacted-email], code [redacted-code], phone [redacted-number]',
+    })
+    expect(JSON.stringify(event)).not.toContain('alex@example.com')
+    expect(JSON.stringify(event)).not.toContain('123456')
+    expect(JSON.stringify(event)).not.toContain('+14155552671')
+  })
+
   it('sends a Server-Timing total on every response', async () => {
     const app = express()
     app.use(requestObservability(0))
