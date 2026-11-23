@@ -70,7 +70,11 @@ documented in `../urban_tanker_app/README.md`.
 
 ## Customer email confirmation
 
-All application email (registration confirmation, password reset, and notifications) is sent by the backend through Gmail SMTP. Configure `SMTP_USER` with the Gmail address and `SMTP_PASSWORD` with its Google app password. The defaults are `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=465`, and `SMTP_SECURE=true`; set `MAIL_FROM` only if you use an address authorized by that Gmail account. Add `${FRONTEND_ORIGIN}/login` to the Supabase Auth redirect allow list.
+All application email (registration confirmation, password reset, and notifications) is sent by the backend. On Render, configure `RESEND_API_KEY` and a `MAIL_FROM` address on a domain verified with Resend; the HTTPS API avoids Render's restrictions on direct SMTP. If `RESEND_API_KEY` is unset, the backend uses Gmail SMTP: configure `SMTP_USER` with the Gmail address and `SMTP_PASSWORD` with its Google app password. The defaults are `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=465`, and `SMTP_SECURE=true`; set `MAIL_FROM` only to an address authorized by the configured provider. Add `${FRONTEND_ORIGIN}/login` to the Supabase Auth redirect allow list.
+
+## Registration phone OTP
+
+Phone OTP delivery tries the configured Combirds WhatsApp campaign first, then uses MSG91 SMS when the fallback is enabled. For Render, set the relevant Combirds API key, campaign name, and user name, or configure `MSG91_AUTH_KEY` and `MSG91_TEMPLATE_ID_USER_REGISTRATION_OTP`. The `user_registration_otp` row in Supabase `sms_templates` must be active and include the `{{otp}}` placeholder; its stored MSG91 template ID takes precedence over the environment variable.
 
 ## Booking phone verification fallback
 

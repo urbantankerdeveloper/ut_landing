@@ -55,7 +55,20 @@ services:
         sync: false
       - key: SMTP_PASSWORD
         sync: false
+      # Use Resend's HTTPS API for email delivery on Render rather than direct SMTP.
+      - key: RESEND_API_KEY
+        sync: false
       - key: MAIL_FROM
+        sync: false
+      - key: COMBIRDS_WABA_API_KEY
+        sync: false
+      - key: COMBIRDS_WABA_CAMPAIGN_NAME
+        sync: false
+      - key: COMBIRDS_CAMPAIGN_USER_NAME
+        sync: false
+      - key: COMBIRDS_CAMPAIGN_USER_REGISTRATION_OTP
+        sync: false
+      - key: COMBIRDS_CAMPAIGN_BOOKING_VERIFICATION_OTP
         sync: false
       - key: MSG91_AUTH_KEY
         sync: false

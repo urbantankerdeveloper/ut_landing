@@ -125,13 +125,17 @@ function mailFailureFields(error: unknown) {
   const details = error && typeof error === 'object'
     ? error as { responseCode?: unknown; command?: unknown }
     : {}
+  const usingResend = Boolean(config.RESEND_API_KEY)
   return {
-    smtpHost: config.SMTP_HOST,
-    smtpPort: config.SMTP_PORT,
-    smtpSecure: config.SMTP_SECURE,
+    deliveryProvider: usingResend ? 'resend' : 'smtp',
+    ...(!usingResend ? {
+      smtpHost: config.SMTP_HOST,
+      smtpPort: config.SMTP_PORT,
+      smtpSecure: config.SMTP_SECURE,
+    } : {}),
     errorCode: mailErrorCode(error),
-    smtpResponseCode: typeof details.responseCode === 'number' ? details.responseCode : undefined,
-    smtpCommand: typeof details.command === 'string' ? details.command : undefined,
+    providerResponseCode: typeof details.responseCode === 'number' ? details.responseCode : undefined,
+    smtpCommand: !usingResend && typeof details.command === 'string' ? details.command : undefined,
   }
 }
 
@@ -367,7 +371,7 @@ async function authUserForEmail(email: string): Promise<AuthUserLookup> {
 type IssuedEmailCode = { ok: true; challengeId: string } | { ok: false; status: number; error: string }
 
 async function issueEmailCode(requestId: unknown, email: string, purpose: EmailCodePurpose, userId: string | null): Promise<IssuedEmailCode> {
-  if (!isEmailConfigured()) return { ok: false, status: 503, error: 'Email sign-in is unavailable right now.' }
+  if (!isEmailConfigured()) return { ok: false, status: 503, error: 'Email delivery is not configured. Set RESEND_API_KEY and MAIL_FROM, or SMTP_USER, SMTP_PASSWORD, and MAIL_FROM.' }
   const otp = config.USE_DEFAULT_VERIFICATION_CODE ? config.DEFAULT_VERIFICATION_CODE : crypto.randomInt(100000, 1000000).toString()
   const { data: challenge, error } = await supabase
     .from('email_otp_challenges')
@@ -580,6 +584,7 @@ router.post('/guest/verify-otp', async (request, response) => {
   if (parsed.data.emailChallengeId && (!parsed.data.email || !parsed.data.emailOtp)) return response.status(400).json({ error: 'Enter the verification code sent to your email.' })
   const phone = toE164IndianMobile(parsed.data.phone)
   if (!phone) return response.status(400).json({ error: 'Enter the verification code sent to your mobile.' })
+  const verifiedBookingEmail = parsed.data.emailChallengeId ? parsed.data.email!.trim().toLowerCase() : undefined
   if (parsed.data.challengeId && !(await passesChallengeAttempt(response, parsed.data.challengeId, phone, parsed.data.otp!))) return
   if (parsed.data.emailChallengeId && !(await consumeEmailChallenge(response, parsed.data.emailChallengeId, parsed.data.email!, ['booking'], parsed.data.emailOtp!))) return
   if (parsed.data.challengeId && !(await markChallengeVerified(response, parsed.data.challengeId))) return
@@ -622,6 +627,15 @@ router.post('/guest/verify-otp', async (request, response) => {
         logFailure('guest.user_lookup_failed', response.locals.requestId, userError?.message)
         return response.status(403).json({ error: 'The phone account is unavailable.' })
       }
+      if (verifiedBookingEmail && existingUser.user.email.toLowerCase().endsWith('@guest.urbantanker.local')) {
+        const { error: bookingEmailError } = await authSupabase.auth.admin.updateUserById(profile.id, {
+          app_metadata: { ...existingUser.user.app_metadata, booking_email: verifiedBookingEmail },
+        })
+        if (bookingEmailError) {
+          logFailure('guest.booking_email_save_failed', response.locals.requestId, bookingEmailError.message)
+          return response.status(500).json({ error: 'The verified booking email could not be saved.' })
+        }
+      }
       const { data: link, error: linkError } = await authSupabase.auth.admin.generateLink({
         type: 'magiclink',
         email: existingUser.user.email,
@@ -661,7 +675,13 @@ router.post('/guest/verify-otp', async (request, response) => {
   const email = `guest-${parsed.data.phone}-${crypto.randomBytes(6).toString('hex')}@guest.urbantanker.local`
   const phoneVerified = Boolean(parsed.data.challengeId)
   const username = `guest_${parsed.data.phone}_${crypto.randomBytes(3).toString('hex')}`
-  const { data: created, error: createError } = await authSupabase.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { full_name: name, ...(phoneVerified ? { phone } : {}) }, app_metadata: { role: 'customer' } })
+  const { data: created, error: createError } = await authSupabase.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    user_metadata: { full_name: name, ...(phoneVerified ? { phone } : {}) },
+    app_metadata: { role: 'customer', ...(verifiedBookingEmail ? { booking_email: verifiedBookingEmail } : {}) },
+  })
   if (createError || !created.user) {
     logFailure('guest.user_create_failed', response.locals.requestId, createError?.message)
     return response.status(500).json({ error: 'Guest account could not be created.' })
@@ -1311,7 +1331,7 @@ router.post('/signup', signupLimit, signupEmailLimit, async (request, response) 
   if (role === 'vendor' && (!parsed.data.businessName || !parsed.data.serviceZone)) return response.status(400).json({ error: 'Enter your business name and service zone to create a vendor account.' })
   const selfie = parsed.data.selfieJpegBase64 === undefined ? null : decodeSelfieJpeg(parsed.data.selfieJpegBase64)
   if (parsed.data.selfieJpegBase64 !== undefined && !selfie) return response.status(400).json({ error: 'Choose a JPEG photo.' })
-  if (!isEmailConfigured()) return response.status(503).json({ error: 'Email confirmation is unavailable. Configure Gmail SMTP_USER, SMTP_PASSWORD, and MAIL_FROM on the backend, then try again.' })
+  if (!isEmailConfigured()) return response.status(503).json({ error: 'Email confirmation is unavailable. Configure RESEND_API_KEY and MAIL_FROM, or SMTP_USER, SMTP_PASSWORD, and MAIL_FROM on the backend, then try again.' })
 
   const phone = toE164IndianMobile(parsed.data.phone)
   if (!phone) return response.status(400).json({ error: 'Enter a valid 10-digit mobile number.' })
@@ -1448,7 +1468,7 @@ function deliverPasswordReset(email: string, requestId: unknown) {
 router.post('/password-reset', passwordResetLimit, passwordResetEmailLimit, async (request, response) => {
   const parsed = z.object({ email: z.string().email() }).safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Valid email is required' })
-  if (!isEmailConfigured()) return response.status(503).json({ error: 'Password reset email is unavailable. Configure Gmail SMTP_USER, SMTP_PASSWORD, and MAIL_FROM on the backend, then try again.' })
+  if (!isEmailConfigured()) return response.status(503).json({ error: 'Password reset email is unavailable. Configure RESEND_API_KEY and MAIL_FROM, or SMTP_USER, SMTP_PASSWORD, and MAIL_FROM on the backend, then try again.' })
   deliverPasswordReset(parsed.data.email, response.locals.requestId)
   response.status(202).json({ accepted: true })
 })

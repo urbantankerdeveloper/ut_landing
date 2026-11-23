@@ -3,6 +3,7 @@ import { supabase } from '../supabase.js'
 import { emitRealtimeToVendor } from './realtime.js'
 import { sendPushNotification } from './pushNotifications.js'
 import { sendTemplateWhatsApp, type SmsTemplateKey } from './whatsapp.js'
+import { notifyCustomerOfBookingStatus } from './bookingNotifications.js'
 
 // Statuses before the driver starts the trip, so cash has not been collected yet.
 export const codSwitchStatuses: string[] = ['pending_vendor', 'vendor_assigned', 'accepted']
@@ -10,7 +11,7 @@ export const codSwitchStatuses: string[] = ['pending_vendor', 'vendor_assigned',
 type AlertTarget = { id: string; reference: string | null; vendor_id: string | null; driver_id: string | null }
 type Alert = { eventType: string; title: string; detail: string; smsTemplate: SmsTemplateKey }
 
-// Vendor gets an in-app notification, push and a realtime event. Vendor and driver both get an SMS.
+// Vendor gets an in-app notification, push and realtime event. Vendor and driver get WhatsApp alerts.
 async function alertVendorAndDriver(booking: AlertTarget, alert: Alert) {
   const reference = booking.reference ?? booking.id
   const [vendorResult, driverResult] = await Promise.all([
@@ -71,6 +72,7 @@ export async function notifyPaidOnlineAfterCodSwitch(bookingId: string) {
     if (claimError) throw new Error(claimError.message)
     if (!claimed) return
 
+    await notifyCustomerOfBookingStatus(booking.id, 'payment_online')
     await alertVendorAndDriver(booking, {
       eventType: 'booking_paid_online',
       title: 'Booking paid online',
@@ -84,7 +86,7 @@ export async function notifyPaidOnlineAfterCodSwitch(bookingId: string) {
 
 // Runs after a booking is back on cash on delivery. Tells the vendor and driver to collect cash again.
 // Never throws: the revert is already committed when this runs.
-export async function notifyRevertedToCash(bookingId: string) {
+export async function notifyRevertedToCash(bookingId: string, sendCustomerUpdate = true) {
   try {
     const { data: booking, error } = await supabase
       .from('bookings')
@@ -93,6 +95,7 @@ export async function notifyRevertedToCash(bookingId: string) {
       .maybeSingle()
     if (error) throw new Error(error.message)
     if (!booking) return
+    if (sendCustomerUpdate) await notifyCustomerOfBookingStatus(booking.id, 'payment_cod')
     await alertVendorAndDriver(booking, {
       eventType: 'booking_reverted_to_cash',
       title: 'Booking is cash on delivery',

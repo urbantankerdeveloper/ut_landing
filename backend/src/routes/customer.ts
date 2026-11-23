@@ -366,7 +366,7 @@ async function createBookingAndNotifications(input: {
   if (result?.booking?.id) notifyNearbyVendors(input.vendors, result.booking, result.created)
   const sendTrackingConfirmation = input.sendTrackingConfirmation
     ?? input.booking.payment_method !== 'gateway'
-  if (result?.created && sendTrackingConfirmation && input.booking.customer_phone_e164) {
+  if (result?.booking?.id && sendTrackingConfirmation) {
     void notifyCustomerOfBooking(input.booking.customer_phone_e164, result.booking.id, input.reference)
   }
   return result
@@ -410,7 +410,7 @@ async function createMultiServiceBookings(input: {
   }
   for (const booking of result.bookings) notifyNearbyVendors(input.vendors, booking, result.created)
   const customerPhone = input.data.phone ? toE164IndianMobile(input.data.phone) : null
-  if (result.created && customerPhone && input.data.paymentMethod !== 'gateway') {
+  if (input.data.paymentMethod !== 'gateway') {
     void notifyCustomerOfBooking(customerPhone, result.bookings[0]!.id, input.groupReference)
   }
   return { booking: result.bookings[0]!, bookings: result.bookings, created: result.created }

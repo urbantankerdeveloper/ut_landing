@@ -5,7 +5,7 @@ import { requireAuth, requireRole } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 import { emitBookingLifecycleEvent, emitRealtime, emitRealtimeToBooking, emitRealtimeToUser, emitRealtimeToVendor } from '../services/realtime.js'
 import { notifyCustomer } from '../services/customerNotifications.js'
-import { notifyCustomerOfAssignment, notifyCustomerWhatsAppById } from '../services/bookingNotifications.js'
+import { notifyCustomerOfAssignment, notifyCustomerOfBookingStatus, notifyCustomerOfBookingWhatsApp } from '../services/bookingNotifications.js'
 import { transitionBooking, type BookingStatus } from '../services/bookingLifecycle.js'
 import { analyticsEventNames, recordAnalyticsEvent } from '../lib/analytics.js'
 import { failure } from '../lib/httpErrors.js'
@@ -132,6 +132,12 @@ async function handleVendorOrderTransition(request: Request, response: Response)
   if (requestedStatus === 'accepted') {
     await markOtherVendorOffersTaken(current.id, vendor, current.reference)
     await shareAssignment(data as Record<string, unknown>)
+  } else if (requestedStatus === 'delivered') {
+    void notifyCustomerOfBookingWhatsApp(current.id, 'delivery_confirmation', {
+      reference: current.reference ?? current.id,
+    })
+  } else if (requestedStatus === 'vendor_assigned' || requestedStatus === 'en_route' || requestedStatus === 'arrived' || requestedStatus === 'cancelled') {
+    void notifyCustomerOfBookingStatus(current.id, requestedStatus)
   }
   return response.json(data)
 }
@@ -249,7 +255,7 @@ router.post('/orders/:id/delivery/verify', async (request, response) => {
       detail: 'Your Urban Tanker delivery is complete.',
       bookingId: booking.id,
     })
-    void notifyCustomerWhatsAppById(booking.customer_id, 'delivery_confirmation', {
+    void notifyCustomerOfBookingWhatsApp(booking.id, 'delivery_confirmation', {
       reference: booking.reference ?? booking.id,
     })
   }

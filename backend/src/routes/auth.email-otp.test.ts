@@ -565,6 +565,50 @@ describe('POST /guest/verify-otp', () => {
     expect(mocks.verifyOtp).toHaveBeenCalledWith({ token_hash: 'magic-token', type: 'magiclink' })
   })
 
+  it('stores a verified booking email for an existing guest account', async () => {
+    const profile = {
+      id: 'existing-guest',
+      role: 'customer',
+      full_name: 'Guest Customer',
+      username: 'guest_9876543210',
+      phone_e164: '+919876543210',
+      phone_verified: true,
+      phone_verified_at: '2026-01-01T00:00:00.000Z',
+      theme_mode: null,
+      selfie_required: false,
+    }
+    mocks.getUserById.mockResolvedValue({
+      data: { user: { email: 'guest-9876543210@guest.urbantanker.local', app_metadata: { role: 'customer' } } },
+      error: null,
+    })
+    mocks.rpc.mockImplementation(async (procedure: string) => {
+      if (procedure === 'consume_guest_otp_attempt') return { data: [{ otp_hash: hashOtp('123456') }], error: null }
+      if (procedure === 'consume_email_otp_attempt') return { data: [{ otp_hash: hashOtp('654321'), purpose: 'booking', user_id: null }], error: null }
+      return { data: null, error: null }
+    })
+    mocks.respond.mockImplementation((table, ops) => {
+      const last = ops[ops.length - 1]?.name
+      if (table === 'guest_otp_challenges' && last === 'maybeSingle') return { data: { id: CHALLENGE }, error: null }
+      if (table === 'email_otp_challenges' && last === 'maybeSingle') return { data: { id: EMAIL_CHALLENGE }, error: null }
+      if (table === 'profiles' && last === 'maybeSingle') return { data: profile, error: null }
+      return { data: null, error: null }
+    })
+
+    const response = await request(buildApp()).post('/guest/verify-otp').send({
+      challengeId: CHALLENGE,
+      phone: PHONE,
+      otp: '123456',
+      email: 'guest@example.com',
+      emailChallengeId: EMAIL_CHALLENGE,
+      emailOtp: '654321',
+    })
+
+    expect(response.status).toBe(200)
+    expect(mocks.updateUserById).toHaveBeenCalledWith('existing-guest', {
+      app_metadata: { role: 'customer', booking_email: 'guest@example.com' },
+    })
+  })
+
   it('signs in a guest with the email code alone when SMS is off', async () => {
     mocks.rpc.mockResolvedValue({ data: [{ otp_hash: hashOtp('123456'), purpose: 'booking', user_id: null }], error: null })
     const response = await request(buildApp()).post('/guest/verify-otp').send({
@@ -576,6 +620,9 @@ describe('POST /guest/verify-otp', () => {
     expect(response.status).toBe(200)
     expect(response.body.accessToken).toBe('access-token')
     expect(mocks.rpc).toHaveBeenCalledWith('consume_email_otp_attempt', expect.objectContaining({ p_purposes: ['booking'], p_email: 'guest@example.com' }))
+    expect(mocks.createUser).toHaveBeenCalledWith(expect.objectContaining({
+      app_metadata: { role: 'customer', booking_email: 'guest@example.com' },
+    }))
   })
 
   it('rejects a wrong email code', async () => {

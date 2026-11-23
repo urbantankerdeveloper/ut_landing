@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   notifyCustomer: vi.fn(),
   notifyCustomerWhatsAppById: vi.fn(),
   notifyCustomerOfAssignment: vi.fn(),
+  notifyCustomerOfBookingStatus: vi.fn(),
+  notifyCustomerOfBookingWhatsApp: vi.fn(),
   recordAnalyticsEvent: vi.fn(),
   emitRealtime: vi.fn(),
   emitBookingLifecycleEvent: vi.fn(),
@@ -66,6 +68,8 @@ vi.mock('../services/bookingLifecycle.js', () => ({ transitionBooking: mocks.tra
 vi.mock('../services/customerNotifications.js', () => ({ notifyCustomer: mocks.notifyCustomer }))
 vi.mock('../services/bookingNotifications.js', () => ({
   notifyCustomerOfAssignment: mocks.notifyCustomerOfAssignment,
+  notifyCustomerOfBookingStatus: mocks.notifyCustomerOfBookingStatus,
+  notifyCustomerOfBookingWhatsApp: mocks.notifyCustomerOfBookingWhatsApp,
   notifyCustomerWhatsAppById: mocks.notifyCustomerWhatsAppById,
 }))
 vi.mock('../services/otp.js', () => ({ otpMatches: mocks.otpMatches }))
@@ -263,6 +267,23 @@ describe('vendor order lifecycle events', () => {
     )
   })
 
+  it('sends WhatsApp updates to the booking customer for en-route and arrival events', async () => {
+    setResults('vendors', { data: { id: 'vendor-1' } })
+    setResults('bookings', { data: { id: BOOKING_ID, reference: 'UT-1', status: 'accepted', vendor_id: 'vendor-1', customer_id: 'cust-9' } })
+    mocks.transitionBooking.mockResolvedValueOnce({
+      data: { id: BOOKING_ID, reference: 'UT-1', customer_id: 'cust-9', status: 'en_route' },
+      error: null,
+    })
+
+    const response = await request(buildApp())
+      .patch(`/api/vendor/orders/${BOOKING_ID}/transition`)
+      .set('x-test-role', 'vendor')
+      .send({ action: 'status', status: 'en_route' })
+
+    expect(response.status).toBe(200)
+    expect(mocks.notifyCustomerOfBookingStatus).toHaveBeenCalledWith(BOOKING_ID, 'en_route')
+  })
+
   it('emits booking.delivered and booking.updated when delivery is verified with the OTP', async () => {
     setResults('vendors', { data: { id: 'vendor-1' }, error: null })
     setResults('bookings', {
@@ -293,6 +314,11 @@ describe('vendor order lifecycle events', () => {
       'vendor-1',
       'booking.updated',
       { bookingId: BOOKING_ID, status: 'delivered' },
+    )
+    expect(mocks.notifyCustomerOfBookingWhatsApp).toHaveBeenCalledWith(
+      BOOKING_ID,
+      'delivery_confirmation',
+      { reference: 'UT-1' },
     )
   })
 })
@@ -326,6 +352,7 @@ describe('admin order status events', () => {
       { bookingId: BOOKING_ID, status: 'vendor_assigned' },
       'cust-9',
     )
+    expect(mocks.notifyCustomerOfBookingStatus).toHaveBeenCalledWith(BOOKING_ID, 'vendor_assigned')
   })
 
   it('emits booking.delivered to the customer when an admin marks the order delivered', async () => {
@@ -338,6 +365,11 @@ describe('admin order status events', () => {
       'booking.delivered',
       { bookingId: BOOKING_ID, reference: 'UT-1', deliveredAt: expect.any(String) },
       'cust-9',
+    )
+    expect(mocks.notifyCustomerOfBookingWhatsApp).toHaveBeenCalledWith(
+      BOOKING_ID,
+      'delivery_confirmation',
+      { reference: 'UT-1' },
     )
     expect(mocks.emitRealtimeToVendor).toHaveBeenCalledWith(
       'vendor-1',
@@ -353,6 +385,7 @@ describe('admin order status events', () => {
 
     expect(response.status).toBe(200)
     expect(mocks.emitRealtime).toHaveBeenCalledWith('booking.updated', { bookingId: BOOKING_ID, status: 'cancelled' }, 'cust-9')
+    expect(mocks.notifyCustomerOfBookingStatus).toHaveBeenCalledWith(BOOKING_ID, 'cancelled')
   })
 
   it('does not emit booking.delivered for other admin status changes', async () => {
@@ -362,5 +395,18 @@ describe('admin order status events', () => {
 
     expect(response.status).toBe(200)
     expect(mocks.emitBookingLifecycleEvent).not.toHaveBeenCalled()
+    expect(mocks.notifyCustomerOfBookingStatus).toHaveBeenCalledWith(BOOKING_ID, 'en_route')
+  })
+
+  it('notifies the customer when an admin restarts vendor assignment', async () => {
+    mocks.transitionBooking.mockResolvedValueOnce({ data: { id: BOOKING_ID, reference: 'UT-1', customer_id: 'cust-9', status: 'pending_vendor' }, error: null })
+
+    const response = await request(buildApp())
+      .patch(`/api/admin/orders/${BOOKING_ID}/status`)
+      .set('x-test-role', 'admin')
+      .send({ status: 'pending_vendor' })
+
+    expect(response.status).toBe(200)
+    expect(mocks.notifyCustomerOfBookingStatus).toHaveBeenCalledWith(BOOKING_ID, 'pending_vendor')
   })
 })

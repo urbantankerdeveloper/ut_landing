@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   notifyUser: vi.fn(),
   sendTemplateWhatsApp: vi.fn(),
   getUserById: vi.fn(),
+  groupLeadId: 'booking-1' as string | null,
   claimedBookings: new Set<string>(),
   rows: {} as Record<string, { data: unknown; error: null }>,
 }))
@@ -19,25 +20,39 @@ vi.mock('../lib/logger.js', () => ({
 vi.mock('../supabase.js', () => ({
   supabase: {
     from: (table: string) => {
+      let selectedFields = ''
+      let isUpdate = false
+      let updateId = ''
+      let updateField = ''
       const builder = {
-        select: () => ({
-          eq: () => ({
-            maybeSingle: async () => mocks.rows[table],
-          }),
-        }),
-        update: () => ({
-          eq: () => ({
-            is: () => ({
-              select: () => ({
-                maybeSingle: async () => {
-                  if (mocks.claimedBookings.has('booking-1')) return { data: null, error: null }
-                  mocks.claimedBookings.add('booking-1')
-                  return { data: { id: 'booking-1' }, error: null }
-                },
-              }),
-            }),
-          }),
-        }),
+        select: (fields: string) => {
+          selectedFields = fields
+          return builder
+        },
+        eq: (field: string, value: string) => {
+          if (isUpdate && field === 'id') updateId = value
+          return builder
+        },
+        order: () => builder,
+        limit: () => builder,
+        is: () => builder,
+        update: (payload: Record<string, unknown>) => {
+          isUpdate = true
+          updateField = Object.keys(payload)[0] ?? ''
+          return builder
+        },
+        maybeSingle: async () => {
+          if (isUpdate) {
+            const claimKey = `${updateField}:${updateId}`
+            if (mocks.claimedBookings.has(claimKey)) return { data: null, error: null }
+            mocks.claimedBookings.add(claimKey)
+            return { data: { id: updateId }, error: null }
+          }
+          if (table === 'bookings' && selectedFields === 'id') {
+            return mocks.groupLeadId ? { data: { id: mocks.groupLeadId }, error: null } : { data: null, error: null }
+          }
+          return mocks.rows[table]
+        },
       }
       return builder
     },
@@ -60,14 +75,26 @@ vi.mock('./trackingTokens.js', () => ({
 import {
   notifyCustomerOfAssignment,
   notifyCustomerOfBooking,
+  notifyCustomerOfBookingStatus,
+  notifyCustomerOfBookingWhatsApp,
 } from './bookingNotifications.js'
 
 describe('notifyCustomerOfAssignment', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.claimedBookings.clear()
+    mocks.groupLeadId = 'booking-1'
     mocks.getOrCreateTrackingToken.mockResolvedValue({ token: 'track-token' })
     mocks.rows.profiles = { data: { phone_e164: '+919876543210' }, error: null }
+    mocks.rows.bookings = {
+      data: {
+        id: 'booking-1',
+        reference: 'UT-100',
+        customer_id: 'customer-1',
+        customer_phone_e164: '+919123456789',
+      },
+      error: null,
+    }
     mocks.rows.vehicles = {
       data: { registration_number: 'TN-01-AB-1234' },
       error: null,
@@ -77,7 +104,7 @@ describe('notifyCustomerOfAssignment', () => {
       data: { user: { email: 'customer@example.com' } },
       error: null,
     })
-    mocks.notifyUser.mockResolvedValue({ email: { queued: true } })
+    mocks.notifyUser.mockResolvedValue([{ queued: true }, { queued: false }, { queued: false }])
     mocks.sendTemplateWhatsApp.mockResolvedValue({ queued: true })
   })
 
@@ -104,6 +131,11 @@ describe('notifyCustomerOfAssignment', () => {
   })
 
   it('uses the verified profile phone when the booking has no separate contact', async () => {
+    mocks.rows.bookings = {
+      data: { id: 'booking-1', reference: 'UT-100', customer_id: 'customer-1', customer_phone_e164: null },
+      error: null,
+    }
+
     await notifyCustomerOfAssignment({
       id: 'booking-1',
       reference: 'UT-100',
@@ -131,6 +163,187 @@ describe('notifyCustomerOfAssignment', () => {
         reference: 'UT-100',
         trackingUrl: 'https://urban-tanker.example/track/track-token',
       },
+    )
+    expect(mocks.notifyUser).toHaveBeenCalledWith(
+      { email: 'customer@example.com' },
+      'Your Urban Tanker booking UT-100 is confirmed',
+      'Urban Tanker: Your booking UT-100 is confirmed. Track your order: https://urban-tanker.example/track/track-token',
+    )
+  })
+
+  it('claims and sends one group confirmation using the group reference and lead tracking link', async () => {
+    mocks.rows.bookings = {
+      data: {
+        id: 'booking-2',
+        reference: 'UT-GROUP-02',
+        customer_id: 'customer-1',
+        customer_phone_e164: '+919123456789',
+        order_group_id: 'group-1',
+        order_group_reference: 'UT-GROUP',
+      },
+      error: null,
+    }
+
+    await notifyCustomerOfBooking('+919123456789', 'booking-2', 'UT-GROUP-02')
+
+    expect(mocks.getOrCreateTrackingToken).toHaveBeenCalledWith('booking-1')
+    expect(mocks.sendTemplateWhatsApp).toHaveBeenCalledWith(
+      'guest_booking_confirmation',
+      '+919123456789',
+      {
+        reference: 'UT-GROUP',
+        trackingUrl: 'https://urban-tanker.example/track/track-token',
+      },
+    )
+  })
+
+  it('uses the registered profile phone when the booking has no contact phone', async () => {
+    mocks.rows.bookings = {
+      data: { id: 'booking-1', customer_id: 'customer-1', customer_phone_e164: null },
+      error: null,
+    }
+
+    await notifyCustomerOfBooking(null, 'booking-1', 'UT-100')
+
+    expect(mocks.sendTemplateWhatsApp).toHaveBeenCalledWith(
+      'guest_booking_confirmation',
+      '+919876543210',
+      expect.objectContaining({ reference: 'UT-100' }),
+    )
+  })
+
+  it('sends status updates to the booking phone with its stable tracking link', async () => {
+    await notifyCustomerOfBookingStatus('booking-1', 'en_route')
+
+    expect(mocks.sendTemplateWhatsApp).toHaveBeenCalledWith(
+      'booking_status_update',
+      '+919123456789',
+      {
+        reference: 'UT-100',
+        status: 'Tanker on the way',
+        detail: 'Your tanker is on the way to the delivery location.',
+        trackingUrl: 'https://urban-tanker.example/track/track-token',
+      },
+    )
+    expect(mocks.notifyUser).toHaveBeenCalledWith(
+      { email: 'customer@example.com' },
+      'Your Urban Tanker booking UT-100: Tanker on the way',
+      'Urban Tanker: Booking UT-100 update: Tanker on the way. Your tanker is on the way to the delivery location. Track your booking: https://urban-tanker.example/track/track-token',
+    )
+  })
+
+  it('uses one group lead reference and tracking link for every grouped booking event', async () => {
+    mocks.groupLeadId = 'booking-1'
+    mocks.rows.bookings = {
+      data: {
+        id: 'booking-2',
+        reference: 'UT-GROUP-02',
+        customer_id: 'customer-1',
+        customer_phone_e164: '+919123456789',
+        order_group_id: 'group-1',
+        order_group_reference: 'UT-GROUP',
+      },
+      error: null,
+    }
+
+    await notifyCustomerOfBookingStatus('booking-2', 'en_route')
+
+    expect(mocks.getOrCreateTrackingToken).toHaveBeenCalledWith('booking-1')
+    expect(mocks.sendTemplateWhatsApp).toHaveBeenCalledWith(
+      'booking_status_update',
+      '+919123456789',
+      expect.objectContaining({
+        reference: 'UT-GROUP',
+        trackingUrl: 'https://urban-tanker.example/track/track-token',
+      }),
+    )
+  })
+
+  it('uses the group lead tracking link when a grouped booking is accepted', async () => {
+    mocks.rows.bookings = {
+      data: {
+        id: 'booking-2',
+        reference: 'UT-GROUP-02',
+        customer_id: 'customer-1',
+        customer_phone_e164: '+919123456789',
+        order_group_id: 'group-1',
+        order_group_reference: 'UT-GROUP',
+      },
+      error: null,
+    }
+
+    await notifyCustomerOfAssignment({
+      id: 'booking-2',
+      reference: 'UT-GROUP-02',
+      customer_id: 'customer-1',
+      customer_phone_e164: '+919123456789',
+    })
+
+    expect(mocks.getOrCreateTrackingToken).toHaveBeenCalledWith('booking-1')
+    expect(mocks.sendTemplateWhatsApp).toHaveBeenCalledWith(
+      'vendor_acceptance',
+      '+919123456789',
+      expect.objectContaining({
+        reference: 'UT-GROUP',
+        trackingUrl: 'https://urban-tanker.example/track/track-token',
+      }),
+    )
+  })
+
+  it('sends delivery confirmation over email as well as WhatsApp', async () => {
+    await notifyCustomerOfBookingWhatsApp('booking-1', 'delivery_confirmation', {})
+
+    expect(mocks.sendTemplateWhatsApp).toHaveBeenCalledWith(
+      'delivery_confirmation',
+      '+919123456789',
+      { reference: 'UT-100' },
+    )
+    expect(mocks.notifyUser).toHaveBeenCalledWith(
+      { email: 'customer@example.com' },
+      'Delivery complete for Urban Tanker booking UT-100',
+      'Urban Tanker: Delivery for booking UT-100 is complete. Thank you for choosing Urban Tanker.',
+    )
+  })
+
+  it('does not email a guest account placeholder address', async () => {
+    mocks.getUserById.mockResolvedValue({
+      data: { user: { email: 'guest_123@guest.urbantanker.local' } },
+      error: null,
+    })
+
+    await notifyCustomerOfBookingStatus('booking-1', 'en_route')
+
+    expect(mocks.notifyUser).not.toHaveBeenCalled()
+    expect(mocks.sendTemplateWhatsApp).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses the OTP-verified booking email stored for a guest account', async () => {
+    mocks.getUserById.mockResolvedValue({
+      data: {
+        user: {
+          email: 'guest_123@guest.urbantanker.local',
+          app_metadata: { role: 'customer', booking_email: 'guest@example.com' },
+        },
+      },
+      error: null,
+    })
+
+    await notifyCustomerOfBookingStatus('booking-1', 'en_route')
+
+    expect(mocks.notifyUser).toHaveBeenCalledWith(
+      { email: 'guest@example.com' },
+      'Your Urban Tanker booking UT-100: Tanker on the way',
+      expect.stringContaining('Track your booking: https://urban-tanker.example/track/track-token'),
+    )
+  })
+
+  it('sends booking-specific event templates to the booking contact', async () => {
+    await notifyCustomerOfBookingWhatsApp('booking-1', 'delivery_confirmation', {})
+
+    expect(mocks.sendTemplateWhatsApp).toHaveBeenCalledWith(
+      'delivery_confirmation',
+      '+919123456789',
+      { reference: 'UT-100' },
     )
   })
 })

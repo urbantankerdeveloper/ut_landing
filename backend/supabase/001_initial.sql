@@ -31,7 +31,7 @@ create table if not exists public.vendors (id uuid primary key default gen_rando
 create table if not exists public.vehicles (id uuid primary key default gen_random_uuid(), vendor_id uuid not null references public.vendors(id) on delete cascade, registration_number text not null unique, capacity_litres integer, supported_services text[] not null default '{}', is_active boolean not null default true, metadata jsonb not null default '{}');
 create table if not exists public.drivers (id uuid primary key default gen_random_uuid(), vendor_id uuid not null references public.vendors(id) on delete cascade, name text not null, mobile_e164 text not null, licence_number text not null, is_active boolean not null default false, verification text not null default 'pending', metadata jsonb not null default '{}');
 create table if not exists public.service_catalog (id uuid primary key default gen_random_uuid(), code text unique not null, name text not null, description text, base_price_paise integer not null default 0, is_active boolean not null default true, config jsonb not null default '{}');
-create table if not exists public.bookings (id uuid primary key default gen_random_uuid(), reference text unique not null, customer_id uuid references public.profiles(id) on delete set null, idempotency_key uuid, vendor_id uuid references public.vendors(id), vehicle_id uuid references public.vehicles(id), service_code text not null references public.service_catalog(code), capacity_litres integer, scheduled_for timestamptz, address_text text not null, latitude numeric(9,6), longitude numeric(9,6), access_notes text, cancellation_reason text, service_details jsonb not null default '[]'::jsonb, quoted_amount_paise integer not null default 0, status public.booking_status not null default 'pending_vendor', delivery_otp_hash text, delivery_otp_expires_at timestamptz, delivery_otp_sms_sent boolean, tracking_token_hash text unique, tracking_token_v2_hash text unique, tracking_token_expires_at timestamptz, tracking_confirmation_sent_at timestamptz, created_at timestamptz not null default now(), updated_at timestamptz not null default now());
+create table if not exists public.bookings (id uuid primary key default gen_random_uuid(), reference text unique not null, customer_id uuid references public.profiles(id) on delete set null, idempotency_key uuid, vendor_id uuid references public.vendors(id), vehicle_id uuid references public.vehicles(id), service_code text not null references public.service_catalog(code), capacity_litres integer, scheduled_for timestamptz, address_text text not null, latitude numeric(9,6), longitude numeric(9,6), access_notes text, cancellation_reason text, service_details jsonb not null default '[]'::jsonb, quoted_amount_paise integer not null default 0, status public.booking_status not null default 'pending_vendor', delivery_otp_hash text, delivery_otp_expires_at timestamptz, delivery_otp_sms_sent boolean, tracking_token_hash text unique, tracking_token_v2_hash text unique, tracking_token_expires_at timestamptz, tracking_confirmation_sent_at timestamptz, tracking_confirmation_email_sent_at timestamptz, created_at timestamptz not null default now(), updated_at timestamptz not null default now());
 create unique index if not exists bookings_customer_idempotency_key_idx on public.bookings(customer_id, idempotency_key) where idempotency_key is not null;
 alter table public.bookings add column if not exists cancellation_reason text;
 alter table public.bookings add column if not exists service_details jsonb not null default '[]'::jsonb;
@@ -39,6 +39,7 @@ alter table public.bookings add column if not exists tracking_token_hash text un
 alter table public.bookings add column if not exists tracking_token_v2_hash text unique;
 alter table public.bookings add column if not exists tracking_token_expires_at timestamptz;
 alter table public.bookings add column if not exists tracking_confirmation_sent_at timestamptz;
+alter table public.bookings add column if not exists tracking_confirmation_email_sent_at timestamptz;
 create index if not exists bookings_customer_created_idx on public.bookings(customer_id, created_at desc);
 create index if not exists bookings_vendor_created_idx on public.bookings(vendor_id, created_at desc);
 create index if not exists bookings_tracking_token_hash_idx on public.bookings(tracking_token_hash);
@@ -748,6 +749,7 @@ insert into public.sms_templates (template_key, body, variables) values
   ('user_registration_otp', 'Your Urban Tanker verification code is {{otp}}. It expires in 10 minutes. Do not share this code.', '{otp}'),
   ('booking_verification_otp', 'Your Urban Tanker booking verification code is {{otp}}. It expires in 10 minutes. Do not share this code.', '{otp}'),
   ('guest_booking_confirmation', 'Urban Tanker: Your booking {{reference}} is confirmed. Track your order: {{trackingUrl}}', '{reference,trackingUrl}'),
+  ('booking_status_update', 'Urban Tanker: Booking {{reference}} update: {{status}}. {{detail}} Track your booking: {{trackingUrl}}', '{reference,status,detail,trackingUrl}'),
   ('vendor_acceptance', 'Your booking {{reference}} is confirmed. Vehicle: {{vehicle}}. Driver: {{driver}}. Follow live tracking: {{trackingUrl}}', '{reference,vehicle,driver,trackingUrl}'),
   ('delivery_confirmation', 'Urban Tanker: Delivery for booking {{reference}} is complete. Thank you for choosing Urban Tanker.', '{reference}'),
   ('delivery_otp', 'Urban Tanker: Your delivery OTP for booking {{reference}} is {{otp}}. It expires in 15 minutes. Share it only with the driver.', '{reference,otp}')
@@ -756,6 +758,7 @@ on conflict (template_key) do nothing;
 -- Consolidated from 002_vendor_acceptance_tracking_template.sql.
 alter table public.bookings
   add column if not exists tracking_confirmation_sent_at timestamptz,
+  add column if not exists tracking_confirmation_email_sent_at timestamptz,
   add column if not exists tracking_token_v2_hash text unique;
 
 update public.sms_templates
@@ -3012,3 +3015,6 @@ grant execute on function public.record_multi_service_delivery_invoices() to ser
 grant execute on function public.sync_multi_service_invoice_payment() to service_role;
 notify pgrst, 'reload schema';
 commit;
+
+alter table public.bookings
+  add column if not exists tracking_confirmation_email_sent_at timestamptz;

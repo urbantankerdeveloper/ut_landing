@@ -3,7 +3,7 @@ import express from 'express'
 import request from 'supertest'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { config } from '../config.js'
-import { notifyCustomerOfBooking } from '../services/bookingNotifications.js'
+import { notifyCustomerOfBooking, notifyCustomerOfBookingStatus } from '../services/bookingNotifications.js'
 import { getOrCreateTrackingToken } from '../services/trackingTokens.js'
 
 const state = vi.hoisted(() => ({
@@ -51,7 +51,11 @@ vi.mock('../services/scaling.js', () => ({ limiterStore: () => undefined, getRed
 vi.mock('../lib/logger.js', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }))
 vi.mock('../services/whatsapp.js', () => ({ sendTemplateWhatsApp: vi.fn() }))
 vi.mock('../services/customerNotifications.js', () => ({ notifyCustomer: vi.fn() }))
-vi.mock('../services/bookingNotifications.js', () => ({ notifyCustomerOfBooking: vi.fn(async () => ({ queued: true })) }))
+vi.mock('../services/bookingNotifications.js', () => ({
+  notifyCustomerOfBooking: vi.fn(async () => ({ queued: true })),
+  notifyCustomerOfBookingStatus: vi.fn(async () => ({ queued: true })),
+  notifyCustomerOfBookingWhatsApp: vi.fn(async () => ({ queued: true })),
+}))
 vi.mock('../services/trackingTokens.js', () => ({ getOrCreateTrackingToken: vi.fn(async () => ({ token: 'a'.repeat(43) })) }))
 
 import { logger } from '../lib/logger.js'
@@ -372,6 +376,8 @@ describe('switch gateway booking to cash on delivery', () => {
     expect(updatePayloads('bookings')[0]).toMatchObject({ payment_method: 'cod' })
     expect(state.calls.find((call) => call.table === 'payments' && call.method === 'insert')?.args[0]).toMatchObject({ booking_id: 'booking-1', provider: 'cash_on_delivery', amount_paise: 50000 })
     expect(notifyCustomerOfBooking).toHaveBeenCalledWith('+919123456789', 'booking-1', 'UT-100')
+    expect(notifyCustomerOfBookingStatus).toHaveBeenCalledWith('booking-1', 'payment_cod')
+    expect(notifyCustomerOfBookingStatus).toHaveBeenCalledTimes(1)
   })
 
   describe('customer tracking link', () => {

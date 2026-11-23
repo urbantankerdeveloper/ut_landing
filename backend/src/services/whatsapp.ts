@@ -197,6 +197,10 @@ function resolveCampaignName(key: SmsTemplateKey) {
       config.COMBIRDS_CAMPAIGN_GUEST_BOOKING_CONFIRMATION ??
       config.COMBIRDS_WABA_CAMPAIGN_NAME,
 
+    booking_status_update:
+      config.COMBIRDS_CAMPAIGN_BOOKING_STATUS_UPDATE ??
+      config.COMBIRDS_WABA_CAMPAIGN_NAME,
+
     vendor_acceptance:
       config.COMBIRDS_CAMPAIGN_VENDOR_ACCEPTANCE ??
       config.COMBIRDS_WABA_CAMPAIGN_NAME,

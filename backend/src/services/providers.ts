@@ -3,7 +3,9 @@ import { config } from '../config.js'
 import { escapeHtml } from '../lib/html.js'
 
 export function isEmailConfigured() {
-  return Boolean(config.SMTP_USER && config.SMTP_PASSWORD && config.MAIL_FROM)
+  return Boolean(config.MAIL_FROM && (
+    config.RESEND_API_KEY || (config.SMTP_USER && config.SMTP_PASSWORD)
+  ))
 }
 
 let smtpTransporter: Transporter | null = null
@@ -21,7 +23,25 @@ function emailTransporter() {
 
 export async function sendEmail(to: string, subject: string, html: string) {
   if (!isEmailConfigured()) {
-    return { queued: false, reason: 'SMTP_USER, SMTP_PASSWORD, and MAIL_FROM are not configured' }
+    return { queued: false, reason: 'RESEND_API_KEY and MAIL_FROM, or SMTP_USER, SMTP_PASSWORD, and MAIL_FROM are not configured' }
+  }
+  if (config.RESEND_API_KEY) {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.RESEND_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ from: config.MAIL_FROM, to: [to], subject, html }),
+      signal: AbortSignal.timeout(8_000),
+    })
+    if (!response.ok) {
+      throw Object.assign(new Error(`Resend email API failed: ${response.status}`), {
+        code: 'RESEND_API_ERROR',
+        responseCode: response.status,
+      })
+    }
+    return { queued: true }
   }
   await emailTransporter().sendMail({ from: config.MAIL_FROM, to, subject, html })
   return { queued: true }

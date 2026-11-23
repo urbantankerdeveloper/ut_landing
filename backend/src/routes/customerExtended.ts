@@ -7,7 +7,7 @@ import { z } from 'zod'
 import { requireAuth } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 import { notifyCustomer } from '../services/customerNotifications.js'
-import { notifyCustomerOfBooking } from '../services/bookingNotifications.js'
+import { notifyCustomerOfBooking, notifyCustomerOfBookingStatus } from '../services/bookingNotifications.js'
 import { sendTemplateWhatsApp } from '../services/whatsapp.js'
 import { canCustomerCancelBooking, transitionBooking } from '../services/bookingLifecycle.js'
 import { signaturesMatch } from '../services/paymentSecurity.js'
@@ -132,7 +132,7 @@ router.post('/orders/:orderId/delivery-otp', deliveryOtpLimit, async (request, r
 
   response.status(201).json({ otp, expiresAt, whatsappSent: smsSent, smsSent })
 })
-router.patch('/orders/:orderId/reschedule', async (request, response) => { const parsed = z.object({ scheduledFor: z.string().datetime() }).safeParse(request.body); if (!parsed.success || new Date(parsed.data.scheduledFor).getTime() <= Date.now()) return response.status(400).json({ error: 'Scheduled time must be a valid future datetime' }); const { data, error } = await supabase.from('bookings').update({ scheduled_for: parsed.data.scheduledFor, updated_at: new Date().toISOString() }).eq('id', request.params.orderId).eq('customer_id', request.authUser!.id).in('status', ['pending_vendor', 'vendor_assigned', 'accepted']).select().maybeSingle(); if (error) return databaseFailure(response, 'customerExtended.database_error', error, 400); if (!data) return response.status(409).json({ error: 'Booking cannot be rescheduled in its current state' }); response.json(data) })
+router.patch('/orders/:orderId/reschedule', async (request, response) => { const parsed = z.object({ scheduledFor: z.string().datetime() }).safeParse(request.body); if (!parsed.success || new Date(parsed.data.scheduledFor).getTime() <= Date.now()) return response.status(400).json({ error: 'Scheduled time must be a valid future datetime' }); const { data, error } = await supabase.from('bookings').update({ scheduled_for: parsed.data.scheduledFor, updated_at: new Date().toISOString() }).eq('id', request.params.orderId).eq('customer_id', request.authUser!.id).in('status', ['pending_vendor', 'vendor_assigned', 'accepted']).select().maybeSingle(); if (error) return databaseFailure(response, 'customerExtended.database_error', error, 400); if (!data) return response.status(409).json({ error: 'Booking cannot be rescheduled in its current state' }); void notifyCustomerOfBookingStatus(data.id, 'rescheduled'); response.json(data) })
 router.patch('/orders/:orderId/status', async (request, response) => {
   const parsed = statusSchema.safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Invalid status' })
@@ -143,6 +143,7 @@ router.patch('/orders/:orderId/status', async (request, response) => {
   if (!canCustomerCancelBooking(booking.status)) return response.status(409).json({ error: 'A booking can only be cancelled before the vendor accepts it.' })
   const { data, error } = await transitionBooking({ bookingId: booking.id, actorId: customerId, status: 'cancelled', cancellationReason: 'Cancelled by customer' })
   if (error || !data) return failure(response, 409, 'Booking cannot be cancelled in its current state.', 'customer.cancel_failed', error)
+  void notifyCustomerOfBookingStatus(booking.id, 'cancelled')
   response.json(data)
 })
 router.post('/orders/:orderId/rating', async (request, response) => { const parsed = z.object({ rating: z.number().int().min(1).max(5), review: z.string().trim().max(1000).optional() }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid rating' }); const { data: booking, error: bookingError } = await supabase.from('bookings').select('id,status').eq('id', request.params.orderId).eq('customer_id', request.authUser!.id).single(); if (bookingError || !booking) return response.status(404).json({ error: 'Booking not found' }); if (booking.status !== 'delivered') return response.status(409).json({ error: 'A rating can only be submitted after delivery' }); const { data, error } = await supabase.from('ratings').insert({ booking_id: booking.id, customer_id: request.authUser!.id, rating: parsed.data.rating, review: parsed.data.review || null }).select().single(); if (error) return error.code === '23505' ? failure(response, 409, 'Booking has already been rated.') : databaseFailure(response, 'customer.rating_failed', error, 400); response.status(201).json(data) })
@@ -187,7 +188,8 @@ router.post('/orders/:orderId/payment-method', async (request, response) => {
     if (insertError) return databaseFailure(response, 'customerExtended.database_error', insertError, 500)
   }
   await notifyCustomerOfBooking(booking.customer_phone_e164, booking.id, booking.reference)
-  await Promise.all(bookingIds.map((id) => notifyRevertedToCash(id)))
+  void notifyCustomerOfBookingStatus(booking.id, 'payment_cod')
+  await Promise.all(bookingIds.map((id) => notifyRevertedToCash(id, false)))
   response.json({ id: booking.id, paymentMethod: 'cod' })
 })
 router.post('/orders/:orderId/payment-method/online', async (request, response) => {
