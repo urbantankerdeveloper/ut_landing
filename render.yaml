@@ -55,7 +55,8 @@ services:
         sync: false
       - key: SMTP_PASSWORD
         sync: false
-      # Use Resend's HTTPS API for email delivery on Render rather than direct SMTP.
+      - key: EMAIL_PROVIDER
+        value: resend
       - key: RESEND_API_KEY
         sync: false
       - key: MAIL_FROM

@@ -70,7 +70,7 @@ documented in `../urban_tanker_app/README.md`.
 
 ## Customer email confirmation
 
-All application email (registration confirmation, password reset, and notifications) is sent by the backend. On Render, configure `RESEND_API_KEY` and a `MAIL_FROM` address on a domain verified with Resend; the HTTPS API avoids Render's restrictions on direct SMTP. If `RESEND_API_KEY` is unset, the backend uses Gmail SMTP: configure `SMTP_USER` with the Gmail address and `SMTP_PASSWORD` with its Google app password. The defaults are `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=465`, and `SMTP_SECURE=true`; set `MAIL_FROM` only to an address authorized by the configured provider. Add `${FRONTEND_ORIGIN}/login` to the Supabase Auth redirect allow list.
+All application email (registration confirmation, password reset, and notifications) is sent by the backend. Local development defaults to SMTP, so existing Gmail settings continue to work even if a Resend key is present. On Render, set `EMAIL_PROVIDER=resend`, `RESEND_API_KEY`, and a `MAIL_FROM` address on a domain verified with Resend; the HTTPS API avoids relying on direct SMTP. To explicitly use SMTP, set `EMAIL_PROVIDER=smtp`, configure `SMTP_USER` with the Gmail address and `SMTP_PASSWORD` with its Google app password. The defaults are `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=465`, and `SMTP_SECURE=true`; set `MAIL_FROM` only to an address authorized by the configured provider. Add `${FRONTEND_ORIGIN}/login` to the Supabase Auth redirect allow list.
 
 ## Registration phone OTP
 

@@ -23,6 +23,17 @@ describe('production configuration guards', () => {
     expect(config.DB_SSL_CA).toBe('line1\nline2')
   })
 
+  it('keeps SMTP as the local default and selects Resend for production when configured', async () => {
+    process.env = { ...original, ...base, NODE_ENV: 'development', EMAIL_PROVIDER: '', RESEND_API_KEY: 'test-key' }
+    const localConfig = await import('./config.js')
+    expect(localConfig.config.EMAIL_PROVIDER).toBe('smtp')
+
+    vi.resetModules()
+    process.env = { ...original, ...base, NODE_ENV: 'production', EMAIL_PROVIDER: '', FRONTEND_ORIGIN: 'https://app.example.com', RESEND_API_KEY: 'test-key' }
+    const productionConfig = await import('./config.js')
+    expect(productionConfig.config.EMAIL_PROVIDER).toBe('resend')
+  })
+
   it('requires booking phone verification by default and allows the setting to be disabled', async () => {
     process.env = { ...original, ...base, NODE_ENV: 'test' }
     const defaultConfig = await import('./config.js')

@@ -4,7 +4,9 @@ import { escapeHtml } from '../lib/html.js'
 
 export function isEmailConfigured() {
   return Boolean(config.MAIL_FROM && (
-    config.RESEND_API_KEY || (config.SMTP_USER && config.SMTP_PASSWORD)
+    config.EMAIL_PROVIDER === 'resend'
+      ? config.RESEND_API_KEY
+      : config.SMTP_USER && config.SMTP_PASSWORD
   ))
 }
 
@@ -25,7 +27,10 @@ export async function sendEmail(to: string, subject: string, html: string) {
   if (!isEmailConfigured()) {
     return { queued: false, reason: 'RESEND_API_KEY and MAIL_FROM, or SMTP_USER, SMTP_PASSWORD, and MAIL_FROM are not configured' }
   }
-  if (config.RESEND_API_KEY) {
+  if (config.EMAIL_PROVIDER === 'resend') {
+    if (!config.RESEND_API_KEY) {
+      return { queued: false, reason: 'RESEND_API_KEY is not configured' }
+    }
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {

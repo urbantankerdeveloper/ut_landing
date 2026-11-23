@@ -29,6 +29,7 @@ const schema = z.object({
   SMTP_SECURE: z.preprocess((value) => value === undefined ? undefined : value === 'true', z.boolean().default(true)),
   SMTP_USER: optionalEmail,
   SMTP_PASSWORD: optionalSecret,
+  EMAIL_PROVIDER: z.enum(['smtp', 'resend']).optional(),
   RESEND_API_KEY: optionalSecret,
   MAIL_FROM: optionalEmail,
   TWILIO_ACCOUNT_SID: optionalSecret,
@@ -116,6 +117,9 @@ const featureFlags = resolveFeatureFlags(
     : parsed.WALLET_ENABLED === 'true',
 )
 const serviceRoleKey = parsed.SUPABASE_SERVICE_ROLE_KEY ?? parsed.SUPABASE_SECRET_KEY
+const emailProvider = parsed.EMAIL_PROVIDER ?? (
+  parsed.NODE_ENV === 'production' && parsed.RESEND_API_KEY ? 'resend' : 'smtp'
+)
 if (!serviceRoleKey) throw new Error('SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SECRET_KEY is required. Copy backend/.env.example to backend/.env and fill in the values.')
 if (parsed.NODE_ENV === 'production' && !parsed.FRONTEND_ORIGIN.startsWith('https://')) {
   throw new Error('FRONTEND_ORIGIN must use HTTPS in production. For local runs set NODE_ENV=development in backend/.env.local.')
@@ -140,6 +144,7 @@ if (!otpHmacSecret) throw new Error('OTP_HMAC_SECRET (32+ characters) is require
 export const config = {
   ...parsed,
   featureFlags,
+  EMAIL_PROVIDER: emailProvider,
   SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey,
   OTP_HMAC_SECRET: otpHmacSecret,
   MAIL_FROM: parsed.MAIL_FROM ?? parsed.SMTP_USER,

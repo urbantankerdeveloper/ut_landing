@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mail = vi.hoisted(() => ({ sendMail: vi.fn(async () => ({})) }))
 const mailConfig = vi.hoisted(() => ({
+  EMAIL_PROVIDER: 'smtp',
   SMTP_HOST: 'smtp.example.com',
   SMTP_PORT: 465,
   SMTP_SECURE: true,
@@ -20,7 +21,7 @@ import { isEmailConfigured, notifyUser, sendEmail } from './providers.js'
 describe('notifyUser', () => {
   beforeEach(() => {
     mail.sendMail.mockClear()
-    Object.assign(mailConfig, { SMTP_USER: 'mailer@example.com', SMTP_PASSWORD: 'secret', RESEND_API_KEY: undefined, MAIL_FROM: 'mailer@example.com' })
+    Object.assign(mailConfig, { EMAIL_PROVIDER: 'smtp', SMTP_USER: 'mailer@example.com', SMTP_PASSWORD: 'secret', RESEND_API_KEY: undefined, MAIL_FROM: 'mailer@example.com' })
   })
 
   it('escapes the message before it is placed in the email HTML', async () => {
@@ -41,6 +42,7 @@ describe('notifyUser', () => {
 
   it('sends email through Resend when an API key is configured', async () => {
     Object.assign(mailConfig, {
+      EMAIL_PROVIDER: 'resend',
       RESEND_API_KEY: 'resend-test-key',
       SMTP_USER: undefined,
       SMTP_PASSWORD: undefined,
@@ -65,7 +67,7 @@ describe('notifyUser', () => {
   })
 
   it('reports a rejected Resend request as a delivery failure', async () => {
-    Object.assign(mailConfig, { RESEND_API_KEY: 'resend-test-key', SMTP_USER: undefined, SMTP_PASSWORD: undefined })
+    Object.assign(mailConfig, { EMAIL_PROVIDER: 'resend', RESEND_API_KEY: 'resend-test-key', SMTP_USER: undefined, SMTP_PASSWORD: undefined })
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 403 })))
 
     await expect(sendEmail('customer@example.com', 'Verification', '<p>Code</p>'))

@@ -125,7 +125,7 @@ function mailFailureFields(error: unknown) {
   const details = error && typeof error === 'object'
     ? error as { responseCode?: unknown; command?: unknown }
     : {}
-  const usingResend = Boolean(config.RESEND_API_KEY)
+  const usingResend = config.EMAIL_PROVIDER === 'resend'
   return {
     deliveryProvider: usingResend ? 'resend' : 'smtp',
     ...(!usingResend ? {
