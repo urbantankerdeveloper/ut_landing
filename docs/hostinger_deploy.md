@@ -20,10 +20,10 @@ Use Business Web Hosting or a Cloud Startup, Professional, or Enterprise plan. N
 | Node.js version | `22` |
 | Build script | `npm run build` (verifies the prebuilt `dist/server.js`) |
 | Output directory | `dist` |
-| Entry file | `server.js` (relative to the `dist` output directory) |
+| Entry file | `server.cjs` (relative to the `dist` output directory) |
 | Start command, if requested | `npm start` |
 
-The compiled file is stored in the archive as `dist/server.js`. With `dist` configured as the output directory, hPanel resolves the entry file relative to that directory, so use `server.js` (not `dist/server.js`, which would resolve as `dist/dist/server.js`). The ZIP has `package.json` at its root, with `express` listed directly under `dependencies`. Upload the ZIP itself, not a ZIP containing an extra enclosing project folder. Hostinger can install dependencies from the included `package.json` and `package-lock.json`; `node_modules` is intentionally excluded.
+The compiled ESM server is stored as `dist/server.js`. The archive also includes `dist/server.cjs`, a CommonJS bootstrap that dynamically imports the ESM server so Hostinger's `require()`-based loader can start the app despite the server's top-level `await`. With `dist` configured as the output directory, hPanel resolves the entry file relative to that directory, so set it to `server.cjs` (not `dist/server.cjs`, which would resolve as `dist/dist/server.cjs`). The ZIP has `package.json` at its root, with `express` listed directly under `dependencies`. Upload the ZIP itself, not a ZIP containing an extra enclosing project folder. Hostinger can install dependencies from the included `package.json` and `package-lock.json`; `node_modules` is intentionally excluded.
 
 ## Build and upload
 
