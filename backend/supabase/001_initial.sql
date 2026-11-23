@@ -745,15 +745,96 @@ create table if not exists public.sms_templates (
 alter table public.sms_templates add column if not exists msg91_template_id text;
 alter table public.sms_templates enable row level security;
 
-insert into public.sms_templates (template_key, body, variables) values
-  ('user_registration_otp', 'Your Urban Tanker verification code is {{otp}}. It expires in 10 minutes. Do not share this code.', '{otp}'),
-  ('booking_verification_otp', 'Your Urban Tanker booking verification code is {{otp}}. It expires in 10 minutes. Do not share this code.', '{otp}'),
-  ('guest_booking_confirmation', 'Urban Tanker: Your booking {{reference}} is confirmed. Track your order: {{trackingUrl}}', '{reference,trackingUrl}'),
-  ('booking_status_update', 'Urban Tanker: Booking {{reference}} update: {{status}}. {{detail}} Track your booking: {{trackingUrl}}', '{reference,status,detail,trackingUrl}'),
-  ('vendor_acceptance', 'Your booking {{reference}} is confirmed. Vehicle: {{vehicle}}. Driver: {{driver}}. Follow live tracking: {{trackingUrl}}', '{reference,vehicle,driver,trackingUrl}'),
-  ('delivery_confirmation', 'Urban Tanker: Delivery for booking {{reference}} is complete. Thank you for choosing Urban Tanker.', '{reference}'),
-  ('delivery_otp', 'Urban Tanker: Your delivery OTP for booking {{reference}} is {{otp}}. It expires in 15 minutes. Share it only with the driver.', '{reference,otp}')
-on conflict (template_key) do nothing;
+
+INSERT INTO public.sms_templates (template_key, body, variables)
+VALUES
+(
+  'user_registration_otp',
+  'Welcome to Urban Tanker!
+
+Use {{otp}} to verify your mobile number and complete your registration.
+
+This code is valid for 10 minutes. For your security, please do not share it with anyone.
+
+Thank you for joining Urban Tanker!',
+  '{otp}'
+),
+(
+  'booking_verification_otp',
+  'Urban Tanker Booking Verification
+
+Your booking verification code is {{otp}}.
+
+This code is valid for 10 minutes. Please do not share it with anyone.',
+  '{otp}'
+),
+(
+  'guest_booking_confirmation',
+  'Urban Tanker | Booking Confirmed
+
+Your booking {{reference}} has been successfully confirmed.
+
+You can view your booking details and track its progress here:
+
+{{trackingUrl}}
+
+Thank you for choosing Urban Tanker. We appreciate your trust in us!',
+  '{reference,trackingUrl}'
+),
+(
+  'booking_status_update',
+  'Urban Tanker | Booking Update
+
+Your booking {{reference}} has a new status: {{status}}.
+
+{{detail}}
+
+Track your booking and view the latest updates:
+
+{{trackingUrl}}
+
+Thank you for choosing Urban Tanker!',
+  '{reference,status,detail,trackingUrl}'
+),
+(
+  'vendor_acceptance',
+  'Urban Tanker | Booking Accepted
+
+Good news! Your booking {{reference}} has been accepted.
+
+Vehicle: {{vehicle}}
+Driver: {{driver}}
+
+You can follow your delivery progress using the link below:
+
+{{trackingUrl}}
+
+Thank you for choosing Urban Tanker!',
+  '{reference,vehicle,driver,trackingUrl}'
+),
+(
+  'delivery_confirmation',
+  'Urban Tanker | Delivery Completed
+
+Your booking {{reference}} has been successfully delivered.
+
+Thank you for choosing Urban Tanker. We appreciate your business and look forward to serving you again!',
+  '{reference}'
+),
+(
+  'delivery_otp',
+  'Urban Tanker | Delivery Verification
+
+Your delivery verification code for booking {{reference}} is {{otp}}.
+
+This code is valid for 15 minutes. Share it only with your authorized delivery driver to confirm receipt of your order.',
+  '{reference,otp}'
+)
+ON CONFLICT (template_key)
+DO UPDATE SET
+  body = EXCLUDED.body,
+  variables = EXCLUDED.variables;
+
 
 -- Consolidated from 002_vendor_acceptance_tracking_template.sql.
 alter table public.bookings
