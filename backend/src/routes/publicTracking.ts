@@ -25,7 +25,7 @@ router.get('/tracking/:token', async (request, response) => {
   const { data: booking, error: bookingError } = await supabase
     .from('bookings')
     .select('id,reference,status,scheduled_for,vehicle_id,driver_id,tracking_token_expires_at')
-    .eq('tracking_token_hash', hashTrackingToken(token))
+    .or(`tracking_token_hash.eq.${hashTrackingToken(token)},tracking_token_v2_hash.eq.${hashTrackingToken(token)}`)
     .maybeSingle()
   if (bookingError) return response.status(500).json({ error: bookingError.message })
   if (!booking || !booking.tracking_token_expires_at || new Date(booking.tracking_token_expires_at).getTime() <= Date.now()) {

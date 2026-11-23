@@ -7,6 +7,7 @@ import { z } from 'zod'
 import { requireAuth } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 import { notifyCustomer } from '../services/customerNotifications.js'
+import { notifyCustomerOfBooking } from '../services/bookingNotifications.js'
 import { sendTemplateWhatsApp } from '../services/whatsapp.js'
 import { canCustomerCancelBooking, transitionBooking } from '../services/bookingLifecycle.js'
 import { signaturesMatch } from '../services/paymentSecurity.js'
@@ -17,6 +18,7 @@ import { limiterStore } from '../services/scaling.js'
 import { codSwitchStatuses, notifyRevertedToCash } from '../services/codOnlineSwitch.js'
 import { loadOrderGroup } from '../services/orderGroups.js'
 import { config } from '../config.js'
+import { getOrCreateTrackingToken } from '../services/trackingTokens.js'
 const catalogCacheControl = 'private, max-age=30, stale-while-revalidate=120'
 const router = Router(); router.use(requireAuth)
 router.use('/wallet', (_request, response, next) => {
@@ -28,6 +30,33 @@ router.use('/wallet', (_request, response, next) => {
 const deliveryOtpLimit = rateLimit({ windowMs: 10 * 60 * 1000, limit: 3, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:customerExtended:deliveryOtp:', 'open'), passOnStoreError: true, keyGenerator: (request) => `${request.authUser!.id}:${request.params.orderId}`, message: { error: 'Too many delivery codes requested for this order. Try again later.' } })
 const statusSchema = z.object({ status: z.enum(['cancelled']) })
 router.get('/orders/:orderId/tracking', async (request, response) => { const { data: booking, error: bookingError } = await supabase.from('bookings').select('id,status,customer_id,vehicle_id,driver_id,latitude,longitude').eq('id', request.params.orderId).eq('customer_id', request.authUser!.id).maybeSingle(); if (bookingError) return databaseFailure(response, 'customerExtended.database_error', bookingError, 500); if (!booking) return response.status(404).json({ error: 'Booking not found' }); const { data: location, error } = await supabase.from('vendor_location_updates').select('latitude,longitude,accuracy_metres,recorded_at').eq('booking_id', request.params.orderId).order('recorded_at', { ascending: false }).limit(1).maybeSingle(); if (error) return databaseFailure(response, 'customerExtended.database_error', error, 500); const [vehicleResult, driverResult] = await Promise.all([booking.vehicle_id ? supabase.from('vehicles').select('registration_number').eq('id', booking.vehicle_id).maybeSingle() : Promise.resolve({ data: null, error: null }), booking.driver_id ? supabase.from('drivers').select('name').eq('id', booking.driver_id).maybeSingle() : Promise.resolve({ data: null, error: null })]); if (vehicleResult.error || driverResult.error) return failure(response, 500, 'Tracking details could not be loaded.', 'customer.tracking_lookup_failed', vehicleResult.error ?? driverResult.error); response.json({ orderId: booking.id, status: booking.status, latitude: location?.latitude ?? undefined, longitude: location?.longitude ?? undefined, accuracy: location?.accuracy_metres ?? undefined, recorded_at: location?.recorded_at, customerLatitude: booking.latitude ?? undefined, customerLongitude: booking.longitude ?? undefined, vehicle: vehicleResult.data?.registration_number, driver: driverResult.data?.name, trackingAvailable: Boolean(location) }) })
+router.get('/orders/:orderId/tracking-link', async (request, response) => {
+  const { data: booking, error: bookingError } = await supabase
+    .from('bookings')
+    .select('id,payment_method')
+    .eq('id', request.params.orderId)
+    .eq('customer_id', request.authUser!.id)
+    .maybeSingle()
+  if (bookingError) return databaseFailure(response, 'customer.tracking_link_lookup_failed', bookingError, 500)
+  if (!booking) return response.status(404).json({ error: 'Booking not found' })
+  if (booking.payment_method === 'gateway') {
+    const { data: payment, error: paymentError } = await supabase
+      .from('payments')
+      .select('status')
+      .eq('booking_id', booking.id)
+      .maybeSingle()
+    if (paymentError) return databaseFailure(response, 'customer.tracking_link_payment_lookup_failed', paymentError, 500)
+    if (payment?.status !== 'paid') return response.status(409).json({ error: 'Tracking link is available after payment is confirmed.' })
+  } else if (!['cod', 'wallet'].includes(booking.payment_method)) {
+    return response.status(409).json({ error: 'Tracking link is not available for this booking.' })
+  }
+  try {
+    const { token } = await getOrCreateTrackingToken(booking.id)
+    response.json({ trackingUrl: `${config.FRONTEND_ORIGIN}/track/${token}` })
+  } catch (error) {
+    return failure(response, 500, 'Tracking link could not be created.', 'customer.tracking_link_failed', error)
+  }
+})
 router.post('/orders/:orderId/delivery-otp', deliveryOtpLimit, async (request, response) => {
   const { data: booking, error: bookingError } = await supabase
     .from('bookings')
@@ -130,7 +159,7 @@ router.post('/orders/:orderId/payment-method', async (request, response) => {
   const parsed = z.object({ paymentMethod: z.literal('cod') }).safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Only switching to cash on delivery is supported' })
   const customerId = request.authUser!.id
-  const { data: booking, error: bookingError } = await supabase.from('bookings').select('id,status,payment_method,quoted_amount_paise').eq('id', request.params.orderId).eq('customer_id', customerId).maybeSingle()
+  const { data: booking, error: bookingError } = await supabase.from('bookings').select('id,reference,customer_phone_e164,status,payment_method,quoted_amount_paise').eq('id', request.params.orderId).eq('customer_id', customerId).maybeSingle()
   if (bookingError) return databaseFailure(response, 'customerExtended.database_error', bookingError, 500)
   if (!booking) return response.status(404).json({ error: 'Booking not found' })
   if (booking.payment_method === 'cod') return response.json({ id: booking.id, paymentMethod: 'cod' })
@@ -157,6 +186,7 @@ router.post('/orders/:orderId/payment-method', async (request, response) => {
     const { error: insertError } = await supabase.from('payments').insert({ booking_id: paymentBookingId, provider: 'cash_on_delivery', amount_paise: orderGroup.data?.totalPaise ?? booking.quoted_amount_paise, currency: 'INR', status: 'pending' })
     if (insertError) return databaseFailure(response, 'customerExtended.database_error', insertError, 500)
   }
+  await notifyCustomerOfBooking(booking.customer_phone_e164, booking.id, booking.reference)
   await Promise.all(bookingIds.map((id) => notifyRevertedToCash(id)))
   response.json({ id: booking.id, paymentMethod: 'cod' })
 })

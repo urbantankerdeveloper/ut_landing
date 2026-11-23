@@ -230,6 +230,18 @@ describe('vendor order lifecycle events', () => {
     setResults('vendors', { data: { id: 'vendor-1' }, error: null }, { data: { owner_profile_id: 'prof-v1' }, error: null }, { data: { owner_profile_id: 'prof-v1' }, error: null })
     setResults('bookings', { data: { id: BOOKING_ID, reference: 'UT-1', status: 'pending_vendor', vendor_id: null, vehicle_id: null, driver_id: null, customer_id: 'cust-9' }, error: null }, { data: { vendor_id: null, vehicle_id: 'veh-1', driver_id: 'drv-1' }, error: null })
     setResults('notifications', { data: [{ id: 'n1', event_type: 'vendor_order_created', payload: { bookingId: BOOKING_ID } }], error: null }, { data: [], error: null })
+    mocks.transitionBooking.mockResolvedValueOnce({
+      data: {
+        id: BOOKING_ID,
+        reference: 'UT-1',
+        customer_id: 'cust-9',
+        customer_phone_e164: '+919123456789',
+        vehicle_id: 'veh-1',
+        driver_id: 'drv-1',
+        status: 'accepted',
+      },
+      error: null,
+    })
 
     const response = await request(buildApp()).patch(`/api/vendor/orders/${BOOKING_ID}/transition`).set('x-test-role', 'vendor').send({ action: 'accept' })
 
@@ -239,6 +251,15 @@ describe('vendor order lifecycle events', () => {
       'booking.vendor_accepted',
       { bookingId: BOOKING_ID, vendorId: 'vendor-1', reference: 'UT-1' },
       'cust-9',
+    )
+    expect(mocks.notifyCustomerOfAssignment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: BOOKING_ID,
+        customer_id: 'cust-9',
+        customer_phone_e164: '+919123456789',
+        vehicle_id: 'veh-1',
+        driver_id: 'drv-1',
+      }),
     )
   })
 

@@ -11,7 +11,7 @@ import { generateMissingCustomerInvoices } from '../services/invoices.js'
 import { emitRealtimeToUser, emitRealtimeToVendor } from '../services/realtime.js'
 import { sendPushNotification } from '../services/pushNotifications.js'
 import { isJpeg, selfieBucket, selfieMaxBytes, selfieObjectPath } from '../services/selfie.js'
-import { notifyCustomerWhatsApp } from '../services/bookingNotifications.js'
+import { notifyCustomerOfBooking } from '../services/bookingNotifications.js'
 import { config } from '../config.js'
 import { getManualAssignmentModeEnabled } from '../services/manualAssignmentMode.js'
 import { toE164IndianMobile } from '../lib/phone.js'
@@ -349,6 +349,7 @@ async function createBookingAndNotifications(input: {
   booking: ReturnType<typeof bookingInsert>
   vendors: Awaited<ReturnType<typeof findNearbyVendors>>
   payment?: { provider: string; amount_paise: number; currency: string; status: string }
+  sendTrackingConfirmation?: boolean
 }): Promise<{ booking: CreatedBooking; created: boolean }> {
   const { data, error } = await supabase.rpc('create_customer_booking', {
     p_booking: {
@@ -363,8 +364,10 @@ async function createBookingAndNotifications(input: {
   if (error) throw error
   const result = data as { booking: CreatedBooking; created: boolean }
   if (result?.booking?.id) notifyNearbyVendors(input.vendors, result.booking, result.created)
-  if (result?.created && input.booking.customer_phone_e164) {
-    void notifyCustomerWhatsApp(input.booking.customer_phone_e164, 'guest_booking_confirmation', { reference: input.reference })
+  const sendTrackingConfirmation = input.sendTrackingConfirmation
+    ?? input.booking.payment_method !== 'gateway'
+  if (result?.created && sendTrackingConfirmation && input.booking.customer_phone_e164) {
+    void notifyCustomerOfBooking(input.booking.customer_phone_e164, result.booking.id, input.reference)
   }
   return result
 }
@@ -407,8 +410,8 @@ async function createMultiServiceBookings(input: {
   }
   for (const booking of result.bookings) notifyNearbyVendors(input.vendors, booking, result.created)
   const customerPhone = input.data.phone ? toE164IndianMobile(input.data.phone) : null
-  if (result.created && customerPhone) {
-    void notifyCustomerWhatsApp(customerPhone, 'guest_booking_confirmation', { reference: input.groupReference })
+  if (result.created && customerPhone && input.data.paymentMethod !== 'gateway') {
+    void notifyCustomerOfBooking(customerPhone, result.bookings[0]!.id, input.groupReference)
   }
   return { booking: result.bookings[0]!, bookings: result.bookings, created: result.created }
 }
@@ -534,6 +537,17 @@ export async function settleBookingCheckout(checkout: CheckoutRow, method: 'gate
   }
   if (!bookingId) return { status: 'conflict' }
   if (method === 'gateway' && payment) await recordCheckoutPayment(bookingId, checkout, payment)
+  if (method === 'gateway' && payment) {
+    const { data: bookingContact, error: contactError } = await supabase
+      .from('bookings')
+      .select('id,reference,customer_phone_e164')
+      .eq('id', bookingId)
+      .maybeSingle()
+    if (contactError) throw contactError
+    if (bookingContact) {
+      await notifyCustomerOfBooking(bookingContact.customer_phone_e164, bookingContact.id, bookingContact.reference)
+    }
+  }
   if (method === 'cod' && checkout.provider_order_id) {
     // A Razorpay order created before the customer switched to cash can still be captured, so the webhook must find this row.
     const { error } = await supabase.from('payments').update({ provider_order_id: checkout.provider_order_id }).eq('booking_id', bookingId)
@@ -697,6 +711,7 @@ async function placeQuotedBooking(request: Request, response: Response, includeQ
           quote.invoiceLineItems,
         ),
         vendors,
+        sendTrackingConfirmation: method !== 'gateway',
         payment: method === 'cod' ? { provider: 'cash_on_delivery', amount_paise: quote.totalPaise, currency: 'INR', status: 'pending' } : undefined,
       })
       result = { ...singleBooking, bookings: [] }

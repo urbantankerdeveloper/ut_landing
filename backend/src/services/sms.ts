@@ -20,7 +20,7 @@ export type SmsTemplateKey = (typeof smsTemplateKeys)[number]
 export const smsTemplateVariables: Record<SmsTemplateKey, readonly string[]> = {
   user_registration_otp: ['otp'],
   booking_verification_otp: ['otp'],
-  guest_booking_confirmation: ['reference'],
+  guest_booking_confirmation: ['reference', 'trackingUrl'],
   vendor_acceptance: ['reference', 'vehicle', 'driver', 'trackingUrl'],
   delivery_confirmation: ['reference'],
   delivery_otp: ['reference', 'otp'],
@@ -32,8 +32,8 @@ export const smsTemplateVariables: Record<SmsTemplateKey, readonly string[]> = {
 export const smsTemplateRequiredVariables: Record<SmsTemplateKey, readonly string[]> = {
   user_registration_otp: ['otp'],
   booking_verification_otp: ['otp'],
-  guest_booking_confirmation: ['reference'],
-  vendor_acceptance: ['reference'],
+  guest_booking_confirmation: ['reference', 'trackingUrl'],
+  vendor_acceptance: ['reference', 'trackingUrl'],
   delivery_confirmation: ['reference'],
   delivery_otp: ['otp'],
   cod_switched_to_online: ['reference'],

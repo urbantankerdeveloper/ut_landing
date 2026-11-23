@@ -33,6 +33,7 @@ vi.mock('../supabase.js', () => ({
   supabase: { from: (table: string) => queryBuilder(table) },
 }))
 vi.mock('../lib/logger.js', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }))
+vi.mock('./bookingNotifications.js', () => ({ notifyCustomerOfBooking: vi.fn(async () => ({ queued: true })) }))
 vi.mock('./codOnlineSwitch.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./codOnlineSwitch.js')>()),
   notifyPaidOnlineAfterCodSwitch: vi.fn(),

@@ -10,6 +10,7 @@ type AssignedBooking = {
   id: string
   reference?: string | null
   customer_id: string
+  customer_phone_e164?: string | null
   latitude?: number | null
   longitude?: number | null
   vehicle_id?: string | null
@@ -49,13 +50,57 @@ export async function notifyCustomerOfAssignment(booking: AssignedBooking) {
 
   const message = `Urban Tanker ${booking.reference ?? booking.id}: ${detail} Live tracking: ${trackingUrl}${customerMapUrl ? ` Delivery location: ${customerMapUrl}` : ''}`
   const providerResults = await notifyUser({ email: authUser.user.email ?? undefined }, 'Your Urban Tanker fleet is assigned', message)
-  const whatsapp = await notifyCustomerWhatsApp(profileResult.data?.phone_e164, 'vendor_acceptance', {
-    reference: booking.reference ?? booking.id,
-    vehicle,
-    driver,
-    trackingUrl,
-  })
+  const whatsapp = await notifyCustomerWhatsApp(
+    booking.customer_phone_e164 ?? profileResult.data?.phone_e164,
+    'vendor_acceptance',
+    {
+      reference: booking.reference ?? booking.id,
+      vehicle,
+      driver,
+      trackingUrl,
+    },
+  )
   return { vehicle, driver, trackingUrl, providerResults, whatsapp }
+}
+
+export async function notifyCustomerOfBooking(phoneE164: string | null | undefined, bookingId: string, reference: string) {
+  if (!phoneE164) return { queued: false, reason: 'No phone' }
+  try {
+    const { token } = await getOrCreateTrackingToken(bookingId)
+    const claimedAt = new Date().toISOString()
+    const { data: claimed, error: claimError } = await supabase
+      .from('bookings')
+      .update({ tracking_confirmation_sent_at: claimedAt })
+      .eq('id', bookingId)
+      .is('tracking_confirmation_sent_at', null)
+      .select('id')
+      .maybeSingle()
+    if (claimError) throw new Error(`Tracking confirmation claim failed: ${claimError.message}`)
+    if (!claimed) return { queued: false, reason: 'Tracking confirmation already sent' }
+
+    const result = await notifyCustomerWhatsApp(phoneE164, 'guest_booking_confirmation', {
+      reference,
+      trackingUrl: `${config.FRONTEND_ORIGIN}/track/${token}`,
+    })
+    if (!result.queued) {
+      const { error: releaseError } = await supabase
+        .from('bookings')
+        .update({ tracking_confirmation_sent_at: null })
+        .eq('id', bookingId)
+        .eq('tracking_confirmation_sent_at', claimedAt)
+      if (releaseError) logger.warn('booking.tracking_confirmation_claim_release_failed', {
+        bookingId,
+        error: releaseError.message,
+      })
+    }
+    return result
+  } catch (error) {
+    logger.warn('booking.tracking_confirmation_failed', {
+      bookingId,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    })
+    return { queued: false, reason: 'Tracking confirmation failed' }
+  }
 }
 
 export async function notifyCustomerWhatsApp(phoneE164: string | null | undefined, key: SmsTemplateKey, vars: Record<string, string>) {

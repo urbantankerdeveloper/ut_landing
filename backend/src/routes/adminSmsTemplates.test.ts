@@ -6,6 +6,10 @@ describe('placeholderError', () => {
     expect(placeholderError('vendor_acceptance', 'Booking {{reference}} {{vehicle}} {{driver}} {{trackingUrl}}')).toBeNull()
   })
 
+  it('requires the live tracking link in vendor acceptance messages', () => {
+    expect(placeholderError('vendor_acceptance', 'Booking {{reference}} accepted')).toContain('{{trackingUrl}}')
+  })
+
   it('rejects placeholders the code path does not send', () => {
     const message = placeholderError('user_registration_otp', 'Code {{otp}} for {{name}}')
     expect(message).toContain('{{name}}')
@@ -28,5 +32,9 @@ describe('placeholderError', () => {
 
   it('requires the reference on built-in confirmations', () => {
     expect(placeholderError('guest_booking_confirmation', 'Thank you')).toContain('{{reference}}')
+  })
+
+  it('requires the tracking URL on booking confirmations', () => {
+    expect(placeholderError('guest_booking_confirmation', 'Booking {{reference}} confirmed')).toContain('{{trackingUrl}}')
   })
 })

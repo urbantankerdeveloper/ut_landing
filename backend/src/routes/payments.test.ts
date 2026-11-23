@@ -3,6 +3,8 @@ import express from 'express'
 import request from 'supertest'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { config } from '../config.js'
+import { notifyCustomerOfBooking } from '../services/bookingNotifications.js'
+import { getOrCreateTrackingToken } from '../services/trackingTokens.js'
 
 const state = vi.hoisted(() => ({
   results: new Map<string, unknown[]>(),
@@ -49,6 +51,8 @@ vi.mock('../services/scaling.js', () => ({ limiterStore: () => undefined, getRed
 vi.mock('../lib/logger.js', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }))
 vi.mock('../services/whatsapp.js', () => ({ sendTemplateWhatsApp: vi.fn() }))
 vi.mock('../services/customerNotifications.js', () => ({ notifyCustomer: vi.fn() }))
+vi.mock('../services/bookingNotifications.js', () => ({ notifyCustomerOfBooking: vi.fn(async () => ({ queued: true })) }))
+vi.mock('../services/trackingTokens.js', () => ({ getOrCreateTrackingToken: vi.fn(async () => ({ token: 'a'.repeat(43) })) }))
 
 import { logger } from '../lib/logger.js'
 import adminRouter from './adminExtended.js'
@@ -131,6 +135,8 @@ beforeEach(() => {
   vi.stubEnv('RAZORPAY_KEY_SECRET', KEY_SECRET)
   vi.mocked(logger.warn).mockClear()
   vi.mocked(logger.error).mockClear()
+  vi.mocked(notifyCustomerOfBooking).mockClear()
+  vi.mocked(getOrCreateTrackingToken).mockClear()
 })
 
 afterEach(() => {
@@ -141,6 +147,7 @@ afterEach(() => {
 describe('razorpay webhook payment details', () => {
   it('stores structured card details and captured_at for a captured payment', async () => {
     setResults('payments', { data: { amount_paise: 50000 }, error: null }, { data: [{ id: 'row-1' }], error: null })
+    setResults('bookings', { data: { id: 'booking-1', reference: 'UT-100', customer_phone_e164: '+919123456789', payment_method: 'gateway' }, error: null })
 
     const response = await signedWebhook(capturedEvent)
 
@@ -160,6 +167,7 @@ describe('razorpay webhook payment details', () => {
       captured_at: '2023-11-14T22:13:20.000Z',
     })
     expect(payload?.raw_webhook).toEqual(capturedEvent)
+    expect(notifyCustomerOfBooking).toHaveBeenCalledWith('+919123456789', 'booking-1', 'UT-100')
   })
 
   it('refunds a capture that lands after the customer switched to cash', async () => {
@@ -351,7 +359,7 @@ describe('customer payment receipt', () => {
 })
 
 describe('switch gateway booking to cash on delivery', () => {
-  const gatewayBooking = { id: 'booking-1', status: 'pending_vendor', payment_method: 'gateway', quoted_amount_paise: 50000 }
+  const gatewayBooking = { id: 'booking-1', reference: 'UT-100', customer_phone_e164: '+919123456789', status: 'pending_vendor', payment_method: 'gateway', quoted_amount_paise: 50000 }
 
   it('switches the booking and creates a COD payment row when no order exists', async () => {
     setResults('bookings', { data: gatewayBooking, error: null }, { data: { id: 'booking-1' }, error: null })
@@ -363,6 +371,29 @@ describe('switch gateway booking to cash on delivery', () => {
     expect(response.body).toEqual({ id: 'booking-1', paymentMethod: 'cod' })
     expect(updatePayloads('bookings')[0]).toMatchObject({ payment_method: 'cod' })
     expect(state.calls.find((call) => call.table === 'payments' && call.method === 'insert')?.args[0]).toMatchObject({ booking_id: 'booking-1', provider: 'cash_on_delivery', amount_paise: 50000 })
+    expect(notifyCustomerOfBooking).toHaveBeenCalledWith('+919123456789', 'booking-1', 'UT-100')
+  })
+
+  describe('customer tracking link', () => {
+    it('returns the stable link for COD bookings', async () => {
+      setResults('bookings', { data: { id: 'booking-1', payment_method: 'cod' }, error: null })
+
+      const response = await request(buildApp()).get('/api/customer/orders/booking-1/tracking-link')
+
+      expect(response.status).toBe(200)
+      expect(response.body.trackingUrl).toMatch(/\/track\/a{43}$/)
+      expect(getOrCreateTrackingToken).toHaveBeenCalledWith('booking-1')
+    })
+
+    it('does not expose a link before gateway payment is confirmed', async () => {
+      setResults('bookings', { data: { id: 'booking-1', payment_method: 'gateway' }, error: null })
+      setResults('payments', { data: { status: 'pending' }, error: null })
+
+      const response = await request(buildApp()).get('/api/customer/orders/booking-1/tracking-link')
+
+      expect(response.status).toBe(409)
+      expect(getOrCreateTrackingToken).not.toHaveBeenCalled()
+    })
   })
 
   it('refuses when the booking is already paid online', async () => {

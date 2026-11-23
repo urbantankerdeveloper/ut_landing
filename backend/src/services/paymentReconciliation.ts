@@ -2,6 +2,7 @@ import { supabase } from '../supabase.js'
 import { logger } from '../lib/logger.js'
 import { epochSecondsToIso, extractPaymentDetails, type RazorpayPaymentEntity } from './paymentDetails.js'
 import { notifyPaidOnlineAfterCodSwitch, notifyRevertedToCash, codSwitchStatuses } from './codOnlineSwitch.js'
+import { notifyCustomerOfBooking } from './bookingNotifications.js'
 
 // Notes an admin should look at. Kept in one place so the admin filter and the writers agree.
 export const ATTENTION_NOTES = ['amount_mismatch', 'authorized_not_captured', 'captured_after_cod_switch', 'auto_refund_in_progress', 'auto_refunded_after_cod_switch'] as const
@@ -91,7 +92,7 @@ export async function reconcilePayment(row: PendingPayment, now: Date = new Date
     return 'flagged'
   }
 
-  const { data: booking, error: bookingError } = await supabase.from('bookings').select('payment_method').eq('id', row.booking_id).maybeSingle()
+  const { data: booking, error: bookingError } = await supabase.from('bookings').select('id,reference,customer_phone_e164,payment_method').eq('id', row.booking_id).maybeSingle()
   if (bookingError) throw new Error(`Booking lookup failed: ${bookingError.message}`)
   const note = booking?.payment_method === 'cod' ? 'captured_after_cod_switch' : 'reconciled_from_razorpay'
 
@@ -109,6 +110,7 @@ export async function reconcilePayment(row: PendingPayment, now: Date = new Date
   if (!settled?.length) return 'skipped'
 
   logger.info('payment.reconciled', { paymentId: row.id, note })
+  if (booking) await notifyCustomerOfBooking(booking.customer_phone_e164, booking.id, booking.reference)
   await notifyPaidOnlineAfterCodSwitch(row.booking_id)
   return note === 'reconciled_from_razorpay' ? 'paid' : 'flagged'
 }

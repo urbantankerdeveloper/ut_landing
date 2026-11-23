@@ -9,6 +9,7 @@ import { refundAmountInPaise, signaturesMatch } from '../services/paymentSecurit
 import { epochSecondsToIso, extractPaymentDetails, type RazorpayPaymentEntity } from '../services/paymentDetails.js'
 import { refundCapturedAfterCod } from '../services/paymentReconciliation.js'
 import { notifyPaidOnlineAfterCodSwitch } from '../services/codOnlineSwitch.js'
+import { notifyCustomerOfBooking } from '../services/bookingNotifications.js'
 import { loadOrderGroup } from '../services/orderGroups.js'
 import { failure } from '../lib/httpErrors.js'
 import { settleBookingCheckout, type CheckoutRow } from './customer.js'
@@ -158,10 +159,11 @@ router.post('/razorpay/verify', requireAuth, async (request, response) => {
   const { data: payment, error: paymentError } = await supabase.from('payments').select('id,booking_id,amount_paise,status,provider_payment_id').eq('provider_order_id', parsed.data.orderId).maybeSingle()
   if (paymentError) return response.status(404).json({ error: 'Payment order not found' })
   if (!payment) return verifyCheckoutPayment(response, request.authUser!.id, parsed.data.orderId, parsed.data.paymentId, keys)
-  const { data: booking, error: bookingError } = await supabase.from('bookings').select('id').eq('id', payment.booking_id).eq('customer_id', request.authUser!.id).single()
+  const { data: booking, error: bookingError } = await supabase.from('bookings').select('id,reference,customer_phone_e164').eq('id', payment.booking_id).eq('customer_id', request.authUser!.id).single()
   if (bookingError || !booking) return response.status(403).json({ error: 'Payment is not owned by this customer' })
   // A webhook may have settled this payment first; a repeated verify for the same payment should still succeed.
   if (payment.status === 'paid' && payment.provider_payment_id === parsed.data.paymentId) {
+    await notifyCustomerOfBooking(booking.customer_phone_e164, booking.id, booking.reference)
     try {
       await createInvoiceIfEligible(payment.booking_id)
     } catch (error) {
@@ -180,6 +182,7 @@ router.post('/razorpay/verify', requireAuth, async (request, response) => {
   const { data: settled, error } = await supabase.from('payments').update({ provider_payment_id: parsed.data.paymentId, status: 'paid', ...details, updated_at: new Date().toISOString() }).eq('id', payment.id).in('status', ['pending', 'failed']).select('id').maybeSingle()
   if (error) return databaseFailure(response, 'payments.verify_failed', error, 400)
   if (!settled) return response.status(409).json({ error: 'This payment has already been processed.' })
+  await notifyCustomerOfBooking(booking.customer_phone_e164, booking.id, booking.reference)
   await notifyPaidOnlineAfterCodSwitch(payment.booking_id)
   try {
     await createInvoiceIfEligible(payment.booking_id)
@@ -253,11 +256,13 @@ router.post('/razorpay/webhook', async (request, response) => {
       return response.status(202).json({ accepted: true })
     }
     const update: Record<string, unknown> = { provider_payment_id: paymentEntity.id, status, raw_webhook: event, ...extractPaymentDetails(paymentEntity), updated_at: new Date().toISOString() }
+    let booking: { id: string; reference: string | null; customer_phone_e164: string | null; payment_method: string | null } | null = null
     if (status === 'paid') {
       update.captured_at = epochSecondsToIso(event.created_at) ?? new Date().toISOString()
       // The customer switched to cash after starting online payment, so this capture needs an admin to look at it.
-      const { data: booking, error: bookingError } = await supabase.from('bookings').select('payment_method').eq('id', payment.booking_id).maybeSingle()
+      const { data, error: bookingError } = await supabase.from('bookings').select('id,reference,customer_phone_e164,payment_method').eq('id', payment.booking_id).maybeSingle()
       if (bookingError) return databaseFailure(response, 'payments.webhook_lookup_failed', bookingError, 500, 'Payment event could not be persisted')
+      booking = data
       if (booking?.payment_method === 'cod') {
         update.reconciliation_note = 'captured_after_cod_switch'
         logger.warn('payment.captured_after_cod_switch', { providerOrderId: paymentEntity.order_id })
@@ -273,6 +278,7 @@ router.post('/razorpay/webhook', async (request, response) => {
     if (!updated?.length) logger.warn('payment.webhook_no_matching_row', { providerOrderId: paymentEntity.order_id, status })
     else {
       if (status === 'paid') {
+        if (booking) await notifyCustomerOfBooking(booking.customer_phone_e164, booking.id, booking.reference ?? booking.id)
         await notifyPaidOnlineAfterCodSwitch(payment.booking_id)
         try {
           await createInvoiceIfEligible(payment.booking_id)
