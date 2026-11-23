@@ -23,6 +23,8 @@ export function ProfileDialog({ user, initialPhotoUrl, onClose }: {
   const [name, setName] = useState(user.name)
   const [email, setEmail] = useState(user.email ?? '')
   const [phone, setPhone] = useState(user.phone ?? '')
+  const [profileLoading, setProfileLoading] = useState(true)
+  const [profileLoadFailed, setProfileLoadFailed] = useState(false)
   const [photo, setPhoto] = useState<File | null>(null)
   const [photoPreview, setPhotoPreview] = useState<string | null>(null)
   const [emailChallenge, setEmailChallenge] = useState<string | null>(null)
@@ -39,6 +41,21 @@ export function ProfileDialog({ user, initialPhotoUrl, onClose }: {
   const photoPreviewUrl = useRef<string | null>(null)
   const setAuthUser = useAuthStore((state) => state.setUser)
   const queryClient = useQueryClient()
+
+  useEffect(() => {
+    let active = true
+    customerApi.profile().then((profile) => {
+      if (!active) return
+      setName(profile.name || user.name)
+      setEmail(profile.email || user.email || '')
+      setPhone(profile.phone || user.phone || '')
+    }).catch(() => {
+      if (active) setProfileLoadFailed(true)
+    }).finally(() => {
+      if (active) setProfileLoading(false)
+    })
+    return () => { active = false }
+  }, [user.email, user.id, user.name, user.phone])
 
   useEffect(() => {
     let active = true
@@ -244,12 +261,20 @@ export function ProfileDialog({ user, initialPhotoUrl, onClose }: {
 
       <form className="profile-dialog-form" onSubmit={(event) => { event.preventDefault(); if (editing) void saveProfile() }}>
         <label>Full name<input value={name} onChange={(event) => setName(event.target.value)} required minLength={2} maxLength={60} disabled={!editing || busy} /></label>
-        <label>Email
-          <div className="profile-dialog-input-action"><input type="email" value={email} onChange={(event) => { setEmail(event.target.value); setEmailVerified(false); setEmailChallenge(null) }} required disabled={!editing || busy} />{editing && emailChanged && <button type="button" className="button button-quiet" onClick={() => void sendCode('email')} disabled={busy || !email}>{emailVerified ? <><Check size={15} /> Verified</> : 'Send code'}</button>}</div>
-        </label>
-        <label>Mobile number
-          <div className="profile-dialog-input-action"><span className="profile-dialog-prefix">+91</span><input type="tel" inputMode="numeric" maxLength={10} value={phone} onChange={(event) => { setPhone(event.target.value.replace(/\D/g, '').slice(0, 10)); setPhoneVerified(false); setPhoneChallenge(null) }} required disabled={!editing || busy} />{editing && phoneChanged && <button type="button" className="button button-quiet" onClick={() => void sendCode('phone')} disabled={busy || phoneDigits.length !== 10}>{phoneVerified ? <><Check size={15} /> Verified</> : 'Send code'}</button>}</div>
-        </label>
+        {editing
+          ? <>
+              <label>Email
+                <div className="profile-dialog-input-action"><input type="email" value={email} onChange={(event) => { setEmail(event.target.value); setEmailVerified(false); setEmailChallenge(null) }} required disabled={busy} />{emailChanged && <button type="button" className="button button-quiet" onClick={() => void sendCode('email')} disabled={busy || !email}>{emailVerified ? <><Check size={15} /> Verified</> : 'Send code'}</button>}</div>
+              </label>
+              <label>Mobile number
+                <div className="profile-dialog-input-action"><span className="profile-dialog-prefix">+91</span><input type="tel" inputMode="numeric" maxLength={10} value={phone} onChange={(event) => { setPhone(event.target.value.replace(/\D/g, '').slice(0, 10)); setPhoneVerified(false); setPhoneChallenge(null) }} required disabled={busy} />{phoneChanged && <button type="button" className="button button-quiet" onClick={() => void sendCode('phone')} disabled={busy || phoneDigits.length !== 10}>{phoneVerified ? <><Check size={15} /> Verified</> : 'Send code'}</button>}</div>
+              </label>
+            </>
+          : <>
+              <div className="profile-dialog-readonly"><span>Email</span><b>{email || (profileLoading ? 'Loading…' : 'Not provided')}</b></div>
+              <div className="profile-dialog-readonly"><span>Mobile number</span><b>{phone || (profileLoading ? 'Loading…' : 'Not provided')}</b></div>
+            </>}
+        {profileLoadFailed && <p className="profile-dialog-error" role="alert">Contact details could not be refreshed. Please try again.</p>}
         {editing && codeKind && <div className="profile-dialog-code">
           <p>{codeKind === 'email' ? `Enter the code sent to ${email}.` : `Enter the code sent via ${phoneChannel === 'whatsapp' ? 'WhatsApp' : 'SMS'} to +91 ${phoneDigits}.`}</p>
           <div className="profile-dialog-otp" role="group" aria-label="6-digit verification code">
@@ -263,7 +288,7 @@ export function ProfileDialog({ user, initialPhotoUrl, onClose }: {
         <div className="profile-dialog-actions">
           {editing
             ? <><button type="button" className="button button-quiet" onClick={resetEditor} disabled={busy}>Cancel</button><button type="submit" className="button button-primary" disabled={busy}>{busy ? 'Saving…' : 'Save profile'}</button></>
-            : <button className="button button-primary" type="button" onClick={() => { setEditing(true); setNotice(null) }}>Edit profile</button>}
+            : <button className="button button-primary" type="button" onClick={() => { setEditing(true); setNotice(null) }} disabled={profileLoading}>Edit profile</button>}
         </div>
       </form>
     </div>
