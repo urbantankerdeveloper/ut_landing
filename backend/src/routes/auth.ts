@@ -17,6 +17,7 @@ import { logger } from '../lib/logger.js'
 import { isAllowedCorsOrigin } from '../lib/corsOrigins.js'
 import { limiterStore } from '../services/scaling.js'
 import { isPhoneVerificationRequired, logPhoneVerificationAudit } from '../services/phoneVerification.js'
+import { invalidateAuthProfile } from '../services/authCache.js'
 
 const router = Router()
 const minute = 60 * 1000
@@ -687,6 +688,7 @@ router.post('/guest/verify-otp', async (request, response) => {
     return response.status(500).json({ error: 'Guest account could not be created.' })
   }
   const { error: profileError } = await supabase.from('profiles').upsert({ id: created.user.id, full_name: name, phone_e164: phoneVerified ? phone : null, phone_verified: phoneVerified, phone_verified_at: phoneVerified ? new Date().toISOString() : null, username, role: 'customer' })
+  if (!profileError) await invalidateAuthProfile(created.user.id)
   if (profileError) {
     logFailure('guest.profile_failed', response.locals.requestId, profileError.message)
     const { error: rollbackError } = await authSupabase.auth.admin.deleteUser(created.user.id)
@@ -1360,6 +1362,7 @@ router.post('/signup', signupLimit, signupEmailLimit, async (request, response) 
     signup_platform: signupPlatform,
     theme_mode: themeMode,
   })
+  if (!profileError) await invalidateAuthProfile(userId)
   if (profileError) {
     logFailure('signup.profile_failed', response.locals.requestId, profileError.message)
     const { error: deleteError } = await authSupabase.auth.admin.deleteUser(userId)

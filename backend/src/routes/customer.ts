@@ -2,7 +2,6 @@ import crypto from 'node:crypto'
 import express, { Router, type Request, type Response } from 'express'
 import rateLimit from 'express-rate-limit'
 import { z } from 'zod'
-import { requireAuth } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 import { logger } from '../lib/logger.js'
 import { bookingSchema } from '../lib/schemas.js'
@@ -21,9 +20,11 @@ import { listWindow, sendList } from '../lib/listParams.js'
 import { cachedCatalog } from '../services/catalogCache.js'
 import { limiterStore } from '../services/scaling.js'
 import { isPhoneVerificationRequired, isPhoneVerified, logPhoneVerificationAudit } from '../services/phoneVerification.js'
+import { authenticatedRateLimitKey } from '../middleware/auth.js'
+import { requireAuth } from '../middleware/auth.js'
 const router = Router()
 const catalogCacheControl = 'private, max-age=30, stale-while-revalidate=120'
-const quoteLimit = rateLimit({ windowMs: 10 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:customer:quote:', 'open'), passOnStoreError: true, keyGenerator: (request) => request.authUser!.id, message: { error: 'Too many quote requests. Try again later.' } })
+const quoteLimit = rateLimit({ windowMs: 10 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:customer:quote:', 'open'), passOnStoreError: true, keyGenerator: (request) => authenticatedRateLimitKey(request, () => request.authUser!.id), message: { error: 'Too many quote requests. Try again later.' } })
 const phoneVerificationWindowMs = 15 * 60 * 1000
 function recentVerificationCutoff() { return new Date(Date.now() - phoneVerificationWindowMs).toISOString() }
 function bookingReference() { return `UT-${crypto.randomBytes(5).toString('hex').toUpperCase()}` }

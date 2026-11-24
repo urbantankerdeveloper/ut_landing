@@ -1,6 +1,7 @@
 import type { Server } from 'socket.io'
 import { supabase } from '../supabase.js'
 import { logger } from '../lib/logger.js'
+import { config } from '../config.js'
 
 let realtimeServer: Server | null = null
 
@@ -15,7 +16,18 @@ export type BookingLifecyclePayload = { bookingId: string; vendorId?: string; re
 
 export function emitRealtime(event: string, payload: unknown = {}, customerId?: string) {
   if (event === 'booking.updated') emitBookingUpdated(payload, customerId)
-  else realtimeServer?.emit(event, payload)
+  else if (config.featureFlags.REALTIME_ROOM_ROUTING) {
+    const payloadObject = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
+    if (typeof payloadObject.customerId === 'string') {
+      realtimeServer?.to(`customer:${payloadObject.customerId}`).emit(event, payload)
+    } else if (typeof payloadObject.vendorId === 'string') {
+      realtimeServer?.to(`vendor:${payloadObject.vendorId}`).emit(event, payload)
+    } else if (typeof payloadObject.bookingId === 'string') {
+      realtimeServer?.to(`booking:${payloadObject.bookingId}`).emit(event, payload)
+    } else {
+      logger.warn('realtime.unknown_room_target', { event })
+    }
+  } else realtimeServer?.emit(event, payload)
   persistUnlessTransient(event, payload)
 }
 export function emitRealtimeToUser(userId: string, event: string, payload: unknown = {}) {

@@ -1,6 +1,38 @@
 import type { NextFunction, Request, Response } from 'express'
 import { logger } from '../lib/logger.js'
 import { supabase } from '../supabase.js'
+import { config } from '../config.js'
+import { getCachedAuthProfile } from '../services/authCache.js'
+import { createRemoteJWKSet, jwtVerify } from 'jose'
+import type { User } from '@supabase/supabase-js'
+
+let supabaseJwks: ReturnType<typeof createRemoteJWKSet> | null = null
+
+export async function resolveAuthenticatedUser(token: string): Promise<{ user: User | null; error?: Error }> {
+  if (config.featureFlags.AUTH_LOCAL_JWT_VERIFY) {
+    try {
+      if (!supabaseJwks) supabaseJwks = createRemoteJWKSet(new URL(`${config.SUPABASE_URL}/auth/v1/.well-known/jwks.json`))
+      const { payload } = await jwtVerify(token, supabaseJwks, { requiredClaims: ['sub'] })
+      const sub = typeof payload.sub === 'string' ? payload.sub : null
+      if (!sub) throw new Error('JWT is missing sub')
+      return {
+        user: {
+          id: sub,
+          aud: typeof payload.aud === 'string' ? payload.aud : 'authenticated',
+          role: typeof payload.role === 'string' ? payload.role : 'authenticated',
+          email: typeof payload.email === 'string' ? payload.email : undefined,
+          app_metadata: typeof payload.app_metadata === 'object' && payload.app_metadata ? payload.app_metadata as User['app_metadata'] : {},
+          user_metadata: typeof payload.user_metadata === 'object' && payload.user_metadata ? payload.user_metadata as User['user_metadata'] : {},
+          created_at: typeof payload.created_at === 'string' ? payload.created_at : new Date(0).toISOString(),
+        },
+      }
+    } catch (error) {
+      logger.warn('auth.local_jwt_verify_failed_fallback', { error: error instanceof Error ? error.message : 'Unknown JWT error' })
+    }
+  }
+  const { data, error } = await supabase.auth.getUser(token)
+  return { user: data.user ?? null, error: error ?? undefined }
+}
 
 // Only these keys are copied into audit metadata. Anything else, including free text and contact details, is replaced.
 const auditSafeKeys = new Set([
@@ -30,17 +62,22 @@ export function auditBodySnapshot(body: unknown) {
 }
 
 export async function requireAuth(request: Request, response: Response, next: NextFunction) {
+  if (request.authUser && request.profile) return next()
   const token = request.headers.authorization?.replace(/^Bearer\s+/i, '')
   if (!token) return response.status(401).json({ error: 'Authentication required' })
 
-  const { data, error } = await supabase.auth.getUser(token)
-  if (error || !data.user) return response.status(401).json({ error: 'Invalid session' })
+  const resolved = await resolveAuthenticatedUser(token)
+  if (!resolved.user) return response.status(401).json({ error: 'Invalid session' })
+  const authUser = resolved.user
 
-  const { data: profile } = await supabase.from('profiles').select('id,role,full_name').eq('id', data.user.id).single()
-  request.authUser = data.user
+  const profile = config.featureFlags.AUTH_PROFILE_CACHE
+    ? await getCachedAuthProfile(authUser.id)
+    : (await supabase.from('profiles').select('id,role,full_name').eq('id', authUser.id).single()).data
+  request.authUser = authUser
   request.profile = profile ?? undefined
 
-  if (request.method !== 'GET' && request.method !== 'HEAD') {
+  if (!request.authAuditRegistered && request.method !== 'GET' && request.method !== 'HEAD') {
+    request.authAuditRegistered = true
     response.on('finish', () => {
       const offlineId = request.header('x-offline-mutation-id')
       if (offlineId) {
@@ -49,7 +86,7 @@ export async function requireAuth(request: Request, response: Response, next: Ne
             conflict_status: response.statusCode < 400 ? 'applied' : 'conflict',
             server_version: response.statusCode,
             updated_at: new Date().toISOString(),
-          }).eq('id', offlineId).eq('actor_id', data.user.id)
+          }).eq('id', offlineId).eq('actor_id', authUser.id)
           if (offlineError) logger.warn('offline_mutation.update_failed', { requestId: response.locals.requestId, error: offlineError.message })
         })().catch((offlineError: unknown) => {
           logger.warn('offline_mutation.update_failed', { requestId: response.locals.requestId, error: offlineError instanceof Error ? offlineError.message : String(offlineError) })
@@ -59,7 +96,7 @@ export async function requireAuth(request: Request, response: Response, next: Ne
       const after = auditBodySnapshot(request.body)
       void (async () => {
         const { error: auditError } = await supabase.from('audit_logs').insert({
-          actor_id: data.user.id,
+          actor_id: authUser.id,
           action: `${request.method.toLowerCase()} ${request.route?.path ?? request.path}`,
           entity_type: request.baseUrl.split('/').filter(Boolean).pop() ?? 'api',
           entity_id: typeof request.params.id === 'string' ? request.params.id : undefined,
@@ -78,13 +115,20 @@ export async function optionalAuth(request: Request, response: Response, next: N
   const token = request.headers.authorization?.replace(/^Bearer\s+/i, '')
   if (!token) return next()
 
-  const { data, error } = await supabase.auth.getUser(token)
-  if (error || !data.user) return response.status(401).json({ error: 'Invalid session' })
+  const resolved = await resolveAuthenticatedUser(token)
+  if (!resolved.user) return response.status(401).json({ error: 'Invalid session' })
 
-  const { data: profile } = await supabase.from('profiles').select('id,role,full_name').eq('id', data.user.id).single()
-  request.authUser = data.user
+  const profile = config.featureFlags.AUTH_PROFILE_CACHE
+    ? await getCachedAuthProfile(resolved.user.id)
+    : (await supabase.from('profiles').select('id,role,full_name').eq('id', resolved.user.id).single()).data
+  request.authUser = resolved.user
   request.profile = profile ?? undefined
   return next()
+}
+
+export function authenticatedRateLimitKey(request: Request, fallback: () => string): string {
+  if (!config.featureFlags.RATE_LIMIT_BY_USER) return fallback()
+  return request.authUser?.id ? `user:${request.authUser.id}` : `ip:${request.ip}`
 }
 
 export function requireRole(...roles: string[]) {

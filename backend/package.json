@@ -29,6 +29,7 @@
     "express": "^5.1.0",
     "express-rate-limit": "^8.1.0",
     "helmet": "^8.1.0",
+    "jose": "^6.2.18",
     "nodemailer": "^10.1.6",
     "pg": "^8.13.1",
     "rate-limit-redis": "^6.0.2",

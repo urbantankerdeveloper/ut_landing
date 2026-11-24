@@ -1,11 +1,9 @@
 import { Router } from 'express'
 import { z } from 'zod'
-import { requireAuth } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 import { logger } from '../lib/logger.js'
 
 const router = Router()
-router.use(requireAuth)
 const documentBucket = 'urban-tanker-documents'
 const maxUploadBytes = 10 * 1024 * 1024
 

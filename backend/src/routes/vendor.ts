@@ -1,13 +1,13 @@
 import { databaseFailure, failure } from '../lib/httpErrors.js'
 import { Router } from 'express'
-import { requireAuth, requireRole } from '../middleware/auth.js'
+import { requireRole } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 import { listWindow, sendList, type ListWindow } from '../lib/listParams.js'
 import { cachedCatalog } from '../services/catalogCache.js'
 import { config } from '../config.js'
 import { DEFAULT_VENDOR_SHARE_RATE, vendorAccrualPaise } from '../services/pricingMath.js'
 const exactCount = (range: ListWindow) => (range.mode === 'paged' ? { count: 'exact' as const } : undefined)
-const router = Router(); router.use(requireAuth, requireRole('vendor'))
+const router = Router(); router.use(requireRole('vendor'))
 type BookingServiceDetail = { serviceId: string; capacity?: string; waterType?: string; tankerCount?: string; serviceType?: string; quantity?: string; depth?: string; grade?: string; pump?: string; pickupLocation?: string; materialType?: string; details?: string; deliveryDate?: string; preferredTime?: string; location?: string }
 type BookingRecord = { id: string; reference: string; service_code: string; service_details?: BookingServiceDetail[] | null; address_text: string; latitude?: number | null; longitude?: number | null; quoted_amount_paise?: number | null; status: string; vendor_id?: string | null; vehicle_id?: string | null; driver_id?: string | null; created_at: string; scheduled_for?: string | null; order_group_reference?: string | null; order_group_size?: number | null }
 type RelatedRecord = { id: string; name?: string; registration_number?: string }

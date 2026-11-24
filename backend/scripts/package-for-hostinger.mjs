@@ -64,6 +64,7 @@ try {
   }
   writeFileSync(join(stageDirectory, 'package.json'), `${JSON.stringify(hostingerPackageJson, null, 2)}\n`)
   copyFileSync(packageLockPath, join(stageDirectory, 'package-lock.json'))
+  writeFileSync(join(stageDirectory, '.npmrc'), 'omit=dev\n')
   cpSync(distDirectory, join(stageDirectory, 'dist'), { recursive: true, filter: shouldIncludeDistPath })
   writeFileSync(join(stageDirectory, 'dist', 'server.cjs'), [
     "import('./server.js').catch((error) => {",

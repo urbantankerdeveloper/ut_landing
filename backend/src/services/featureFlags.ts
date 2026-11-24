@@ -16,6 +16,10 @@ export const defaultFeatureFlags = {
   address_geocoding_enabled: true,
   invoice_generation_enabled: false,
   wallet_enabled: false,
+  AUTH_LOCAL_JWT_VERIFY: false,
+  AUTH_PROFILE_CACHE: false,
+  REALTIME_ROOM_ROUTING: false,
+  RATE_LIMIT_BY_USER: false,
 } as const
 
 const overridesSchema = z.object({
@@ -34,6 +38,10 @@ const overridesSchema = z.object({
   address_geocoding_enabled: z.boolean().optional(),
   invoice_generation_enabled: z.boolean().optional(),
   wallet_enabled: z.boolean().optional(),
+  AUTH_LOCAL_JWT_VERIFY: z.boolean().optional(),
+  AUTH_PROFILE_CACHE: z.boolean().optional(),
+  REALTIME_ROOM_ROUTING: z.boolean().optional(),
+  RATE_LIMIT_BY_USER: z.boolean().optional(),
 }).strict()
 
 export type FeatureFlags = Record<keyof typeof defaultFeatureFlags, boolean>
