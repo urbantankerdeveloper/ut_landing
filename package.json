@@ -23,6 +23,7 @@
     "test:e2e:booking": "playwright test --config=playwright.booking.config.ts",
     "test:e2e:realtime": "playwright test --config=playwright.realtime.config.ts",
     "test:realtime:smoke": "node e2e/realtime-smoke.mjs",
+    "lighthouse:home": "lighthouse http://localhost:4173/ --preset=perf --throttling-method=devtools --only-categories=performance --form-factor=mobile --screenEmulation.mobile=true --chrome-flags=\"--headless --no-sandbox\" --output=json --output-path=stats/lighthouse-home.json",
     "reference": "node scripts/serve-reference.mjs",
     "reference:list": "node scripts/serve-reference.mjs --list"
   },
@@ -59,6 +60,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.6",
     "globals": "^17.12.0",
+    "lighthouse": "^13.6.0",
     "rollup-plugin-visualizer": "^7.1.1",
     "sass": "^1.86.0",
     "typescript": "~6.0.2",

@@ -7,6 +7,8 @@ const ASSET_CACHE = `urban-tanker-assets-${BUILD_ID}`
 // Lazily loaded route chunks are cached as they are used. Only the newest entries are kept.
 const ASSET_CACHE_LIMIT = 80
 const NETWORK_FIRST_PATHS = new Set(['/manifest.json', '/robots.txt', '/sitemap.xml'])
+const PUBLIC_GET_PATHS = new Set(['/api/config/flags', '/api/customer/services'])
+const NAVIGATION_TIMEOUT_MS = 3000
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(SHELL_CACHE).then((cache) => cache.addAll(SHELL_URLS.map((url) => new Request(url, { cache: 'reload' })))).then(() => self.skipWaiting()))
@@ -23,13 +25,31 @@ async function trimAssetCache(cache) {
 
 async function handleNavigation(request) {
   const cache = await caches.open(SHELL_CACHE)
-  try {
-    const response = await fetch(request)
-    if (response.ok) cache.put('/', response.clone()).catch(() => undefined)
+  const networkResponse = new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), NAVIGATION_TIMEOUT_MS)
+    fetch(request).then((response) => {
+      clearTimeout(timer)
+      if (response.ok) cache.put('/', response.clone()).catch(() => undefined)
+      resolve(response)
+    }).catch(() => {
+      clearTimeout(timer)
+      resolve(null)
+    })
+  })
+  const [response] = await Promise.all([
+    networkResponse,
+  ])
+  return response ?? ((await cache.match('/')) ?? Response.error())
+}
+
+async function handlePublicGet(request) {
+  const cache = await caches.open(SHELL_CACHE)
+  const cached = await cache.match(request)
+  const network = fetch(request).then((response) => {
+    if (response.ok) cache.put(request, response.clone()).catch(() => undefined)
     return response
-  } catch {
-    return (await cache.match('/')) ?? Response.error()
-  }
+  }).catch(() => null)
+  return cached ?? (await network) ?? Response.error()
 }
 
 function handleAsset(event) {
@@ -56,10 +76,18 @@ async function handleNetworkFirst(request) {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return
   const requestUrl = new URL(event.request.url)
+  if (PUBLIC_GET_PATHS.has(requestUrl.pathname)) return event.respondWith(handlePublicGet(event.request))
   if (requestUrl.origin !== self.location.origin) return
   if (event.request.mode === 'navigate') return event.respondWith(handleNavigation(event.request))
   if (requestUrl.pathname.startsWith('/assets/')) return event.respondWith(handleAsset(event))
   if (NETWORK_FIRST_PATHS.has(requestUrl.pathname)) event.respondWith(handleNetworkFirst(event.request))
+})
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    (self.registration.navigationPreload ? self.registration.navigationPreload.enable() : Promise.resolve())
+      .then(() => self.clients.claim()),
+  )
 })
 
 self.addEventListener('push', (event) => {

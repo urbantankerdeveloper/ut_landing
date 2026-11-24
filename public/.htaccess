@@ -24,6 +24,37 @@ RewriteRule ^ index.html [L]
   Header always set Content-Security-Policy "default-src 'self'; script-src 'self' https://checkout.razorpay.com https://maps.googleapis.com; style-src 'self'; font-src 'self'; img-src 'self' data: blob: https://*.tile.openstreetmap.org https://*.razorpay.com https://<SUPABASE_REF>.supabase.co https://*.googleapis.com https://*.gstatic.com https://*.ggpht.com; connect-src 'self' __API_ORIGIN__ __REALTIME_WS_ORIGIN__ https://nominatim.openstreetmap.org https://*.razorpay.com https://<SUPABASE_REF>.supabase.co https://maps.googleapis.com; frame-src https://*.razorpay.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 </IfModule>
 
+<IfModule mod_brotli.c>
+  AddOutputFilterByType BROTLI_COMPRESS text/html text/plain text/xml text/css text/javascript application/javascript application/json application/xml application/font-woff2 image/svg+xml
+</IfModule>
+
+<IfModule mod_deflate.c>
+  <IfModule !mod_brotli.c>
+    AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/json application/xml application/font-woff2 image/svg+xml
+  </IfModule>
+</IfModule>
+
+<IfModule mod_headers.c>
+  Header append Vary Accept-Encoding
+</IfModule>
+
+# Prefer precompressed assets; the build creates matching .br and .gz siblings.
+RewriteCond %{HTTP:Accept-Encoding} br
+RewriteCond %{REQUEST_FILENAME}\.br -f
+RewriteRule ^(.+\.(?:js|css|svg|html|json|txt|xml|webmanifest))$ $1.br [L]
+RewriteCond %{HTTP:Accept-Encoding} gzip
+RewriteCond %{REQUEST_FILENAME}\.gz -f
+RewriteRule ^(.+\.(?:js|css|svg|html|json|txt|xml|webmanifest))$ $1.gz [L]
+
+<FilesMatch "\.br$">
+  Header set Content-Encoding br
+  Header set Vary Accept-Encoding
+</FilesMatch>
+<FilesMatch "\.gz$">
+  Header set Content-Encoding gzip
+  Header set Vary Accept-Encoding
+</FilesMatch>
+
 <IfModule mod_expires.c>
   ExpiresActive On
   ExpiresByType text/html "access plus 0 seconds"
@@ -38,5 +69,11 @@ RewriteRule ^ index.html [L]
 <IfModule mod_headers.c>
   <If "%{REQUEST_URI} =~ m#^/assets/#">
     Header set Cache-Control "public, max-age=31536000, immutable"
+  </If>
+</IfModule>
+
+<IfModule mod_headers.c>
+  <If "%{REQUEST_URI} =~ m#^/(favicon\.ico|favicon\.png|urban-tanker-mark-\d+\.png|urban-tanker-wordmark\.webp|.*\.(?:ico|png|webp|avif|svg))$#">
+    Header set Cache-Control "public, max-age=604800"
   </If>
 </IfModule>

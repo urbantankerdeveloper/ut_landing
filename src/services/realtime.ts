@@ -1,4 +1,4 @@
-import { io, type Socket } from 'socket.io-client'
+import type { Socket } from 'socket.io-client'
 import { useAuthStore } from '../stores/authStore'
 import { useRealtimeStore } from '../stores/realtimeStore'
 
@@ -60,28 +60,33 @@ export class VendorRealtimeClient {
       return
     }
     window.removeEventListener('online', this.handleOnline)
-    const socket = io(this.url, {
-      auth: (callback) => callback({ token: useAuthStore.getState().accessToken }),
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelayMax: 10_000,
-    })
-    this.socket = socket
-    socket.onAny((type, payload) => this.onMessage({ type, payload }))
-    socket.on('connect', () => {
-      useRealtimeStore.getState().setConnected(true)
-      this.bookingIds.forEach((bookingId) => socket.emit('booking:join', bookingId))
-      if (this.disconnectedAt !== null) {
-        this.onMessage({ type: SOCKET_RECONNECTED, payload: { since: this.disconnectedAt } })
-        this.disconnectedAt = null
-      }
-    })
-    socket.on('disconnect', () => {
-      this.disconnectedAt = Date.now()
-      useRealtimeStore.getState().setConnected(false)
-    })
-    socket.on('connect_error', () => {
-      if (!useAuthStore.getState().accessToken) this.disconnect()
+    void import('socket.io-client').then(({ io }) => {
+      if (this.socket) return
+      const socket = io(this.url, {
+        auth: (callback) => callback({ token: useAuthStore.getState().accessToken }),
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelayMax: 10_000,
+      })
+      this.socket = socket
+      socket.onAny((type, payload) => this.onMessage({ type, payload }))
+      socket.on('connect', () => {
+        useRealtimeStore.getState().setConnected(true)
+        this.bookingIds.forEach((bookingId) => socket.emit('booking:join', bookingId))
+        if (this.disconnectedAt !== null) {
+          this.onMessage({ type: SOCKET_RECONNECTED, payload: { since: this.disconnectedAt } })
+          this.disconnectedAt = null
+        }
+      })
+      socket.on('disconnect', () => {
+        this.disconnectedAt = Date.now()
+        useRealtimeStore.getState().setConnected(false)
+      })
+      socket.on('connect_error', () => {
+        if (!useAuthStore.getState().accessToken) this.disconnect()
+      })
+    }).catch((error) => {
+      console.warn('Realtime Socket.IO client could not be loaded.', error)
     })
   }
   joinBooking(bookingId: string) { this.bookingIds.add(bookingId); this.socket?.emit('booking:join', bookingId) }

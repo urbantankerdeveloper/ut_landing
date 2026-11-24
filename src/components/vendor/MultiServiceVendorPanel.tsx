@@ -12,17 +12,20 @@ function serviceTitle(item: MultiServiceOffer['items'][number]) {
 
 export function MultiServiceVendorPanel() {
   const queryClient = useQueryClient()
+  const fallbackInterval = import.meta.env.VITE_SOCKET_DRIVEN_REFRESH === 'true' ? 120_000 : 30_000
   const offers = useQuery({
     queryKey: offersKey,
     queryFn: vendorApi.multiServiceOffers,
     enabled: !demoDataEnabled,
-    refetchInterval: 30_000,
+    refetchInterval: fallbackInterval,
+    refetchIntervalInBackground: false,
   })
   const fulfilments = useQuery({
     queryKey: fulfilmentsKey,
     queryFn: vendorApi.multiServiceFulfilments,
     enabled: !demoDataEnabled,
-    refetchInterval: 30_000,
+    refetchInterval: fallbackInterval,
+    refetchIntervalInBackground: false,
   })
   const refresh = () => Promise.all([
     queryClient.invalidateQueries({ queryKey: offersKey }),

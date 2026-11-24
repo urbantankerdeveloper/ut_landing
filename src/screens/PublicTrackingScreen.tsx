@@ -12,7 +12,8 @@ const statuses = ['pending_vendor', 'vendor_assigned', 'accepted', 'en_route', '
 
 export default function PublicTrackingScreen({ token }: { token: string }) {
   const [inBrowser, setInBrowser] = useState(() => !isMobileUserAgent(navigator.userAgent))
-  const query = useQuery({ queryKey: ['public-tracking', token], queryFn: () => customerApi.publicTracking(token), refetchInterval: PUBLIC_TRACKING_POLL_INTERVAL_MS, enabled: inBrowser })
+  const fallback = import.meta.env.VITE_SOCKET_DRIVEN_REFRESH === 'true' ? 120_000 : PUBLIC_TRACKING_POLL_INTERVAL_MS
+  const query = useQuery({ queryKey: ['public-tracking', token], queryFn: () => customerApi.publicTracking(token), refetchInterval: fallback, refetchIntervalInBackground: false, enabled: inBrowser })
   if (!inBrowser) return <TrackingChooser token={token} onBrowser={() => setInBrowser(true)} />
   if (query.isLoading) return <TrackingShell><p role="status">{c.loading}</p></TrackingShell>
   if (query.isError || !query.data) return <TrackingShell><h1>{c.unavailable.title}</h1><p>{c.unavailable.body}</p></TrackingShell>

@@ -81,7 +81,6 @@ export default function AdminReportsLiveScreen({ onNotice }: Props) {
   async function exportExcel() {
     setExportingExcel(true)
     try {
-      const { downloadXlsx } = await import('../utils/xlsx')
       const vendorReport = type === 'vendors'
       const headers = vendorReport ? [...c.reportsLive.vendorCsvHeaders] : [...c.reportsLive.csvHeaders]
       const exportRows = vendorReport
@@ -101,14 +100,20 @@ export default function AdminReportsLiveScreen({ onNotice }: Props) {
           row.created_at ?? '',
         ])
       const { reportsLive } = c
-      await downloadXlsx(
-        `urban-tanker-${type}-report-${to}.xlsx`,
-        `${reportsLive.typeOptions[type]} report`,
-        `${reportsLive.from}: ${from} ${reportsLive.to.toLowerCase()}: ${to}`,
-        headers,
-        exportRows,
-        vendorReport ? 4 : 6,
-      )
+      if (import.meta.env.VITE_ADMIN_EXPORT_LIGHT === 'true') {
+        const { downloadCsv } = await import('../utils/csv')
+        downloadCsv(`urban-tanker-${type}-report-${to}.csv`, headers, exportRows)
+      } else {
+        const { downloadXlsx } = await import('../utils/xlsx')
+        await downloadXlsx(
+          `urban-tanker-${type}-report-${to}.xlsx`,
+          `${reportsLive.typeOptions[type]} report`,
+          `${reportsLive.from}: ${from} ${reportsLive.to.toLowerCase()}: ${to}`,
+          headers,
+          exportRows,
+          vendorReport ? 4 : 6,
+        )
+      }
       onNotice(reportsLive.notices.exported)
     } catch {
       onNotice(c.reportsLive.notices.excelExportFailed)
