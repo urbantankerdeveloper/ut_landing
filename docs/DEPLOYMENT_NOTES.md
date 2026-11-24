@@ -26,6 +26,10 @@ Hosting/provider environments (not source files) supply Supabase URL/service key
 6. Smoke-test customer/vendor/admin/dispatcher roles and required notification/payment/map flows in staging before production rollout.
 7. Release signed mobile builds separately; validate the actual Admin App build against deployed endpoints and feature flags.
 
+## Hostinger static-asset MIME troubleshooting
+
+The production build includes explicit MIME mappings in `dist/.htaccess` for JavaScript, CSS, JSON, the web manifest, fonts, and images. Upload the **contents** of `dist/` (including `.htaccess`) directly into Hostinger's `public_html`; do not upload the `dist` folder itself. In DevTools Network, verify that `.js`/`.mjs` responses use `text/javascript`, `.css` uses `text/css`, and `manifest.json` returns valid JSON with `application/json`. If the manifest still reports a syntax error or assets return `text/plain`, check that the requested file body is the built asset rather than a Hostinger error page or stale deployment, and confirm no other `.htaccess` overrides these MIME rules.
+
 ## Not verified
 
 Current hosting state, DNS/SSL, production health, backups, environment values, CI runs, live Razorpay/SMS/email/push, real GPS, app-store builds, and deployment rollback were not accessed or changed.
