@@ -18,6 +18,7 @@ if (!existsSync(join(distDirectory, 'server.js'))) throw new Error('Build did no
 
 const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'))
 const packageLock = JSON.parse(readFileSync(packageLockPath, 'utf8'))
+if (packageJson.main !== 'dist/server.cjs') throw new Error('package.json main must point to dist/server.cjs.')
 if (!packageJson.dependencies?.express) throw new Error('Express must be a direct dependency in package.json.')
 if (packageLock.packages?.['']?.dependencies?.express !== packageJson.dependencies.express) {
   throw new Error('package-lock.json is out of sync with the direct Express dependency.')
@@ -66,13 +67,12 @@ try {
   copyFileSync(packageLockPath, join(stageDirectory, 'package-lock.json'))
   writeFileSync(join(stageDirectory, '.npmrc'), 'omit=dev\n')
   cpSync(distDirectory, join(stageDirectory, 'dist'), { recursive: true, filter: shouldIncludeDistPath })
-  writeFileSync(join(stageDirectory, 'dist', 'server.cjs'), [
-    "import('./server.js').catch((error) => {",
-    "  console.error('Backend startup failed:', error)",
-    '  process.exit(1)',
-    '})',
-    '',
-  ].join('\n'))
+  writeFileSync(join(stageDirectory, 'dist', 'server.cjs'), "import('./server.js').catch(err => { console.error('Backend startup failed:', err); process.exit(1) })\n")
+  for (const requiredPath of ['package.json', 'package-lock.json', 'dist/server.cjs']) {
+    if (!existsSync(join(stageDirectory, requiredPath))) {
+      throw new Error(`Required Hostinger package file is missing: ${requiredPath}`)
+    }
+  }
   assertNoExcludedFiles(stageDirectory)
 
   if (process.platform === 'win32') {
@@ -109,7 +109,7 @@ try {
   }
   copyFileSync(temporaryArchivePath, archivePath)
   console.log(`Hostinger package created: ${archivePath}`)
-  console.log('Archive root: package.json, package-lock.json, dist/')
+  console.log('Archive root: package.json, package-lock.json, dist/ (including dist/server.cjs)')
 } finally {
   rmSync(temporaryDirectory, { recursive: true, force: true })
 }
