@@ -58,6 +58,18 @@ The current topology is split: the frontend is served by Hostinger from `public_
 - Node 22 is pinned in `.nvmrc`, `engines`, and `render.yaml`.
 - CI (`.github/workflows/ci.yml`) runs lint, tests, both builds, and a high-severity production audit for both packages.
 
+## Hostinger deploy
+
+The backend can run as a Node.js application on Hostinger LiteSpeed. Create the upload archive from the repository root with `npm run package:hostinger --prefix backend`; it contains `package.json`, `package-lock.json`, and `dist/` at the archive root.
+
+In hPanel, configure the Node.js application to use Node 22, set its application root to the extracted package directory, and set **Entry file** to `dist/server.cjs`. Install production dependencies from that directory with:
+
+```sh
+npm ci --omit=dev
+```
+
+Set the backend environment variables in the hPanel application settings. Use `backend/.env.example` as the variable reference, supply production credentials through hPanel only, and do not upload `.env` files or commit secrets. Set the port as required by the hPanel Node.js application environment.
+
 ## Maps
 
 Google Maps is the primary web map when `VITE_GOOGLE_MAPS_API_KEY` is

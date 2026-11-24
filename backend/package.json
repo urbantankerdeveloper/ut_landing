@@ -1,6 +1,7 @@
 {
   "name": "urban-tanker-api",
   "private": true,
+  "main": "dist/server.cjs",
   "type": "module",
   "engines": {
     "node": ">=22"
