@@ -1,4 +1,5 @@
 import { apiFetch } from './client'
+import { API_URL } from '../lib/apiBase'
 
 export type AdminOrder = { id: string; reference?: string; service: string; vendor?: string; location: string; status: string; amount: number }
 export type AdminDispatchSettings = { manualAssignmentModeEnabled: boolean }
@@ -131,7 +132,7 @@ export const adminApi = {
   refundPayment: (id: string, amount?: number) => apiFetch<unknown>(`/payment/payments/${id}/refund`, { method: 'POST', body: JSON.stringify(amount ? { amount } : {}) }),
   systemHealth: () => apiFetch<AdminSystemHealth>('/admin/system/health'),
   analyticsSummary: (days = 30) => apiFetch<AdminAnalyticsSummary>(`/analytics/summary?days=${days}`),
-  analyticsExport: (from: string, to: string) => `${import.meta.env.VITE_API_BASE_URL ?? '/api'}/analytics/export?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&format=csv`,
+  analyticsExport: (from: string, to: string) => `${API_URL}/analytics/export?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&format=csv`,
   notifications: () => apiFetch<AdminNotification[]>('/admin/notifications'),
   markNotificationRead: (id: string) => apiFetch<AdminNotification>(`/admin/notifications/${id}/read`, { method: 'PATCH' }),
 }

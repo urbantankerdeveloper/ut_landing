@@ -1,8 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useQueryClient, type QueryKey } from '@tanstack/react-query'
+import { SOCKET_URL } from '../lib/apiBase'
 import { subscribeToRealtime } from '../services/realtime'
-
-const realtimeUrl = import.meta.env.VITE_REALTIME_URL ?? (import.meta.env.PROD ? window.location.origin : 'http://localhost:8080')
 
 const eventQueryPrefixes: Record<string, string[][]> = {
   'booking.created': [['customer', 'bookings'], ['admin', 'orders'], ['admin', 'dashboard-summary']],
@@ -34,7 +33,7 @@ export function useRealtimeInvalidation(queryKey: QueryKey, onMessage?: (message
     queryKeyRef.current = queryKey
     onMessageRef.current = onMessage
   }, [queryKey, onMessage])
-  useEffect(() => subscribeToRealtime(realtimeUrl, (message) => {
+  useEffect(() => subscribeToRealtime(SOCKET_URL, (message) => {
     if (queryMatchesEvent(queryKeyRef.current, message.type)) void queryClient.invalidateQueries({ queryKey: queryKeyRef.current })
     onMessageRef.current?.(message)
   }), [queryClient, queryKeyIdentity])

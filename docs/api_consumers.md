@@ -8,7 +8,7 @@ Read-only audit, 2026-11-03. Sources:
 
 ## Conventions
 
-- Paths are relative to the API base URL, which is `/api` in both clients (`VITE_API_BASE_URL` on web, `API_BASE_URL` default `https://urban-tanker-backend.onrender.com/api` on Flutter). `/customer/orders` means `/api/customer/orders`.
+- Paths are relative to the API base URL, which is `/api` in both clients (web `API_URL` in `src/lib/apiBase.ts`; Flutter `API_BASE_URL` defaults to `https://api.urbantanker.in/api`). `/customer/orders` means `/api/customer/orders`.
 - "Pagination" is what the client sends or reads. "Caching/polling" covers client-side caches, timers and refresh loops.
 - The backend has **no** `Cache-Control`, `ETag` handling, or 429/`Retry-After` handling on API responses; neither client uses `If-None-Match` today.
 
@@ -290,7 +290,7 @@ Connection lifecycle: `io(url, { auth: callback returning accessToken, reconnect
 
 ### Cross-cutting
 
-- **API base URL config.** `import.meta.env.VITE_API_BASE_URL`, falling back to `/api` (api/client.ts:9). The same expression is repeated in services/analytics.ts:16 and api/admin.ts:68. Realtime URL comes from `VITE_REALTIME_URL`, falling back to window.location.origin in production or http://localhost:8080 otherwise (hooks/useRealtimeInvalidation.ts:5, components/LiveTrackingMap.tsx:24). Other env var names referenced: VITE_VAPID_PUBLIC_KEY (hooks/useCustomerData.ts:36), VITE_RAZORPAY_KEY_ID (hooks/useFrontendFeatures.ts:27), VITE_ENABLE_GOOGLE_SIGN_IN (screens/LoginScreen.tsx:13; the Google button is a no-op). No env values were read.
+- **API base URL config.** The web client reads `VITE_API_BASE_URL` once in `src/lib/apiBase.ts`, then derives `API_URL` and `SOCKET_URL`. Flutter reads `API_BASE_URL` once in `lib/services/api_base.dart` and derives the Socket.IO origin from it. Other env var names referenced: VITE_VAPID_PUBLIC_KEY (hooks/useCustomerData.ts:36), VITE_RAZORPAY_KEY_ID (hooks/useFrontendFeatures.ts:27), VITE_ENABLE_GOOGLE_SIGN_IN (screens/LoginScreen.tsx:13; the Google button is a no-op). No env values were read.
 - **Fetch wrapper.** `apiFetch<T>(path, init, retry)` in src/api/client.ts:82, with `apiFetchOnce` at client.ts:105. The request is ``fetch(`${API_BASE_URL}${path}`, { ...init, headers, credentials: 'include', signal })`` at client.ts:112. Raw refresh fetch at client.ts:43, analytics fetch at services/analytics.ts:16, geocoding at services/geocoding.ts:33, upload PUT at hooks/useFrontendFeatures.ts:39.
 - **Credentials and headers.** `credentials: 'include'` on every apiFetch call (client.ts:112), refresh (client.ts:45) and analytics (services/analytics.ts:19). The access token is held in memory and sent as `Authorization: Bearer` (client.ts:18-21, 110-111). authStore persists only `user` to sessionStorage (stores/authStore.ts:22). **x-client-platform header: none found in src.** Other headers: `Content-Type: application/json` when body is a string (client.ts:109). Offline replay adds x-offline-mutation-id and x-client-version (services/offlineMutationQueue.ts:173). Upload PUT adds x-upsert: false (hooks/useFrontendFeatures.ts:39).
 - **Timeouts and retries.** 12 s timeout per attempt (client.ts:10, 25). Idempotent GET retries up to 3 attempts on network or timeout errors with 800 ms then 1600 ms backoff (client.ts:12-13, 94-96). Non-GET never retried by apiFetch. React Query retries queries only on HTTP 5xx, twice (providers/AppProviders.tsx:6-7). Mutations are not retried. On 401, a single-flight refresh runs and the request is retried once (client.ts:38-60, 113-115); /auth/* paths are excluded.
@@ -553,7 +553,7 @@ Notification inbox for customer, vendor, admin and dispatcher workspaces, plus r
 ### HTTP client, base URL and headers
 
 - Client: `package:http` `http.Client`, wrapped by `ApiCore` (`lib/services/api/api_core.dart:14-41`). `ApiClient` (`lib/services/api_client.dart:27-40`) is the facade used by screens and providers.
-- Base URL: `String.fromEnvironment('API_BASE_URL', defaultValue: 'https://urban-tanker-backend.onrender.com/api')`, trailing slash removed (`lib/services/api_client.dart:49-53`). Socket URL: `SOCKET_URL` dart-define, else the base URL minus `/api` (`lib/app/app_controller.dart:417-422`). Push: `ONESIGNAL_APP_ID` dart-define (`lib/app/app_controller.dart:57-61`).
+- Base URL: `API_BASE_URL` dart-define, defaulting to `https://api.urbantanker.in/api` (`lib/services/api_base.dart`). Socket.IO uses the URL origin derived from that same value. Push: `ONESIGNAL_APP_ID` dart-define.
 - Headers on every backend request (`lib/services/api/api_core.dart:233-236`): `Content-Type` (application/json, or image/jpeg for the selfie), `X-Client-Platform: mobile`, and `Authorization: Bearer <access token>` when a token is stored. The app does send `X-Client-Platform: mobile`. The server depends on it: `refreshTokenForClient` returns `refreshToken` in the JSON body only for `mobile` (`ut_landing/backend/src/routes/auth.ts:53-54`), so without it the app would have no refresh token.
 - The signed-URL PUT (`lib/services/api/vendor_api.dart:285-291`) sends no bearer and no X-Client-Platform header.
 - Timeouts: 20 s per request by default (`api_core.dart:106-110`); 30 s for the file PUT (`vendor_api.dart:290`). A request that runs past 3 s sets `slowRequest`, which drives a banner (`api_core.dart:24, 112-126`; `lib/app/app.dart:95-99`).

@@ -38,24 +38,26 @@ There is no incremental database update command. Do not run the reset against an
 
 ## Production deployment
 
-The current topology is split: the frontend is served by Hostinger from `public_html`, and the API runs on Render. Hostinger is planned to host the full deployment later, so the API is configured only through environment variables and can move without code changes.
+The frontend is served by Hostinger from `public_html`, and the backend API is available at `https://api.urbantanker.in`. Both web and Flutter clients use this API origin by default; their configuration supports switching back to Render if rollback is needed.
 
 **Frontend (Hostinger, `public_html`)**
 
 - Build with `npm ci` then `npm run build` (also available as `npm run build:hostinger`). Upload the contents of `dist/` to `public_html`, including the generated `.htaccess`.
-- `.htaccess` (from `public/`) provides the single-page-app fallback for paths such as `/track/<token>`, the security headers, and the Content-Security-Policy. Its `connect-src` names the Render API origin; if the API origin changes, update `.htaccess` and `.env.production` together.
-- `.env.production` points `VITE_API_BASE_URL` and `VITE_REALTIME_URL` at the Render origin. These values are compiled into the bundle, so rebuild after any change.
+- `.htaccess` (from `public/`) provides the single-page-app fallback for paths such as `/track/<token>`, security headers, and the Content-Security-Policy. Its `connect-src` API and WebSocket origins are generated from `VITE_API_BASE_URL`.
+- `.env.production` sets `VITE_API_BASE_URL=https://api.urbantanker.in`. The web app derives both its `/api` HTTP base and Socket.IO origin from this value. Rebuild after changing it.
+- To roll the web app back to Render, set `VITE_API_BASE_URL=https://urban-tanker-backend.onrender.com` and rebuild.
 - The `public_html/` folder in the repository is the legacy design reference site. It is not part of the React build and is kept for later verification.
 
-**API (Render, `render.yaml`)**
+**API (Hostinger Node.js, `api.urbantanker.in`)**
 
-- The blueprint builds `backend/` with `npm ci && npm run build` and starts it with `npm start`. Health check: `GET /health` (process) and `GET /health/ready` (database).
-- Secrets are entered in the Render dashboard (`sync: false` in `render.yaml`), never committed. Set `FRONTEND_ORIGIN` to the HTTPS Hostinger origin, and `CORS_ORIGINS` for any extra origin such as the `www` host.
+- Deploy the backend package described in [Hostinger deploy](#hostinger-deploy). Health check: `GET /health` (process) and `GET /health/ready` (database).
+- Set `FRONTEND_ORIGIN=https://www.urbantanker.in` and include the apex website origin `https://urbantanker.in` in `CORS_ORIGINS`. `FRONTEND_ORIGIN` is also used to generate public tracking links, so keep it on the website domain, not the API host.
+- Enter production secrets in hPanel only; never commit them. The Render blueprint and manual-deploy workflow remain available as legacy rollback infrastructure.
 - The server refuses to start in production when `FRONTEND_ORIGIN` is not HTTPS, when `USE_DEFAULT_VERIFICATION_CODE` is `true`, or when `SUPABASE_DB_URL` is set without `DB_SSL_CA`. Get the CA certificate from the Supabase dashboard and paste it into `DB_SSL_CA` with `\n` for line breaks.
-- The refresh cookie is `SameSite=None; Secure` in production so it works across the Hostinger and Render origins. Browsers that block third-party cookies can still drop it. A same-site API subdomain (for example `api.<your-domain>` pointed at Render) removes that risk and is the recommended next step.
+- The refresh cookie is `SameSite=None; Secure` in production so it works across the website and API subdomain.
 - Scale out only when load needs it. Each API instance must set the same `REDIS_URL`, which shares Socket.io rooms and rate limits across instances. Without it the API runs as one instance, and the server logs a `scaling.single_instance` warning in production. Background sweeps are guarded by a database advisory lock, so they run on one instance per cycle.
 - Socket.io clients fall back to HTTP long-polling, and polling needs sticky sessions at the load balancer. Either enable sticky sessions, or set the client to WebSocket-only transport before running more than one instance.
-- Node 22 is pinned in `.nvmrc`, `engines`, and `render.yaml`.
+- Node 22 is pinned in `.nvmrc`, `engines`, and the deployment configuration.
 - CI (`.github/workflows/ci.yml`) runs lint, tests, both builds, and a high-severity production audit for both packages.
 
 ## Hostinger deploy

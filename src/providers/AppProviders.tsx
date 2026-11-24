@@ -5,6 +5,7 @@ import { customerApi } from '../api/customer'
 import { vendorApi } from '../api/vendor'
 import { configApi } from '../api/config'
 import { ToastHost } from '../components/ToastHost'
+import { SOCKET_URL } from '../lib/apiBase'
 import { SOCKET_RECONNECTED, subscribeToRealtime } from '../services/realtime'
 import { useAuthStore } from '../stores/authStore'
 import { useRealtimeNotificationStore } from '../stores/realtimeNotificationStore'
@@ -18,8 +19,6 @@ import type { WorkspaceRole } from '../stores/navigationStore'
 
 // Network and timeout failures are retried inside apiFetch for GETs, so the query layer only retries server errors.
 const retryTransientFailures = (failureCount: number, error: Error) => failureCount < 2 && error instanceof ApiError && error.status >= 500
-const realtimeUrl = import.meta.env.VITE_REALTIME_URL ?? (import.meta.env.PROD ? window.location.origin : 'http://localhost:8080')
-
 // apiFetch already toasts API and network failures. These handlers cover everything else, such as a thrown parse error or a bug in a query function.
 function reportUnhandled(error: unknown) {
   if (!wasReported(error)) notifyError(describeError(error))
@@ -50,7 +49,7 @@ function useGlobalRealtimeNotices() {
   const hasHydrated = useAuthStore((state) => state.hasHydrated)
   useEffect(() => {
     if (!hasHydrated || !accessToken || (role !== 'customer' && role !== 'vendor')) return
-    return subscribeToRealtime(realtimeUrl, (message) => {
+    return subscribeToRealtime(SOCKET_URL, (message) => {
       if (message.type === SOCKET_RECONNECTED) {
         const since = Number((message.payload as { since?: unknown } | null)?.since)
         void reconcileMissedNotifications(role, since)
