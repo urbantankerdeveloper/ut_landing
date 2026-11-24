@@ -1,7 +1,7 @@
 import { databaseFailure } from '../lib/httpErrors.js'
 import { Router, type Request, type Response } from 'express'
 import { z } from 'zod'
-import { requireAuth, requireRole } from '../middleware/auth.js'
+import { requireRole } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 import { emitBookingLifecycleEvent, emitRealtime, emitRealtimeToBooking, emitRealtimeToUser, emitRealtimeToVendor } from '../services/realtime.js'
 import { notifyCustomer } from '../services/customerNotifications.js'
@@ -15,9 +15,14 @@ import { deliveryVerificationMethod } from '../services/deliveryVerification.js'
 import { listWindow, sendList, type ListWindow } from '../lib/listParams.js'
 import { config } from '../config.js'
 import { createInvoiceIfEligible } from '../services/invoices.js'
+import { getCachedVendorId, invalidateAuthVendor } from '../services/authCache.js'
 const exactCount = (range: ListWindow) => (range.mode === 'paged' ? { count: 'exact' as const } : undefined)
-const router = Router(); router.use(requireAuth, requireRole('vendor'))
-async function vendorId(userId: string) { const { data } = await supabase.from('vendors').select('id').eq('owner_profile_id', userId).single(); return data?.id }
+const router = Router(); router.use(requireRole('vendor'))
+async function vendorId(userId: string) {
+  if (config.featureFlags.AUTH_PROFILE_CACHE) return getCachedVendorId(userId)
+  const { data } = await supabase.from('vendors').select('id').eq('owner_profile_id', userId).single()
+  return data?.id
+}
 function ownedStoragePath(path: string, userId: string) { return path.startsWith(`${userId}/`) && !path.includes('..') }
 const maxDeliveryOtpAttempts = 5
 router.get('/profile', async (request, response) => {

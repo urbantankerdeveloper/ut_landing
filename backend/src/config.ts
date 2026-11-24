@@ -95,6 +95,7 @@ const schema = z.object({
   HTTP_KEEP_ALIVE_TIMEOUT_MS: z.coerce.number().int().positive().default(65_000),
   HTTP_HEADERS_TIMEOUT_MS: z.coerce.number().int().positive().default(66_000),
   HTTP_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  EXTERNAL_FETCH_TIMEOUT_MS: z.coerce.number().int().positive().default(8_000),
   SLOW_REQUEST_MS: z.coerce.number().int().nonnegative().default(800),
   CATALOG_CACHE_TTL_SECONDS: z.coerce.number().int().nonnegative().default(60),
   APPLIED_GST_PERCENTAGE: z.coerce.number({ error: 'APPLIED_GST_PERCENTAGE must be a number from 0 to 100 (see backend/.env.example)' }).min(0).max(100).default(18),

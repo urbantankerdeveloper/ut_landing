@@ -5,8 +5,20 @@ import { databasePool } from '../database.js'
 import { runAnalyticsRetentionSweep } from '../routes/analytics.js'
 import { runPaymentReconciliationSweep } from './paymentReconciliation.js'
 import { runMultiServiceOrderSweep } from '../routes/multiServiceOrders.js'
-export async function runReminderSweep() { const cutoff = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); const { count, error } = await supabase.from('bookings').select('id', { count: 'exact', head: true }).eq('status', 'accepted').lte('scheduled_for', cutoff); if (error) throw new Error(`Reminder sweep failed: ${error.message}`); return count ?? 0 }
-export async function runDocumentExpirySweep() { const cutoff = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10); const { count, error } = await supabase.from('documents').select('id', { count: 'exact', head: true }).lte('expires_on', cutoff); if (error) throw new Error(`Document expiry sweep failed: ${error.message}`); return count ?? 0 }
+export async function runReminderSweep() {
+  const cutoff = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+  const { count, error } = await supabase.from('bookings').select('id', { count: 'exact', head: true }).eq('status', 'accepted').lte('scheduled_for', cutoff)
+  if (error) throw new Error(`Reminder sweep failed: ${error.message}`)
+  logger.info('background_jobs.reminder_sweep_no_action', { TODO: 'Implement reminder delivery', rowsFound: count ?? 0 })
+  return count ?? 0
+}
+export async function runDocumentExpirySweep() {
+  const cutoff = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const { count, error } = await supabase.from('documents').select('id', { count: 'exact', head: true }).lte('expires_on', cutoff)
+  if (error) throw new Error(`Document expiry sweep failed: ${error.message}`)
+  logger.info('background_jobs.document_expiry_sweep_no_action', { TODO: 'Implement document expiry notifications', rowsFound: count ?? 0 })
+  return count ?? 0
+}
 export async function runStorageCleanupSweep() {
   const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
   const { data, error: scanError } = await supabase.from('documents').select('id,object_key,created_at').eq('verification', 'rejected').lt('created_at', cutoff).limit(100)

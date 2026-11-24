@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { requireAuth, requireRole } from '../middleware/auth.js'
+import { requireRole } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 import { analyticsEventSchema, summarizeAnalyticsEvents } from '../lib/analytics.js'
 import { config } from '../config.js'
@@ -10,18 +10,20 @@ const router = Router()
 const analyticsEventLimit = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:analytics:', 'open'), passOnStoreError: true, message: { error: 'Too many analytics events. Try again later.' } })
 
 router.post('/events', analyticsEventLimit, async (request, response) => {
-  const parsed = analyticsEventSchema.safeParse(request.body)
-  if (!parsed.success) return response.status(400).json({ error: 'Invalid analytics event' })
-  const { error } = await supabase.from('analytics_events').insert({
-    event_name: parsed.data.eventName,
-    session_id: parsed.data.sessionId,
-    properties: parsed.data.properties,
+  const body = request.body as { events?: unknown; eventName?: unknown }
+  const candidates = Array.isArray(body.events) ? body.events : [body]
+  const parsed = candidates.map((candidate) => analyticsEventSchema.safeParse(candidate))
+  if (parsed.length === 0 || parsed.some((result) => !result.success)) return response.status(400).json({ error: 'Invalid analytics event' })
+  const rows = parsed.map((result) => {
+    if (!result.success) throw new Error('Invalid analytics event')
+    return { event_name: result.data.eventName, session_id: result.data.sessionId, properties: result.data.properties }
   })
+  const { error } = await supabase.from('analytics_events').insert(rows)
   if (error) return response.status(503).json({ error: 'Analytics storage unavailable' })
   response.status(204).send()
 })
 
-router.get('/summary', requireAuth, requireRole('admin'), async (request, response) => {
+router.get('/summary', requireRole('admin'), async (request, response) => {
   const days = Math.min(90, Math.max(1, Number(request.query.days ?? 30)))
   const to = typeof request.query.to === 'string' ? new Date(request.query.to) : new Date()
   const from = typeof request.query.from === 'string' ? new Date(request.query.from) : new Date(to.getTime() - days * 24 * 60 * 60 * 1000)
@@ -37,7 +39,7 @@ router.get('/summary', requireAuth, requireRole('admin'), async (request, respon
   response.json(summary)
 })
 
-router.get('/export', requireAuth, requireRole('admin'), async (request, response) => {
+router.get('/export', requireRole('admin'), async (request, response) => {
   const from = typeof request.query.from === 'string' ? new Date(request.query.from) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
   const to = typeof request.query.to === 'string' ? new Date(request.query.to) : new Date()
   if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from > to) return response.status(400).json({ error: 'Invalid analytics date range' })

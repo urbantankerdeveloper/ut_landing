@@ -40,6 +40,7 @@ backend/hostinger-upload.zip
 ```
 
 Upload that ZIP through the Node.js Web App in hPanel. The script excludes `.git`, `node_modules`, environment files, and test files.
+The staged archive includes `.npmrc` with `omit=dev`; hPanel should install with `npm ci --omit=dev` (or confirm `.npmrc` is honored). Do not install TypeScript or test dependencies in production.
 
 ## Runtime environment variables
 

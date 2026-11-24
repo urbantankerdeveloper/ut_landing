@@ -38,6 +38,8 @@ import { closeRedisPair, createRedisPair, rateLimitStoreFor, socketAdapterFor, w
 import { requestObservability } from './middleware/observability.js'
 import { createHealthRouter } from './routes/health.js'
 import { multiServiceAdminRoutes, multiServiceCustomerRoutes, multiServiceVendorRoutes } from './routes/multiServiceOrders.js'
+import { requireAuth, resolveAuthenticatedUser } from './middleware/auth.js'
+import { getCachedAuthProfile, getCachedVendorId } from './services/authCache.js'
 const redis = await createRedisPair()
 const app = express(); const httpServer = createServer(app)
 // Keep-alive above the load balancer's idle timeout avoids reused-connection resets. The request timeout bounds slow clients.
@@ -56,6 +58,7 @@ const corsOptions = {
     callback(null, isAllowedCorsOrigin(origin, allowedOrigins, config.NODE_ENV))
   },
   credentials: true,
+  maxAge: 86_400,
 }
 app.set('trust proxy', 1)
 app.use(helmet({
@@ -72,10 +75,10 @@ app.use(helmet({
       frameAncestors: ["'none'"],
     },
   },
-})); app.use(cors(corsOptions)); app.use(compression()); app.use(rateLimit({ windowMs: 60_000, limit: 120, store: rateLimitStoreFor(redis), passOnStoreError: true, skip: (request) => request.path === '/health' || request.path === '/health/ready' || (request.method === 'GET' && !request.path.startsWith('/api/') && !request.path.startsWith('/socket.io')) })); app.use(express.json({ limit: '2mb', verify: (request, _response, buffer) => { (request as typeof request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer) } }))
+})); app.use(cors(corsOptions)); app.use(compression()); app.use(rateLimit({ windowMs: 60_000, limit: 120, store: rateLimitStoreFor(redis), passOnStoreError: true, skip: (request) => request.path === '/health' || request.path === '/health/ready' || (request.method === 'GET' && !request.path.startsWith('/api/') && !request.path.startsWith('/socket.io')) })); app.use(express.json({ limit: '2mb', verify: (request, _response, buffer) => { if ((request as typeof request & { originalUrl?: string }).originalUrl === '/api/payment/razorpay/webhook') (request as typeof request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer) } }))
 app.use(requestObservability(config.SLOW_REQUEST_MS))
 app.use(createHealthRouter({ redisConfigured: Boolean(config.REDIS_URL) }))
-app.use('/api/config', configRoutes); app.use('/api/auth', authRoutes); app.use('/api/devices', deviceRoutes); app.use('/api/public', publicTrackingRoutes); app.use('/api/service-enquiries', serviceEnquiryRoutes); app.use('/api/customer', customerRoutes); app.use('/api/customer', customerExtendedRoutes); app.use('/api/customer', multiServiceCustomerRoutes); app.use('/api/vendor', vendorRoutes); app.use('/api/vendor', vendorExtendedRoutes); app.use('/api/vendor', multiServiceVendorRoutes); app.use('/api/admin', adminRoutes); app.use('/api/admin', adminExtendedRoutes); app.use('/api/admin', multiServiceAdminRoutes); app.use('/api/admin', adminSmsTemplateRoutes); app.use('/api/admin', adminWhatsAppTemplateRoutes); app.use('/api/payment', paymentRoutes); app.use('/api/uploads', uploadRoutes); app.use('/api/support', supportRoutes); app.use('/api/analytics', analyticsRoutes); app.use('/api/partner', partnerRoutes); app.use(errorHandler)
+app.use('/api/config', configRoutes); app.use('/api/auth', authRoutes); app.use('/api/devices', requireAuth, deviceRoutes); app.use('/api/public', publicTrackingRoutes); app.use('/api/service-enquiries', serviceEnquiryRoutes); app.use('/api/customer', customerRoutes); app.use('/api/customer', customerExtendedRoutes); app.use('/api/customer', multiServiceCustomerRoutes); app.use('/api/vendor', requireAuth, vendorRoutes); app.use('/api/vendor', requireAuth, vendorExtendedRoutes); app.use('/api/vendor', requireAuth, multiServiceVendorRoutes); app.use('/api/admin', requireAuth, adminRoutes); app.use('/api/admin', requireAuth, adminExtendedRoutes); app.use('/api/admin', requireAuth, multiServiceAdminRoutes); app.use('/api/admin', requireAuth, adminSmsTemplateRoutes); app.use('/api/admin', requireAuth, adminWhatsAppTemplateRoutes); app.use('/api/payment', paymentRoutes); app.use('/api/uploads', requireAuth, uploadRoutes); app.use('/api/support', requireAuth, supportRoutes); app.use('/api/analytics', requireAuth, analyticsRoutes); app.use('/api/partner', partnerRoutes); app.use(errorHandler)
 if (serveFrontend) app.use(express.static(frontendDist, { index: 'index.html', setHeaders: (response, filePath) => {
   if (filePath.endsWith('index.html')) {
     response.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
@@ -87,6 +90,7 @@ if (serveFrontend) app.use(express.static(frontendDist, { index: 'index.html', s
 } }))
 if (serveFrontend) app.use((request, response, next) => { if (request.method !== 'GET' || request.path.startsWith('/api') || request.path.startsWith('/health') || request.path.startsWith('/socket.io')) return next(); response.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate'); response.sendFile(resolve(frontendDist, 'index.html')) })
 const io = new Server(httpServer, { cors: corsOptions, adapter: socketAdapterFor(redis) })
+logger.info('realtime.startup', { transports: ['polling', 'websocket'], websocketUpgrade: 'enabled', checkUrl: '/socket.io/' })
 io.use(async (socket, next) => {
   const rejectSocket = (reason: string, message: string, detail?: string) => {
     logger.warn('realtime.auth_failed', { reason, origin: socket.handshake.headers.origin ?? null, detail })
@@ -95,9 +99,9 @@ io.use(async (socket, next) => {
   try {
     const token = socket.handshake.auth?.token
     if (typeof token !== 'string' || !token) return rejectSocket('missing_token', 'Authentication required')
-    const { data, error } = await supabase.auth.getUser(token)
-    if (error || !data.user) return rejectSocket('invalid_session', 'Invalid session', error?.message)
-    socket.data.userId = data.user.id
+    const resolved = await resolveAuthenticatedUser(token)
+    if (!resolved.user) return rejectSocket('invalid_session', 'Invalid session', resolved.error?.message)
+    socket.data.userId = resolved.user.id
     next()
   } catch (error) {
     rejectSocket('auth_error', 'Realtime authentication failed', error instanceof Error ? error.message : String(error))
@@ -106,6 +110,13 @@ io.use(async (socket, next) => {
 // Resolves the role and vendor for a socket. Returns null when the lookup fails, and the caller disconnects.
 async function loadSocketContext(userId: string) {
   try {
+    if (config.featureFlags.AUTH_PROFILE_CACHE) {
+      const [profile, vendorId] = await Promise.all([
+        getCachedAuthProfile(userId),
+        getCachedVendorId(userId),
+      ])
+      return { role: profile?.role ?? null, vendor: vendorId ? { id: vendorId } : null }
+    }
     const [{ data: profile, error: profileError }, { data: vendor, error: vendorError }] = await Promise.all([
       supabase.from('profiles').select('role').eq('id', userId).maybeSingle(),
       supabase.from('vendors').select('id').eq('owner_profile_id', userId).maybeSingle(),

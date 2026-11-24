@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { requireAuth, requireRole } from '../middleware/auth.js'
+import { requireRole } from '../middleware/auth.js'
 import { config } from '../config.js'
 import { supabase } from '../supabase.js'
 import { invalidateWhatsAppTemplateCache } from '../services/whatsapp.js'
@@ -7,7 +7,7 @@ import { smsTemplateKeys, smsTemplateRequiredVariables, smsTemplateVariables, is
 import { z } from 'zod'
 
 const router = Router()
-router.use('/whatsapp-templates', requireAuth, requireRole('admin'))
+router.use('/whatsapp-templates', requireRole('admin'))
 const placeholderPattern = /\{\{(\w+)\}\}/g
 const keyPattern = /^[a-z][a-z0-9_]{2,63}$/
 const bodySchema = z.string().trim().min(1).max(640)

@@ -1,12 +1,12 @@
 import { Router } from 'express'
 import { z } from 'zod'
-import { requireAuth, requireRole } from '../middleware/auth.js'
+import { requireRole } from '../middleware/auth.js'
 import { config } from '../config.js'
 import { supabase } from '../supabase.js'
 import { invalidateSmsTemplateCache, isOtpTemplateKey, smsTemplateKeys, smsTemplateRequiredVariables, smsTemplateVariables } from '../services/sms.js'
 
 const router = Router()
-router.use('/sms-templates', requireAuth, requireRole('admin'))
+router.use('/sms-templates', requireRole('admin'))
 
 const placeholderPattern = /\{\{(\w+)\}\}/g
 const maxBodyLength = 640
