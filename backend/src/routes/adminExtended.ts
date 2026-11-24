@@ -1,7 +1,7 @@
 import { databaseFailure } from '../lib/httpErrors.js'
-import { Router } from 'express'
 import { z } from 'zod'
-import { requireRole } from '../middleware/auth.js'
+import express, { Router } from 'express'
+import { requireAuth, requireRole } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 import { ATTENTION_NOTES } from '../services/paymentReconciliation.js'
 import { emitBookingLifecycleEvent, emitRealtime, emitRealtimeToVendor, realtimeHealth } from '../services/realtime.js'
@@ -21,7 +21,8 @@ import { cachedCatalog, invalidateCatalog } from '../services/catalogCache.js'
 import { ACTIVE_BOOKING_STATUSES, groupAvailabilityByArea, indiaDayBounds, type VendorAvailabilityRecord } from '../services/adminDashboard.js'
 import { createInvoiceIfEligible } from '../services/invoices.js'
 const exactCount = (range: ListWindow) => (range.mode === 'paged' ? { count: 'exact' as const } : undefined)
-const router = Router(); router.use((request, response, next) => { const role = request.profile?.role; if (role === 'admin') return next(); if (role === 'dispatcher' && (/^\/alerts(?:\/[^/]+)?$/.test(request.path) || /^\/orders\/[^/]+\/(assignment|status|cancel)$/.test(request.path))) return next(); return response.status(403).json({ error: 'Insufficient permissions' }) }); router.use(['/system/health', '/storage/cleanup', '/services', '/services/:id/pricing', '/payments', '/payouts', '/dispatch-settings'], requireRole('admin'))
+const legacyRouterAuth = (request: express.Request, response: express.Response, next: express.NextFunction) => config.featureFlags.AUTH_MOUNT_ONCE ? next() : requireAuth(request, response, next)
+const router = Router(); router.use(legacyRouterAuth, (request, response, next) => { const role = request.profile?.role; if (role === 'admin') return next(); if (role === 'dispatcher' && (/^\/alerts(?:\/[^/]+)?$/.test(request.path) || /^\/orders\/[^/]+\/(assignment|status|cancel)$/.test(request.path))) return next(); return response.status(403).json({ error: 'Insufficient permissions' }) }); router.use(['/system/health', '/storage/cleanup', '/services', '/services/:id/pricing', '/payments', '/payouts', '/dispatch-settings'], requireRole('admin'))
 const optionSurchargesPaiseSchema = z.record(z.enum(['capacity', 'waterType', 'serviceType', 'grade', 'pump', 'materialType']), z.record(z.string().min(1).max(100), z.number().int().nonnegative().max(1_000_000_000))).optional()
 router.use('/services', async (request, response, next) => {
   if (!['POST', 'PATCH'].includes(request.method)) return next()

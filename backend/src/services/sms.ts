@@ -122,7 +122,7 @@ async function sendMsg91Flow(templateId: string, phoneE164: string, vars: Record
     method: 'POST',
     headers: { authkey: config.MSG91_AUTH_KEY, 'Content-Type': 'application/json' },
     body: JSON.stringify(buildMsg91FlowPayload(templateId, phoneE164, vars)),
-    signal: AbortSignal.timeout(8_000),
+    signal: AbortSignal.timeout(config.EXTERNAL_FETCH_TIMEOUT_MS ?? 8000),
   })
   const result = (await response.json().catch(() => ({}))) as { type?: string; message?: string }
   if (!response.ok || result.type !== 'success') {

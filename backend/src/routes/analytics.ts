@@ -1,5 +1,6 @@
 import { Router } from 'express'
-import { requireRole } from '../middleware/auth.js'
+import express from 'express'
+import { requireAuth, requireRole } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 import { analyticsEventSchema, summarizeAnalyticsEvents } from '../lib/analytics.js'
 import { config } from '../config.js'
@@ -7,6 +8,7 @@ import rateLimit from 'express-rate-limit'
 import { limiterStore } from '../services/scaling.js'
 
 const router = Router()
+const legacyRouterAuth = (request: express.Request, response: express.Response, next: express.NextFunction) => config.featureFlags.AUTH_MOUNT_ONCE ? next() : requireAuth(request, response, next)
 const analyticsEventLimit = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:analytics:', 'open'), passOnStoreError: true, message: { error: 'Too many analytics events. Try again later.' } })
 
 router.post('/events', analyticsEventLimit, async (request, response) => {
@@ -23,7 +25,7 @@ router.post('/events', analyticsEventLimit, async (request, response) => {
   response.status(204).send()
 })
 
-router.get('/summary', requireRole('admin'), async (request, response) => {
+router.get('/summary', legacyRouterAuth, requireRole('admin'), async (request, response) => {
   const days = Math.min(90, Math.max(1, Number(request.query.days ?? 30)))
   const to = typeof request.query.to === 'string' ? new Date(request.query.to) : new Date()
   const from = typeof request.query.from === 'string' ? new Date(request.query.from) : new Date(to.getTime() - days * 24 * 60 * 60 * 1000)
@@ -39,7 +41,7 @@ router.get('/summary', requireRole('admin'), async (request, response) => {
   response.json(summary)
 })
 
-router.get('/export', requireRole('admin'), async (request, response) => {
+router.get('/export', legacyRouterAuth, requireRole('admin'), async (request, response) => {
   const from = typeof request.query.from === 'string' ? new Date(request.query.from) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
   const to = typeof request.query.to === 'string' ? new Date(request.query.to) : new Date()
   if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from > to) return response.status(400).json({ error: 'Invalid analytics date range' })

@@ -1,9 +1,13 @@
-import { Router } from 'express'
 import { z } from 'zod'
 import { supabase } from '../supabase.js'
 import { logger } from '../lib/logger.js'
+import express, { Router } from 'express'
+import { requireAuth } from '../middleware/auth.js'
+import { config } from '../config.js'
 
 const router = Router()
+const legacyRouterAuth = (request: express.Request, response: express.Response, next: express.NextFunction) => config.featureFlags.AUTH_MOUNT_ONCE ? next() : requireAuth(request, response, next)
+router.use(legacyRouterAuth)
 
 router.post('/register', async (request, response) => {
   const parsed = z.object({
