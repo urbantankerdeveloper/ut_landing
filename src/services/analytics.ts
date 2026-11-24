@@ -1,3 +1,5 @@
+import { API_URL } from '../lib/apiBase'
+
 type AnalyticsPayload = Record<string, string | number | boolean | undefined>
 const sessionStorageKey = 'urban-tanker-analytics-session'
 const sessionId = () => {
@@ -13,7 +15,7 @@ let analyticsFlushTimer: number | null = null
 
 function flushAnalytics() {
   if (!analyticsBatch.length) return
-  const endpoint = `${import.meta.env.VITE_API_BASE_URL ?? '/api'}/analytics/events`
+  const endpoint = `${API_URL}/analytics/events`
   const events = analyticsBatch.splice(0, analyticsBatch.length)
   const body = JSON.stringify({ events })
   if (navigator.sendBeacon) {
@@ -41,7 +43,7 @@ export function trackEvent(name: string, payload: AnalyticsPayload = {}) {
     }
     window.addEventListener('pagehide', flushAnalytics, { once: true })
   } else {
-    void fetch(`${import.meta.env.VITE_API_BASE_URL ?? '/api'}/analytics/events`, {
+    void fetch(`${API_URL}/analytics/events`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',

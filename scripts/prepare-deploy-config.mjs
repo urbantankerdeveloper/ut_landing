@@ -17,7 +17,8 @@ const supabaseRef = env.SUPABASE_REF?.trim()
 if (!supabaseRef) throw new Error('prepare-deploy-config: SUPABASE_REF is not set. Set it to the Supabase project reference (the subdomain of <ref>.supabase.co).')
 
 const apiOrigin = originOf(env.VITE_API_BASE_URL)
-const realtimeWsOrigin = originOf(env.VITE_REALTIME_URL).replace(/^http/, 'ws')
+if (!apiOrigin) throw new Error('prepare-deploy-config: VITE_API_BASE_URL is not set.')
+const realtimeWsOrigin = apiOrigin.replace(/^http/, 'ws')
 const supabaseOrigin = supabaseRef ? `https://${supabaseRef}.supabase.co` : ''
 const canonicalOrigin = originOf(env.VITE_SITE_ORIGIN) || 'https://www.urbantanker.in'
 const indexPath = join(root, 'dist', 'index.html')
@@ -50,4 +51,4 @@ for (const relativePath of ['index.html', 'robots.txt', 'sitemap.xml']) {
   deployText = deployText.replaceAll('https://www.urbantanker.in', canonicalOrigin)
   await writeFile(path, deployText)
 }
-console.log(`prepare-deploy-config: filled dist config (api ${apiOrigin || 'same-origin'}, realtime ${realtimeWsOrigin || 'same-origin'}, canonical ${canonicalOrigin}).`)
+console.log(`prepare-deploy-config: filled dist config (api ${apiOrigin}, realtime ${realtimeWsOrigin}, canonical ${canonicalOrigin}).`)

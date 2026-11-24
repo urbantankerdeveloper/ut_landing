@@ -2,8 +2,9 @@
 // so the shell list always matches the index.html that was deployed and every deploy gets new cache names.
 const SHELL_URLS = []
 const BUILD_ID = 'development'
-const SHELL_CACHE = `urban-tanker-shell-${BUILD_ID}`
-const ASSET_CACHE = `urban-tanker-assets-${BUILD_ID}`
+const CACHE_VERSION = 'api-origin-v2'
+const SHELL_CACHE = `urban-tanker-shell-${CACHE_VERSION}-${BUILD_ID}`
+const ASSET_CACHE = `urban-tanker-assets-${CACHE_VERSION}-${BUILD_ID}`
 // Lazily loaded route chunks are cached as they are used. Only the newest entries are kept.
 const ASSET_CACHE_LIMIT = 80
 const NETWORK_FIRST_PATHS = new Set(['/manifest.json', '/robots.txt', '/sitemap.xml'])

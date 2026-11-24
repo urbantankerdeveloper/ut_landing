@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { LiveFleetMap } from './LiveFleetMap'
 import { subscribeToRealtime } from '../services/realtime'
+import { SOCKET_URL } from '../lib/apiBase'
 import type { TrackingSnapshot } from '../api/customer'
 import type { MapPoint } from '../utils/mapCoordinates'
 import { locationContent } from '../content/location'
@@ -23,8 +24,7 @@ export function LiveTrackingMap({ bookingId, snapshot }: Props) {
   useEffect(() => { snapshotKeyRef.current = snapshotKey }, [snapshotKey])
 
   useEffect(() => {
-    const realtimeUrl = import.meta.env.VITE_REALTIME_URL ?? (import.meta.env.PROD ? window.location.origin : 'http://localhost:8080')
-    return subscribeToRealtime(realtimeUrl, (message) => {
+    return subscribeToRealtime(SOCKET_URL, (message) => {
       if (message.type !== 'booking.location.updated' || !message.payload || typeof message.payload !== 'object') return
       const payload = message.payload as { bookingId?: string; latitude?: number; longitude?: number; recordedAt?: string; recorded_at?: string }
       if (payload.bookingId !== bookingId) return

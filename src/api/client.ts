@@ -2,6 +2,7 @@ import { useAuthStore } from '../stores/authStore'
 import { useServerStatusStore } from '../stores/serverStatusStore'
 import { notifyError, notifySuccess, describeError, markReported } from '../utils/notify'
 import { resolveWriteMessage } from '../content/writeMessages'
+import { API_URL } from '../lib/apiBase'
 import { ApiError } from './errors'
 
 export { ApiError }
@@ -11,9 +12,8 @@ export { ApiError }
 export type ApiRequestInit = RequestInit & { silent?: boolean; successMessage?: string; timeoutMs?: number }
 type PhoneVerificationHandler = () => Promise<boolean>
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api'
 const REQUEST_TIMEOUT_MS = 12_000
-// Render's free tier sleeps between requests, so the first call after a sleep can fail or be slow. Only idempotent GETs are retried.
+// The first call after an API instance wakes can fail or be slow. Only idempotent GETs are retried.
 const MAX_GET_ATTEMPTS = 3
 const RETRY_BASE_DELAY_MS = 800
 // A request still pending after this long shows the "waking up the server" notice.
@@ -53,7 +53,7 @@ async function refreshSession() {
     refreshInFlight = (async () => {
       const timed = createTimedSignal()
       try {
-        const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+        const response = await fetch(`${API_URL}/auth/refresh`, {
           method: 'POST',
           credentials: 'include',
           signal: timed.signal,
@@ -146,7 +146,7 @@ async function apiFetchOnce<T>(path: string, init: RequestInit, retry: boolean, 
     if (typeof init.body === 'string' && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
     const authorization = authHeaders().Authorization
     if (authorization && !headers.has('Authorization')) headers.set('Authorization', authorization)
-    const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers, credentials: 'include', signal: timed.signal })
+    const response = await fetch(`${API_URL}${path}`, { ...init, headers, credentials: 'include', signal: timed.signal })
     if (response.status === 401 && retry && !path.startsWith('/auth/')) {
       try {
         if (await refreshSession()) return await apiFetchOnce<T>(path, init, false, timeoutMs)
