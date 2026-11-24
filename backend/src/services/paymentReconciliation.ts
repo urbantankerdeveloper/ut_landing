@@ -3,6 +3,7 @@ import { logger } from '../lib/logger.js'
 import { epochSecondsToIso, extractPaymentDetails, type RazorpayPaymentEntity } from './paymentDetails.js'
 import { notifyPaidOnlineAfterCodSwitch, notifyRevertedToCash, codSwitchStatuses } from './codOnlineSwitch.js'
 import { notifyCustomerOfBooking } from './bookingNotifications.js'
+import { config } from '../config.js'
 
 // Notes an admin should look at. Kept in one place so the admin filter and the writers agree.
 export const ATTENTION_NOTES = ['amount_mismatch', 'authorized_not_captured', 'captured_after_cod_switch', 'auto_refund_in_progress', 'auto_refunded_after_cod_switch'] as const
@@ -28,7 +29,7 @@ function razorpayAuth(): string | null {
 async function fetchOrderPayments(orderId: string): Promise<RazorpayPaymentEntity[] | null> {
   const auth = razorpayAuth()
   if (!auth) return null
-  const providerResponse = await fetch(`https://api.razorpay.com/v1/orders/${encodeURIComponent(orderId)}/payments`, { headers: { Authorization: `Basic ${auth}` }, signal: AbortSignal.timeout(8000) })
+  const providerResponse = await fetch(`https://api.razorpay.com/v1/orders/${encodeURIComponent(orderId)}/payments`, { headers: { Authorization: `Basic ${auth}` }, signal: AbortSignal.timeout(config.EXTERNAL_FETCH_TIMEOUT_MS ?? 8000) })
   if (!providerResponse.ok) throw new Error(`Razorpay order lookup returned ${providerResponse.status}`)
   const body = await providerResponse.json() as { items?: RazorpayPaymentEntity[] }
   return body.items ?? []
@@ -56,7 +57,7 @@ export async function refundCapturedAfterCod(row: { id: string; provider_payment
       method: 'POST',
       headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/json', 'X-Razorpay-Idempotency': `cod-refund-${row.id}` },
       body: JSON.stringify({ amount: row.amount_paise }),
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(config.EXTERNAL_FETCH_TIMEOUT_MS ?? 8000),
     })
     if (!providerResponse.ok) throw new Error(`Razorpay refund returned ${providerResponse.status}`)
   } catch (refundError) {

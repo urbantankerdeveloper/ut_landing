@@ -25,7 +25,7 @@ async function fetchRazorpayPayment(paymentId: string, keys: { key?: string; sec
   if (!keys.key || !keys.secret) return null
   const auth = Buffer.from(`${keys.key}:${keys.secret}`).toString('base64')
   try {
-    const providerResponse = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}`, { headers: { Authorization: `Basic ${auth}` }, signal: AbortSignal.timeout(8000) })
+    const providerResponse = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}`, { headers: { Authorization: `Basic ${auth}` }, signal: AbortSignal.timeout(config.EXTERNAL_FETCH_TIMEOUT_MS ?? 8000) })
     if (!providerResponse.ok) {
       logger.warn('payment.details_fetch_failed', { providerPaymentId: paymentId, providerStatus: providerResponse.status })
       return null
@@ -40,7 +40,7 @@ async function createRazorpayOrder(response: Response, keys: RazorpayKeys, amoun
   const auth = Buffer.from(`${keys.key}:${keys.secret}`).toString('base64')
   let providerResponse: Awaited<ReturnType<typeof fetch>>
   try {
-    providerResponse = await fetch('https://api.razorpay.com/v1/orders', { method: 'POST', headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ amount: amountPaise, currency: 'INR', receipt }), signal: AbortSignal.timeout(8000) })
+    providerResponse = await fetch('https://api.razorpay.com/v1/orders', { method: 'POST', headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ amount: amountPaise, currency: 'INR', receipt }), signal: AbortSignal.timeout(config.EXTERNAL_FETCH_TIMEOUT_MS ?? 8000) })
   } catch (error) {
     failure(response, 502, 'Payment provider unavailable', 'payments.order_request_failed', error)
     return null
@@ -319,7 +319,7 @@ router.post('/payments/:id/refund', requireAuth, requireRole('admin'), async (re
   const auth = Buffer.from(`${keys.key}:${keys.secret}`).toString('base64')
   let providerResponse: Awaited<ReturnType<typeof fetch>>
   try {
-    providerResponse = await fetch(`https://api.razorpay.com/v1/payments/${payment.provider_payment_id}/refund`, { method: 'POST', headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/json', 'X-Razorpay-Idempotency': `refund-${payment.id}-${refundedAfter}` }, body: JSON.stringify({ amount: refundAmount }), signal: AbortSignal.timeout(8000) })
+    providerResponse = await fetch(`https://api.razorpay.com/v1/payments/${payment.provider_payment_id}/refund`, { method: 'POST', headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/json', 'X-Razorpay-Idempotency': `refund-${payment.id}-${refundedAfter}` }, body: JSON.stringify({ amount: refundAmount }), signal: AbortSignal.timeout(config.EXTERNAL_FETCH_TIMEOUT_MS ?? 8000) })
   } catch (error) {
     await releaseClaim()
     return failure(response, 502, 'Payment provider refund failed', 'payments.refund_request_failed', error)

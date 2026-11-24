@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { config } from '../config.js'
 import { failure, databaseFailure } from '../lib/httpErrors.js'
 import { logger } from '../lib/logger.js'
+import express from 'express'
 import { requireAuth, requireRole } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 import { emitRealtimeToUser, emitRealtimeToVendor } from '../services/realtime.js'
@@ -326,7 +327,8 @@ async function emitParentOrderUpdate(orderId: string) {
   if (data?.customer_id) emitRealtimeToUser(data.customer_id, 'multi_service.order.updated', { orderId, status: data.status })
 }
 
-customer.use(requireAuth, requireRole('customer'))
+const legacyRouterAuth = (request: express.Request, response: express.Response, next: express.NextFunction) => config.featureFlags.AUTH_MOUNT_ONCE ? next() : requireAuth(request, response, next)
+customer.use(legacyRouterAuth, requireRole('customer'))
 customer.get('/service-types', async (request, response) => {
   if (!requireFeature(response) || !requireSupportedAppVersion(request, response)) return
   const { data, error } = await supabase.from('service_types').select('id,code,name,active,min_quantity,max_quantity,quantity_unit').eq('active', true).order('name')
@@ -629,7 +631,7 @@ customer.post('/multi-service-fulfilments/:fulfilmentId/ratings', async (request
   response.status(201).json(data)
 })
 
-vendor.use(requireAuth, requireRole('vendor'))
+vendor.use(legacyRouterAuth, requireRole('vendor'))
 
 async function findVendorId(userId: string) {
   const { data, error } = await supabase.from('vendors').select('id').eq('owner_profile_id', userId).maybeSingle()
@@ -817,7 +819,7 @@ vendor.post('/multi-service-fulfilments/:fulfilmentId/delivery/verify', async (r
   response.json({ delivered: true, orderId: outcome.orderId })
 })
 
-admin.use(requireAuth, requireRole('admin'))
+admin.use(legacyRouterAuth, requireRole('admin'))
 
 admin.get('/multi-service-orders', async (request, response) => {
   if (!requireFeature(response) || !requireSupportedAppVersion(request, response)) return

@@ -38,7 +38,7 @@ export async function sendEmail(to: string, subject: string, html: string) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ from: config.MAIL_FROM, to: [to], subject, html }),
-      signal: AbortSignal.timeout(8_000),
+      signal: AbortSignal.timeout(config.EXTERNAL_FETCH_TIMEOUT_MS ?? 8000),
     })
     if (!response.ok) {
       throw Object.assign(new Error(`Resend email API failed: ${response.status}`), {
@@ -62,7 +62,7 @@ export async function sendSms(to: string, body: string) {
     method: 'POST',
     headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
     body: encoded,
-    signal: AbortSignal.timeout(8_000),
+    signal: AbortSignal.timeout(config.EXTERNAL_FETCH_TIMEOUT_MS ?? 8000),
   })
   if (!response.ok) throw new Error(`SMS provider failed: ${response.status}`)
   return { queued: true }

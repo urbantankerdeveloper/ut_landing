@@ -32,7 +32,7 @@ export async function sendPushNotification(input: {
       contents: { en: input.body ?? input.title },
       data: input.data ?? {},
     }),
-    signal: AbortSignal.timeout(8_000),
+    signal: AbortSignal.timeout(config.EXTERNAL_FETCH_TIMEOUT_MS ?? 8000),
   })
   if (!response.ok) {
     throw new Error(`OneSignal push failed: ${response.status} ${response.statusText}`.trim())

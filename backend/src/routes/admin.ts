@@ -1,7 +1,8 @@
 import { databaseFailure } from '../lib/httpErrors.js'
-import { Router } from 'express'
 import { z } from 'zod'
-import { requireRole } from '../middleware/auth.js'
+import express, { Router } from 'express'
+import { requireAuth, requireRole } from '../middleware/auth.js'
+import { config } from '../config.js'
 import { authSupabase, supabase } from '../supabase.js'
 import { selfieBucket } from '../services/selfie.js'
 import { toE164IndianMobile } from '../lib/phone.js'
@@ -10,8 +11,9 @@ import { listWindow, sendList, type ListWindow } from '../lib/listParams.js'
 import { invalidateCatalog } from '../services/catalogCache.js'
 import { invalidateAuthProfile } from '../services/authCache.js'
 const exactCount = (range: ListWindow) => (range.mode === 'paged' ? { count: 'exact' as const } : undefined)
+const legacyRouterAuth = (request: express.Request, response: express.Response, next: express.NextFunction) => config.featureFlags.AUTH_MOUNT_ONCE ? next() : requireAuth(request, response, next)
 const adminOnly = requireRole('admin')
-const router = Router(); router.use(requireRole('admin', 'dispatcher'))
+const router = Router(); router.use(legacyRouterAuth, requireRole('admin', 'dispatcher'))
 router.get('/orders', async (request, response) => { const page = Math.max(1, Number(request.query.page ?? 1)); const pageSize = Math.min(100, Math.max(1, Number(request.query.pageSize ?? 25))); const from = (page - 1) * pageSize; const to = from + pageSize - 1; let query = supabase.from('bookings').select('*', { count: 'exact' }).order('created_at', { ascending: false }).range(from, to); if (typeof request.query.status === 'string') query = query.eq('status', request.query.status); if (typeof request.query.service === 'string') query = query.eq('service_code', request.query.service); if (typeof request.query.vendorId === 'string') query = query.eq('vendor_id', request.query.vendorId); if (request.query.assigned === 'true') query = query.not('vendor_id', 'is', null); if (request.query.assigned === 'false') query = query.is('vendor_id', null); if (typeof request.query.from === 'string') query = query.gte('scheduled_for', `${request.query.from}T00:00:00.000Z`); if (typeof request.query.to === 'string') query = query.lte('scheduled_for', `${request.query.to}T23:59:59.999Z`); const { data, error, count } = await query; if (error) return databaseFailure(response, 'admin.database_error', error, 500); response.json({ rows: data ?? [], page, pageSize, total: count ?? 0 }) })
 router.get('/vendors', async (_request, response) => {
   const [vendorsResult, profilesResult] = await Promise.all([

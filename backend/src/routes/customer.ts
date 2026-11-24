@@ -20,8 +20,7 @@ import { listWindow, sendList } from '../lib/listParams.js'
 import { cachedCatalog } from '../services/catalogCache.js'
 import { limiterStore } from '../services/scaling.js'
 import { isPhoneVerificationRequired, isPhoneVerified, logPhoneVerificationAudit } from '../services/phoneVerification.js'
-import { authenticatedRateLimitKey } from '../middleware/auth.js'
-import { requireAuth } from '../middleware/auth.js'
+import { authenticatedRateLimitKey, requireAuth } from '../middleware/auth.js'
 const router = Router()
 const catalogCacheControl = 'private, max-age=30, stale-while-revalidate=120'
 const quoteLimit = rateLimit({ windowMs: 10 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:customer:quote:', 'open'), passOnStoreError: true, keyGenerator: (request) => authenticatedRateLimitKey(request, () => request.authUser!.id), message: { error: 'Too many quote requests. Try again later.' } })
@@ -145,7 +144,8 @@ router.get('/offers', async (_request, response) => {
   }
 })
 router.post('/coupons/validate', async (request, response) => { const parsed = z.object({ code: z.string().min(2).max(80), serviceCode: z.string().optional(), amount: z.number().nonnegative() }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid coupon request' }); const { data, error } = await supabase.from('coupons').select('id,code,title,discount_type,discount_value,valid_until').eq('code', parsed.data.code.toUpperCase()).eq('is_active', true).or('valid_until.is.null,valid_until.gte.' + new Date().toISOString()).maybeSingle(); if (error) return failure(response, 500, 'Coupon could not be checked.', 'customer.coupon_validate_failed', error); if (!data) return response.status(404).json({ error: 'Coupon is not available' }); response.json({ valid: true, coupon: { id: data.id, code: data.code, title: data.title, discountType: data.discount_type, discountValue: Number(data.discount_value), validUntil: data.valid_until } }) })
-router.use(requireAuth)
+const legacyRouterAuth = (request: express.Request, response: express.Response, next: express.NextFunction) => config.featureFlags.AUTH_MOUNT_ONCE ? next() : requireAuth(request, response, next)
+router.use(legacyRouterAuth)
 router.get('/pricing/me', async (request, response) => {
   try {
     const gstWaived = await customerHasGstWaiver(request.authUser!.id)

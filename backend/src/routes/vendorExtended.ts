@@ -1,7 +1,7 @@
 import { databaseFailure } from '../lib/httpErrors.js'
-import { Router, type Request, type Response } from 'express'
+import express, { Router, type Request, type Response } from 'express'
 import { z } from 'zod'
-import { requireRole } from '../middleware/auth.js'
+import { requireAuth, requireRole } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 import { emitBookingLifecycleEvent, emitRealtime, emitRealtimeToBooking, emitRealtimeToUser, emitRealtimeToVendor } from '../services/realtime.js'
 import { notifyCustomer } from '../services/customerNotifications.js'
@@ -17,7 +17,8 @@ import { config } from '../config.js'
 import { createInvoiceIfEligible } from '../services/invoices.js'
 import { getCachedVendorId, invalidateAuthVendor } from '../services/authCache.js'
 const exactCount = (range: ListWindow) => (range.mode === 'paged' ? { count: 'exact' as const } : undefined)
-const router = Router(); router.use(requireRole('vendor'))
+const legacyRouterAuth = (request: express.Request, response: express.Response, next: express.NextFunction) => config.featureFlags.AUTH_MOUNT_ONCE ? next() : requireAuth(request, response, next)
+const router = Router(); router.use(legacyRouterAuth, requireRole('vendor'))
 async function vendorId(userId: string) {
   if (config.featureFlags.AUTH_PROFILE_CACHE) return getCachedVendorId(userId)
   const { data } = await supabase.from('vendors').select('id').eq('owner_profile_id', userId).single()

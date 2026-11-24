@@ -1,12 +1,13 @@
-import { Router } from 'express'
 import { z } from 'zod'
-import { requireRole } from '../middleware/auth.js'
+import express, { Router } from 'express'
+import { requireAuth, requireRole } from '../middleware/auth.js'
 import { config } from '../config.js'
 import { supabase } from '../supabase.js'
 import { invalidateSmsTemplateCache, isOtpTemplateKey, smsTemplateKeys, smsTemplateRequiredVariables, smsTemplateVariables } from '../services/sms.js'
 
 const router = Router()
-router.use('/sms-templates', requireRole('admin'))
+const legacyRouterAuth = (request: express.Request, response: express.Response, next: express.NextFunction) => config.featureFlags.AUTH_MOUNT_ONCE ? next() : requireAuth(request, response, next)
+router.use('/sms-templates', legacyRouterAuth, requireRole('admin'))
 
 const placeholderPattern = /\{\{(\w+)\}\}/g
 const maxBodyLength = 640

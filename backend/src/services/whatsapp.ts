@@ -440,7 +440,7 @@ export async function sendTemplateWhatsApp(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(config.EXTERNAL_FETCH_TIMEOUT_MS ?? 8000),
     })
 
     const responseText = await response.text()
