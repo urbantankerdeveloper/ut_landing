@@ -23,4 +23,9 @@ describe('publicCoordinate', () => {
     expect(publicCoordinate(13.0827123, 'arrived')).toBe(13.083)
     expect(publicCoordinate(80.2707456, 'delivered')).toBe(80.271)
   })
+
+  it('coarsens registered driver pins in public tracking links', () => {
+    expect(publicCoordinate(13.0827123, 'en_route', 'registered')).toBe(13.08)
+    expect(publicCoordinate(80.2707456, 'en_route', 'registered')).toBe(80.27)
+  })
 })

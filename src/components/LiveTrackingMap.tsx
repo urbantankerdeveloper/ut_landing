@@ -41,6 +41,7 @@ export function LiveTrackingMap({ bookingId, snapshot }: Props) {
   return <div className="booking-location-map tracking-live-map tracking-live-map--compact">
     <LiveFleetMap vehicle={fleetPoint} destination={customerPoint} trail={trail} lastUpdated={lastUpdated} />
     <div className="tracking-map-legend"><span><i className="fleet-dot" /> {locationContent.map.fleet}</span>{customerPoint && <span><i className="customer-dot" /> {locationContent.map.deliveryPoint}</span>}</div>
+    {snapshot.locationSource === 'registered' && !currentSocketFix && <p className="tracking-location-source-note">{locationContent.map.registeredDriverNote}</p>}
   </div>
 }
 

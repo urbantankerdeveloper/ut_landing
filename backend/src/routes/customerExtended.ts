@@ -19,6 +19,7 @@ import { loadOrderGroup } from '../services/orderGroups.js'
 import { config } from '../config.js'
 import { requireAuth } from '../middleware/auth.js'
 import { getOrCreateTrackingToken } from '../services/trackingTokens.js'
+import { resolveTrackingLocation } from '../services/trackingLocation.js'
 const catalogCacheControl = 'private, max-age=30, stale-while-revalidate=120'
 const legacyRouterAuth = (request: express.Request, response: express.Response, next: express.NextFunction) => config.featureFlags.AUTH_MOUNT_ONCE ? next() : requireAuth(request, response, next)
 const router = Router(); router.use(legacyRouterAuth)
@@ -30,7 +31,71 @@ router.use('/wallet', (_request, response, next) => {
 })
 const deliveryOtpLimit = rateLimit({ windowMs: 10 * 60 * 1000, limit: 3, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:customerExtended:deliveryOtp:', 'open'), passOnStoreError: true, keyGenerator: (request) => `${request.authUser!.id}:${request.params.orderId}`, message: { error: 'Too many delivery codes requested for this order. Try again later.' } })
 const statusSchema = z.object({ status: z.enum(['cancelled']) })
-router.get('/orders/:orderId/tracking', async (request, response) => { const { data: booking, error: bookingError } = await supabase.from('bookings').select('id,status,customer_id,vehicle_id,driver_id,latitude,longitude').eq('id', request.params.orderId).eq('customer_id', request.authUser!.id).maybeSingle(); if (bookingError) return databaseFailure(response, 'customerExtended.database_error', bookingError, 500); if (!booking) return response.status(404).json({ error: 'Booking not found' }); const { data: location, error } = await supabase.from('vendor_location_updates').select('latitude,longitude,accuracy_metres,recorded_at').eq('booking_id', request.params.orderId).order('recorded_at', { ascending: false }).limit(1).maybeSingle(); if (error) return databaseFailure(response, 'customerExtended.database_error', error, 500); const [vehicleResult, driverResult] = await Promise.all([booking.vehicle_id ? supabase.from('vehicles').select('registration_number').eq('id', booking.vehicle_id).maybeSingle() : Promise.resolve({ data: null, error: null }), booking.driver_id ? supabase.from('drivers').select('name').eq('id', booking.driver_id).maybeSingle() : Promise.resolve({ data: null, error: null })]); if (vehicleResult.error || driverResult.error) return failure(response, 500, 'Tracking details could not be loaded.', 'customer.tracking_lookup_failed', vehicleResult.error ?? driverResult.error); response.json({ orderId: booking.id, status: booking.status, latitude: location?.latitude ?? undefined, longitude: location?.longitude ?? undefined, accuracy: location?.accuracy_metres ?? undefined, recorded_at: location?.recorded_at, customerLatitude: booking.latitude ?? undefined, customerLongitude: booking.longitude ?? undefined, vehicle: vehicleResult.data?.registration_number, driver: driverResult.data?.name, trackingAvailable: Boolean(location) }) })
+router.get('/orders/:orderId/tracking', async (request, response) => {
+  const { data: booking, error: bookingError } = await supabase
+    .from('bookings')
+    .select('id,status,customer_id,vehicle_id,driver_id,latitude,longitude')
+    .eq('id', request.params.orderId)
+    .eq('customer_id', request.authUser!.id)
+    .maybeSingle()
+  if (bookingError) return databaseFailure(response, 'customerExtended.database_error', bookingError, 500)
+  if (!booking) return response.status(404).json({ error: 'Booking not found' })
+
+  const { data: location, error } = await supabase
+    .from('vendor_location_updates')
+    .select('latitude,longitude,accuracy_metres,recorded_at')
+    .eq('booking_id', request.params.orderId)
+    .order('recorded_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) return databaseFailure(response, 'customerExtended.database_error', error, 500)
+
+  const [vehicleResult, driverResult] = await Promise.all([
+    booking.vehicle_id
+      ? supabase.from('vehicles').select('registration_number').eq('id', booking.vehicle_id).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    booking.driver_id
+      ? supabase.from('drivers').select('name,latitude,longitude').eq('id', booking.driver_id).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ])
+  if (vehicleResult.error || driverResult.error) {
+    return failure(
+      response,
+      500,
+      'Tracking details could not be loaded.',
+      'customer.tracking_lookup_failed',
+      vehicleResult.error ?? driverResult.error,
+    )
+  }
+
+  const trackingLocation = resolveTrackingLocation(
+    booking.status,
+    location && {
+      latitude: location.latitude,
+      longitude: location.longitude,
+      accuracy: location.accuracy_metres,
+      recordedAt: location.recorded_at,
+    },
+    driverResult.data && {
+      latitude: driverResult.data.latitude,
+      longitude: driverResult.data.longitude,
+    },
+  )
+  response.json({
+    orderId: booking.id,
+    status: booking.status,
+    latitude: trackingLocation?.latitude,
+    longitude: trackingLocation?.longitude,
+    accuracy: trackingLocation?.accuracy ?? undefined,
+    recorded_at: trackingLocation?.recordedAt ?? undefined,
+    locationSource: trackingLocation?.source,
+    customerLatitude: booking.latitude ?? undefined,
+    customerLongitude: booking.longitude ?? undefined,
+    vehicle: vehicleResult.data?.registration_number,
+    driver: driverResult.data?.name,
+    trackingAvailable: trackingLocation !== null,
+  })
+})
 router.get('/orders/:orderId/tracking-link', async (request, response) => {
   const { data: booking, error: bookingError } = await supabase
     .from('bookings')

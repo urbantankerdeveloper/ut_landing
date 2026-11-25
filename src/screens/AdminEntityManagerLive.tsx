@@ -7,11 +7,12 @@ import { Modal } from '../components/Modal'
 import { AdminCustomerSelfie } from './AdminCustomerSelfie'
 import { adminEntitiesContent as c } from '../content/admin-entities'
 import { useFeatureFlags } from '../hooks/useFeatureFlags'
+import { parseOptionalCoordinates } from '../utils/locationCoordinates'
 
 const live = c.entities.live
 
 type Entity = 'vendors' | 'drivers' | 'customers' | 'fleet'
-type EntityRow = { id: string; name: string; detail: string; status: string; active?: boolean; setupRequired?: boolean }
+type EntityRow = { id: string; name: string; detail: string; status: string; active?: boolean; setupRequired?: boolean; latitude?: number | null; longitude?: number | null }
 type Verification = 'pending' | 'approved' | 'rejected' | 'suspended'
 type Props = { entity: Entity; onNotice: (message: string) => void }
 
@@ -22,6 +23,7 @@ function isVerification(value: string): value is Verification {
 export function AdminEntityManagerLive({ entity, onNotice }: Props) {
   const [search, setSearch] = useState('')
   const [formOpen, setFormOpen] = useState(false)
+  const [editingVendor, setEditingVendor] = useState<EntityRow | null>(null)
   const [setupVendor, setSetupVendor] = useState<{ id: string; name: string } | null>(null)
   const [pendingVendorId, setPendingVendorId] = useState<string | null>(null)
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
@@ -37,17 +39,17 @@ export function AdminEntityManagerLive({ entity, onNotice }: Props) {
   const updateDriver = useMutation({ mutationFn: ({ id, verification, isActive }: { id: string; verification: Verification; isActive?: boolean }) => adminApi.updateDriverStatus(id, verification, isActive), onSuccess: () => queryClient.invalidateQueries({ queryKey: adminQueryKeys.drivers }) })
   const updateVehicle = useMutation({ mutationFn: ({ id, verification, isActive }: { id: string; verification: Verification; isActive?: boolean }) => adminApi.updateVehicleStatus(id, verification, isActive), onSuccess: () => queryClient.invalidateQueries({ queryKey: adminQueryKeys.vehicles }) })
   const create = useMutation<unknown, Error, Record<string, unknown>>({ mutationFn: (payload) => entity === 'vendors' ? adminApi.createVendor(payload as Parameters<typeof adminApi.createVendor>[0]) : entity === 'customers' ? adminApi.createCustomer(payload as Parameters<typeof adminApi.createCustomer>[0]) : entity === 'drivers' ? adminApi.createDriver(payload as Parameters<typeof adminApi.createDriver>[0]) : adminApi.createVehicle(payload as Parameters<typeof adminApi.createVehicle>[0]), onSuccess: () => { setFormOpen(false); void query.refetch(); onNotice(live.notices.recordCreated(entity)) }, onError: () => onNotice(live.notices.recordCreateFailed(entity)) })
-  const provisionVendor = useMutation({ mutationFn: ({ id, payload }: { id: string; payload: { businessName: string; phone: string; serviceZone: string } }) => adminApi.provisionVendor(id, payload), onSuccess: () => { setSetupVendor(null); void query.refetch(); onNotice(live.notices.vendorProfileCreated) }, onError: () => onNotice(live.notices.vendorProfileFailed) })
+  const provisionVendor = useMutation({ mutationFn: ({ id, payload }: { id: string; payload: { businessName: string; phone: string; serviceZone: string; latitude?: number; longitude?: number } }) => adminApi.provisionVendor(id, payload), onSuccess: () => { setSetupVendor(null); void query.refetch(); onNotice(live.notices.vendorProfileCreated) }, onError: () => onNotice(live.notices.vendorProfileFailed) })
   const remove = useMutation({ mutationFn: (id: string) => entity === 'vendors' ? adminApi.deleteVendor(id) : entity === 'customers' ? adminApi.deleteCustomer(id) : entity === 'drivers' ? adminApi.deleteDriver(id) : adminApi.deleteVehicle(id), onSuccess: () => { setPendingDeleteId(null); void query.refetch(); onNotice(live.notices.recordDeleted) }, onError: () => { setPendingDeleteId(null); onNotice(live.notices.recordDeleteFailed) } })
   const icon = entity === 'vendors' ? Users : entity === 'customers' ? UserRound : entity === 'drivers' ? UserRound : Truck
   const Icon = icon
-  const rows: EntityRow[] = useMemo(() => (query.data ?? []).map((raw) => { const item = raw as unknown as Record<string, unknown>; if (entity === 'vendors') { const setupRequired = Boolean(item.account_only); const hasPin = item.latitude !== null && item.latitude !== undefined && item.longitude !== null && item.longitude !== undefined; return { id: String(item.id), name: String(item.business_name ?? item.name ?? live.fallbacks.unnamedVendor), detail: setupRequired ? live.vendorSetupDetail(String(item.email ?? live.fallbacks.vendorLogin)) : live.vendorDetail(String(item.phone_e164 ?? live.fallbacks.noPhone), String(item.service_zone ?? live.fallbacks.noServiceZone), hasPin ? live.pinSaved : live.pinNeeded), status: setupRequired ? live.setupRequired : String(item.verification ?? 'pending'), active: Boolean(item.is_online), setupRequired } } if (entity === 'customers') return { id: String(item.id), name: String(item.full_name ?? live.fallbacks.unnamedCustomer), detail: String(item.phone_e164 ?? live.fallbacks.noPhoneNumber), status: 'active' }; if (entity === 'drivers') return { id: String(item.id), name: String(item.name ?? live.fallbacks.unnamedDriver), detail: live.driverDetail(String(item.mobile_e164 ?? live.fallbacks.noPhone), String(item.vendor_id ?? live.fallbacks.unassigned)), status: String(item.verification ?? 'pending'), active: Boolean(item.is_active) }; return { id: String(item.id), name: String(item.registration_number ?? live.fallbacks.unnamedVehicle), detail: live.vehicleDetail(String(item.capacity_litres ?? 0), String(item.vendor_id ?? live.fallbacks.unassigned)), status: String(item.verification ?? 'pending'), active: Boolean(item.is_active) } }).filter((item) => `${item.name} ${item.detail}`.toLowerCase().includes(search.toLowerCase())), [entity, query.data, search])
+  const rows: EntityRow[] = useMemo(() => (query.data ?? []).map((raw) => { const item = raw as unknown as Record<string, unknown>; if (entity === 'vendors') { const setupRequired = Boolean(item.account_only); const hasPin = item.latitude !== null && item.latitude !== undefined && item.longitude !== null && item.longitude !== undefined; return { id: String(item.id), name: String(item.business_name ?? item.name ?? live.fallbacks.unnamedVendor), detail: setupRequired ? live.vendorSetupDetail(String(item.email ?? live.fallbacks.vendorLogin)) : live.vendorDetail(String(item.phone_e164 ?? live.fallbacks.noPhone), String(item.service_zone ?? live.fallbacks.noServiceZone), hasPin ? live.pinSaved : live.pinNeeded), status: setupRequired ? live.setupRequired : String(item.verification ?? 'pending'), active: Boolean(item.is_online), setupRequired, latitude: typeof item.latitude === 'number' ? item.latitude : null, longitude: typeof item.longitude === 'number' ? item.longitude : null } } if (entity === 'customers') return { id: String(item.id), name: String(item.full_name ?? live.fallbacks.unnamedCustomer), detail: String(item.phone_e164 ?? live.fallbacks.noPhoneNumber), status: 'active' }; if (entity === 'drivers') return { id: String(item.id), name: String(item.name ?? live.fallbacks.unnamedDriver), detail: live.driverDetail(String(item.mobile_e164 ?? live.fallbacks.noPhone), String(item.vendor_id ?? live.fallbacks.unassigned)), status: String(item.verification ?? 'pending'), active: Boolean(item.is_active) }; return { id: String(item.id), name: String(item.registration_number ?? live.fallbacks.unnamedVehicle), detail: live.vehicleDetail(String(item.capacity_litres ?? 0), String(item.vendor_id ?? live.fallbacks.unassigned)), status: String(item.verification ?? 'pending'), active: Boolean(item.is_active) } }).filter((item) => `${item.name} ${item.detail}`.toLowerCase().includes(search.toLowerCase())), [entity, query.data, search])
   if (query.isLoading) return <section className="admin-view-panel" role="status"><h2>{live.loading(entity)}</h2></section>
   if (query.isError) return <section className="admin-view-panel" role="alert"><h2>{live.unavailable(entity)}</h2><button className="button button-primary" onClick={() => query.refetch()}>{live.retry}</button></section>
   function setStatus(row: (typeof rows)[number]) { const next: Verification = row.status === 'approved' ? 'suspended' : 'approved'; const options = { onSuccess: () => onNotice(live.notices.statusUpdated), onError: () => onNotice(live.notices.statusFailed) }; if (entity === 'vendors') updateVendor.mutate({ id: row.id, payload: { status: next } }, options); if (entity === 'drivers') updateDriver.mutate({ id: row.id, verification: next }, options); if (entity === 'fleet') updateVehicle.mutate({ id: row.id, verification: next }, options) }
   function setFleetActive(row: (typeof rows)[number]) { if (!isVerification(row.status)) { onNotice(live.notices.statusFailed); return } const options = { onSuccess: () => { void query.refetch(); onNotice(live.notices.statusUpdated) }, onError: () => onNotice(live.notices.statusFailed) }; if (entity === 'drivers') updateDriver.mutate({ id: row.id, verification: row.status, isActive: !row.active }, options); if (entity === 'fleet') updateVehicle.mutate({ id: row.id, verification: row.status, isActive: !row.active }, options) }
   function setVendorOnline(row: (typeof rows)[number]) { setPendingVendorId(row.id); updateVendor.mutate({ id: row.id, payload: { isOnline: !row.active } }, { onSuccess: () => { setPendingVendorId(null); void query.refetch(); onNotice(row.active ? live.notices.vendorInactive : live.notices.vendorActive) }, onError: () => { setPendingVendorId(null); onNotice(row.status === 'approved' ? live.notices.vendorAvailabilityFailed : live.notices.approveFirst) } }) }
-  function edit(row: (typeof rows)[number]) { const name = window.prompt(live.editPrompt, row.name); if (!name || name === row.name) return; const update = entity === 'vendors' ? adminApi.updateVendor(row.id, { businessName: name }) : entity === 'customers' ? adminApi.updateCustomer(row.id, { name }) : entity === 'drivers' ? adminApi.updateDriver(row.id, { name }) : adminApi.updateVehicle(row.id, { registrationNumber: name }); void update.then(() => { void query.refetch(); onNotice(live.notices.recordUpdated) }).catch(() => onNotice(live.notices.recordUpdateFailed)) }
+  function edit(row: (typeof rows)[number]) { if (entity === 'vendors') { setEditingVendor(row); return } const name = window.prompt(live.editPrompt, row.name); if (!name || name === row.name) return; const update = entity === 'customers' ? adminApi.updateCustomer(row.id, { name }) : entity === 'drivers' ? adminApi.updateDriver(row.id, { name }) : adminApi.updateVehicle(row.id, { registrationNumber: name }); void update.then(() => { void query.refetch(); onNotice(live.notices.recordUpdated) }).catch(() => onNotice(live.notices.recordUpdateFailed)) }
   return (
     <section className="admin-view-panel admin-entity-manager">
       <div className="view-panel-heading">
@@ -147,6 +149,18 @@ export function AdminEntityManagerLive({ entity, onNotice }: Props) {
             onSubmit={(event) => {
               event.preventDefault()
               const values = new FormData(event.currentTarget)
+              let coordinates: ReturnType<typeof parseOptionalCoordinates> = {}
+              if (entity === 'vendors' || entity === 'drivers') {
+                try {
+                  coordinates = parseOptionalCoordinates(
+                    values.get('latitude'),
+                    values.get('longitude'),
+                  )
+                } catch (error) {
+                  onNotice(error instanceof Error ? error.message : 'Coordinates are invalid.')
+                  return
+                }
+              }
               const payload: Record<string, unknown> = entity === 'vendors'
                 ? {
                     email: String(values.get('email')),
@@ -155,6 +169,7 @@ export function AdminEntityManagerLive({ entity, onNotice }: Props) {
                     phone: String(values.get('phone')),
                     businessName: String(values.get('businessName')),
                     serviceZone: String(values.get('serviceZone')),
+                    ...coordinates,
                   }
                 : entity === 'customers'
                   ? {
@@ -169,6 +184,7 @@ export function AdminEntityManagerLive({ entity, onNotice }: Props) {
                         name: String(values.get('name')),
                         mobileE164: String(values.get('phone')),
                         licenceNumber: String(values.get('licence')),
+                        ...coordinates,
                       }
                     : {
                         vendorId: String(values.get('vendorId')),
@@ -192,6 +208,8 @@ export function AdminEntityManagerLive({ entity, onNotice }: Props) {
                     {live.serviceZones.map((zone) => <option key={zone.id} value={zone.label}>{zone.label}</option>)}
                   </select>
                 </label>
+                <label>Latitude (optional)<input name="latitude" type="number" min="-90" max="90" step="any" /></label>
+                <label>Longitude (optional)<input name="longitude" type="number" min="-180" max="180" step="any" /></label>
               </>
             )}
             {entity === 'customers' && <label>{live.fields.password}<input name="password" type="password" minLength={8} required /></label>}
@@ -199,6 +217,8 @@ export function AdminEntityManagerLive({ entity, onNotice }: Props) {
               <>
                 <label>{live.fields.vendorId}<input name="vendorId" required /></label>
                 <label>{live.fields.licence}<input name="licence" required /></label>
+                <label>Latitude (optional)<input name="latitude" type="number" min="-90" max="90" step="any" /></label>
+                <label>Longitude (optional)<input name="longitude" type="number" min="-180" max="180" step="any" /></label>
               </>
             )}
             {entity === 'fleet' && (
@@ -213,6 +233,40 @@ export function AdminEntityManagerLive({ entity, onNotice }: Props) {
           </form>
         </Modal>
       )}
+      {editingVendor && (
+        <Modal title={live.editPrompt} onClose={() => setEditingVendor(null)}>
+          <form
+            className="modal-form"
+            onSubmit={(event) => {
+              event.preventDefault()
+              const values = new FormData(event.currentTarget)
+              let coordinates: ReturnType<typeof parseOptionalCoordinates>
+              try {
+                coordinates = parseOptionalCoordinates(
+                  values.get('latitude'),
+                  values.get('longitude'),
+                )
+              } catch (error) {
+                onNotice(error instanceof Error ? error.message : 'Coordinates are invalid.')
+                return
+              }
+              void adminApi.updateVendor(editingVendor.id, {
+                businessName: String(values.get('businessName')),
+                ...coordinates,
+              }).then(() => {
+                setEditingVendor(null)
+                void query.refetch()
+                onNotice(live.notices.recordUpdated)
+              }).catch(() => onNotice(live.notices.recordUpdateFailed))
+            }}
+          >
+            <label>{live.fields.businessName}<input name="businessName" defaultValue={editingVendor.name} required /></label>
+            <label>Latitude (optional)<input name="latitude" type="number" min="-90" max="90" step="any" defaultValue={editingVendor.latitude ?? ''} /></label>
+            <label>Longitude (optional)<input name="longitude" type="number" min="-180" max="180" step="any" defaultValue={editingVendor.longitude ?? ''} /></label>
+            <button className="button button-primary button-large" type="submit">{live.saving}</button>
+          </form>
+        </Modal>
+      )}
       {setupVendor && (
         <Modal title={live.completeVendorProfile} onClose={() => setSetupVendor(null)}>
           <p className="admin-dialog-eyebrow">{live.setupEyebrow(setupVendor.name)}</p>
@@ -222,12 +276,23 @@ export function AdminEntityManagerLive({ entity, onNotice }: Props) {
             onSubmit={(event) => {
               event.preventDefault()
               const values = new FormData(event.currentTarget)
+              let coordinates: ReturnType<typeof parseOptionalCoordinates>
+              try {
+                coordinates = parseOptionalCoordinates(
+                  values.get('latitude'),
+                  values.get('longitude'),
+                )
+              } catch (error) {
+                onNotice(error instanceof Error ? error.message : 'Coordinates are invalid.')
+                return
+              }
               provisionVendor.mutate({
                 id: setupVendor.id,
                 payload: {
                   businessName: String(values.get('businessName')),
                   phone: String(values.get('phone')),
                   serviceZone: String(values.get('serviceZone')),
+                  ...coordinates,
                 },
               })
             }}
@@ -241,6 +306,8 @@ export function AdminEntityManagerLive({ entity, onNotice }: Props) {
                 {live.serviceZones.map((zone) => <option key={zone.id} value={zone.label}>{zone.label}</option>)}
               </select>
             </label>
+            <label>Latitude (optional)<input name="latitude" type="number" min="-90" max="90" step="any" /></label>
+            <label>Longitude (optional)<input name="longitude" type="number" min="-180" max="180" step="any" /></label>
             <button className="button button-primary button-large" disabled={provisionVendor.isPending} type="submit">
               {provisionVendor.isPending ? live.saving : live.addToVendorReview}
             </button>

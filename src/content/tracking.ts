@@ -30,6 +30,7 @@ export const trackingContent = {
     refresh: 'Refresh',
     waitingTitle: 'Waiting for a live location',
     waitingBody: 'The vehicle location will appear when the delivery is en route.',
+    registeredLocationNote: 'Showing an approximate registered driver location. This is a fixed pin, not live GPS.',
     vehicleLabel: 'Vehicle',
     vehicleFallback: 'Assigning nearby tanker',
     driverLabel: 'Driver',

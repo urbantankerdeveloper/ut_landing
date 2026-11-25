@@ -16,7 +16,8 @@ export type SupportRequest = { id: string; subject: string; message: string; res
 export type CustomerUsage = { deliveries: number; totalSpend: number; averageAmount: number }
 export type CustomerProfile = { name: string; email: string; phone: string; phoneVerified?: boolean }
 export type CustomerProfileUpdate = Pick<CustomerProfile, 'name' | 'email'> & { phone?: string; phoneVerificationChallengeId?: string; emailVerificationChallengeId?: string }
-export type TrackingSnapshot = { orderId: string; status: string; latitude?: number; longitude?: number; customerLatitude?: number; customerLongitude?: number; eta?: string; vehicle?: string; driver?: string; otpRequired?: boolean; recorded_at?: string; recordedAt?: string; trackingAvailable?: boolean }
+export type TrackingLocationSource = 'live' | 'registered'
+export type TrackingSnapshot = { orderId: string; status: string; latitude?: number; longitude?: number; customerLatitude?: number; customerLongitude?: number; eta?: string; vehicle?: string; driver?: string; otpRequired?: boolean; recorded_at?: string; recordedAt?: string; trackingAvailable?: boolean; locationSource?: TrackingLocationSource }
 export type PaymentOrder = { id: string; amount: number; currency: string; keyId?: string }
 export type PaymentVerification = { verified: boolean; orderId: string }
 export type CreateBookingResult = { id: string; reference?: string; order_group_reference?: string; order_group_size?: number; tasks?: Record<string, unknown>[]; quoted_amount_paise?: number; quote?: { totalPaise: number } }
@@ -47,7 +48,7 @@ export type PublicTracking = {
   expectedDelivery?: string | null
   vehicle?: string | null
   driver?: string | null
-  lastLocation?: { latitude: number; longitude: number; accuracy?: number | null; recordedAt?: string | null } | null
+  lastLocation?: { latitude: number; longitude: number; accuracy?: number | null; recordedAt?: string | null; source?: TrackingLocationSource } | null
   events: { status: string; note?: string | null; createdAt: string }[]
   trackingAvailable: boolean
 }

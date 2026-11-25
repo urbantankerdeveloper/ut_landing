@@ -5,12 +5,13 @@ import { adminApi } from '../api/admin'
 import { adminQueryKeys, useAdminCustomers, useAdminDrivers, useAdminVehicles, useAdminVendors } from '../hooks/useAdminData'
 import { Modal } from '../components/Modal'
 import { adminEntitiesContent as c } from '../content/admin-entities'
+import { parseOptionalCoordinates } from '../utils/locationCoordinates'
 
 const copy = c.entities.modal
 
 type Entity = 'vendors' | 'drivers' | 'customers' | 'fleet'
 type Props = { entity: Entity; onNotice: (message: string) => void }
-type Row = { id: string; name: string; detail: string; status: string; active?: boolean }
+type Row = { id: string; name: string; detail: string; status: string; active?: boolean; latitude?: number | null; longitude?: number | null }
 type CreateInput =
   | { entity: 'vendors'; payload: Parameters<typeof adminApi.createVendor>[0] }
   | { entity: 'customers'; payload: Parameters<typeof adminApi.createCustomer>[0] }
@@ -41,23 +42,71 @@ export function AdminEntityManagerModal({ entity, onNotice }: Props) {
     onError: () => onNotice(copy.notices.recordCreateFailed(entity === 'fleet' ? copy.vehicleTitle : entity.slice(0, -1))),
   })
   const remove = useMutation({ mutationFn: (id: string) => entity === 'vendors' ? adminApi.deleteVendor(id) : entity === 'customers' ? adminApi.deleteCustomer(id) : entity === 'drivers' ? adminApi.deleteDriver(id) : adminApi.deleteVehicle(id), onSuccess: () => { setPendingDeleteId(null); void query.refetch(); onNotice(copy.notices.recordDeleted) }, onError: () => { setPendingDeleteId(null); onNotice(copy.notices.recordDeleteFailed) } })
-  const rows: Row[] = (query.data ?? []).map((raw) => { const item = raw as unknown as Record<string, unknown>; if (entity === 'vendors') return { id: String(item.id), name: String(item.business_name ?? item.name ?? copy.fallbacks.unnamedVendor), detail: copy.pair(String(item.phone_e164 ?? copy.fallbacks.noPhone), String(item.service_zone ?? copy.fallbacks.noServiceZone)), status: String(item.verification ?? 'pending'), active: Boolean(item.is_online) }; if (entity === 'customers') return { id: String(item.id), name: String(item.full_name ?? copy.fallbacks.unnamedCustomer), detail: String(item.phone_e164 ?? copy.fallbacks.noPhone), status: 'active' }; if (entity === 'drivers') return { id: String(item.id), name: String(item.name ?? copy.fallbacks.unnamedDriver), detail: copy.pair(String(item.mobile_e164 ?? copy.fallbacks.noPhone), String(item.licence_number ?? copy.fallbacks.noLicence)), status: String(item.verification ?? 'pending'), active: Boolean(item.is_active) }; return { id: String(item.id), name: String(item.registration_number ?? copy.fallbacks.unnamedVehicle), detail: copy.vehicleDetail(String(item.capacity_litres ?? 0), String(item.vendor_id ?? copy.fallbacks.unassigned)), status: String(item.verification ?? 'pending'), active: Boolean(item.is_active) } }).filter((row) => `${row.name} ${row.detail}`.toLowerCase().includes(search.toLowerCase()))
+  const rows: Row[] = (query.data ?? []).map((raw) => {
+    const item = raw as unknown as Record<string, unknown>
+    const coordinates = {
+      latitude: typeof item.latitude === 'number' ? item.latitude : null,
+      longitude: typeof item.longitude === 'number' ? item.longitude : null,
+    }
+    if (entity === 'vendors') return { id: String(item.id), name: String(item.business_name ?? item.name ?? copy.fallbacks.unnamedVendor), detail: copy.pair(String(item.phone_e164 ?? copy.fallbacks.noPhone), String(item.service_zone ?? copy.fallbacks.noServiceZone)), status: String(item.verification ?? 'pending'), active: Boolean(item.is_online), ...coordinates }
+    if (entity === 'customers') return { id: String(item.id), name: String(item.full_name ?? copy.fallbacks.unnamedCustomer), detail: String(item.phone_e164 ?? copy.fallbacks.noPhone), status: 'active' }
+    if (entity === 'drivers') return { id: String(item.id), name: String(item.name ?? copy.fallbacks.unnamedDriver), detail: copy.pair(String(item.mobile_e164 ?? copy.fallbacks.noPhone), String(item.licence_number ?? copy.fallbacks.noLicence)), status: String(item.verification ?? 'pending'), active: Boolean(item.is_active), ...coordinates }
+    return { id: String(item.id), name: String(item.registration_number ?? copy.fallbacks.unnamedVehicle), detail: copy.vehicleDetail(String(item.capacity_litres ?? 0), String(item.vendor_id ?? copy.fallbacks.unassigned)), status: String(item.verification ?? 'pending'), active: Boolean(item.is_active) }
+  }).filter((row) => `${row.name} ${row.detail}`.toLowerCase().includes(search.toLowerCase()))
   function setStatus(row: Row) { const next = row.status === 'approved' ? 'suspended' : 'approved'; const options = { onSuccess: () => { void query.refetch(); onNotice(copy.notices.approvalUpdated) }, onError: () => onNotice(copy.notices.approvalFailed) }; if (entity === 'vendors') updateVendor.mutate({ id: row.id, payload: { status: next } }, options); if (entity === 'drivers') updateDriver.mutate({ id: row.id, verification: next }, options); if (entity === 'fleet') updateVehicle.mutate({ id: row.id, verification: next }, options) }
   function setVendorOnline(row: Row) { updateVendor.mutate({ id: row.id, payload: { isOnline: !row.active } }, { onSuccess: () => { void query.refetch(); onNotice(row.active ? copy.notices.vendorInactive : copy.notices.vendorActive) }, onError: () => onNotice(row.status === 'approved' ? copy.notices.vendorAvailabilityFailed : copy.notices.approveFirst) }) }
   function createRecord(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const values = new FormData(event.currentTarget)
+    let coordinates: ReturnType<typeof parseOptionalCoordinates> = {}
+    if (entity === 'vendors' || entity === 'drivers') {
+      try {
+        coordinates = parseOptionalCoordinates(
+          values.get('latitude'),
+          values.get('longitude'),
+        )
+      } catch (error) {
+        onNotice(error instanceof Error ? error.message : 'Coordinates are invalid.')
+        return
+      }
+    }
     if (entity === 'vendors') {
-      create.mutate({ entity, payload: { email: String(values.get('email')), password: String(values.get('password')), name: String(values.get('name')), phone: String(values.get('phone')), businessName: String(values.get('businessName')), serviceZone: String(values.get('serviceZone')) } })
+      create.mutate({ entity, payload: { email: String(values.get('email')), password: String(values.get('password')), name: String(values.get('name')), phone: String(values.get('phone')), businessName: String(values.get('businessName')), serviceZone: String(values.get('serviceZone')), ...coordinates } })
     } else if (entity === 'customers') {
       create.mutate({ entity, payload: { email: String(values.get('email')), password: String(values.get('password')), name: String(values.get('name')), phone: String(values.get('phone')) } })
     } else if (entity === 'drivers') {
-      create.mutate({ entity, payload: { vendorId: String(values.get('vendorId')), name: String(values.get('name')), mobileE164: String(values.get('phone')), licenceNumber: String(values.get('licence')) } })
+      create.mutate({ entity, payload: { vendorId: String(values.get('vendorId')), name: String(values.get('name')), mobileE164: String(values.get('phone')), licenceNumber: String(values.get('licence')), ...coordinates } })
     } else {
       create.mutate({ entity, payload: { vendorId: String(values.get('vendorId')), registrationNumber: String(values.get('registration')), capacityLitres: Number(values.get('capacity')) } })
     }
   }
-  function saveEdit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); if (!editing) return; const value = String(new FormData(event.currentTarget).get('name') || '').trim(); if (!value) return; const promise = entity === 'vendors' ? adminApi.updateVendor(editing.id, { businessName: value }) : entity === 'customers' ? adminApi.updateCustomer(editing.id, { name: value }) : entity === 'drivers' ? adminApi.updateDriver(editing.id, { name: value }) : adminApi.updateVehicle(editing.id, { registrationNumber: value }); void promise.then(() => { setEditing(null); void query.refetch(); onNotice(copy.notices.recordUpdated) }).catch(() => onNotice(copy.notices.recordUpdateFailed)) }
+  function saveEdit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!editing) return
+    const values = new FormData(event.currentTarget)
+    const value = String(values.get('name') || '').trim()
+    if (!value) return
+    let coordinates: ReturnType<typeof parseOptionalCoordinates> = {}
+    if (entity === 'vendors' || entity === 'drivers') {
+      try {
+        coordinates = parseOptionalCoordinates(
+          values.get('latitude'),
+          values.get('longitude'),
+        )
+      } catch (error) {
+        onNotice(error instanceof Error ? error.message : 'Coordinates are invalid.')
+        return
+      }
+    }
+    const promise = entity === 'vendors'
+      ? adminApi.updateVendor(editing.id, { businessName: value, ...coordinates })
+      : entity === 'customers'
+        ? adminApi.updateCustomer(editing.id, { name: value })
+        : entity === 'drivers'
+          ? adminApi.updateDriver(editing.id, { name: value, ...coordinates })
+          : adminApi.updateVehicle(editing.id, { registrationNumber: value })
+    void promise.then(() => { setEditing(null); void query.refetch(); onNotice(copy.notices.recordUpdated) }).catch(() => onNotice(copy.notices.recordUpdateFailed))
+  }
   const Icon = entity === 'vendors' ? Users : entity === 'customers' ? UserRound : entity === 'drivers' ? UserRound : Truck
   if (query.isLoading) return <section className="admin-view-panel" role="status"><h2>{copy.loading(entity)}</h2></section>
   if (query.isError) return <section className="admin-view-panel"><h2>{copy.unavailable(entity)}</h2><p role="alert">{query.error instanceof Error ? query.error.message : copy.requestFailed}</p><button className="button button-primary" onClick={() => query.refetch()}>{copy.retry}</button></section>
@@ -70,6 +119,8 @@ export function AdminEntityManagerModal({ entity, onNotice }: Props) {
         <label>{copy.fields.phone}<input name="phone" type="tel" required /></label>
         <label>{copy.fields.businessName}<input name="businessName" required /></label>
         <label>{copy.fields.serviceZone}<input name="serviceZone" required /></label>
+        <label>Latitude (optional)<input name="latitude" type="number" min="-90" max="90" step="any" /></label>
+        <label>Longitude (optional)<input name="longitude" type="number" min="-180" max="180" step="any" /></label>
       </>}
       {entity === 'customers' && <>
         <label>{copy.fields.name}<input name="name" required autoFocus /></label>
@@ -82,6 +133,8 @@ export function AdminEntityManagerModal({ entity, onNotice }: Props) {
         <label>{copy.fields.driverName}<input name="name" required autoFocus /></label>
         <label>{copy.fields.mobile}<input name="phone" type="tel" required /></label>
         <label>{copy.fields.licence}<input name="licence" required /></label>
+        <label>Latitude (optional)<input name="latitude" type="number" min="-90" max="90" step="any" /></label>
+        <label>Longitude (optional)<input name="longitude" type="number" min="-180" max="180" step="any" /></label>
       </>}
       {entity === 'fleet' && <>
         <label>{copy.fields.registrationNumber}<input name="registration" required autoFocus /></label>
@@ -89,5 +142,5 @@ export function AdminEntityManagerModal({ entity, onNotice }: Props) {
       </>}
       <button className="button button-primary button-large" type="submit" disabled={create.isPending || ((entity === 'drivers' || entity === 'fleet') && (!vendors.data?.length || vendors.isError))}><Plus size={15} /> {create.isPending ? c.common.creating : c.common.createRecord}</button>
     </form></Modal>}
-    {editing && <Modal title={copy.editRecord(editing.name)} onClose={() => setEditing(null)}><form className="modal-form" onSubmit={saveEdit}><label>{entity === 'fleet' ? copy.fields.registrationNumber : copy.fields.name}<input name="name" defaultValue={editing.name} required autoFocus /></label><button className="button button-primary button-large" type="submit">{copy.saveChanges}</button></form></Modal>}</section>
+    {editing && <Modal title={copy.editRecord(editing.name)} onClose={() => setEditing(null)}><form className="modal-form" onSubmit={saveEdit}><label>{entity === 'fleet' ? copy.fields.registrationNumber : copy.fields.name}<input name="name" defaultValue={editing.name} required autoFocus /></label>{(entity === 'vendors' || entity === 'drivers') && <><label>Latitude (optional)<input name="latitude" type="number" min="-90" max="90" step="any" defaultValue={editing.latitude ?? ''} /></label><label>Longitude (optional)<input name="longitude" type="number" min="-180" max="180" step="any" defaultValue={editing.longitude ?? ''} /></label></>}<button className="button button-primary button-large" type="submit">{copy.saveChanges}</button></form></Modal>}</section>
 }

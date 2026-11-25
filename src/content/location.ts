@@ -17,5 +17,6 @@ export const locationContent = {
     waiting: 'Waiting for the fleet to start sharing its live location.',
     fleet: 'Fleet',
     deliveryPoint: 'Delivery point',
+    registeredDriverNote: 'Showing the driver’s registered location. This is a fixed pin, not live GPS.',
   },
 } as const

@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { supabase } from '../supabase.js'
 import { hashTrackingToken } from '../services/trackingTokens.js'
+import { resolveTrackingLocation } from '../services/trackingLocation.js'
 
 const router = Router()
 
@@ -14,7 +15,12 @@ export function publicDriverName(status: string, name: string | null | undefined
   return name?.trim().split(/\s+/)[0] || null
 }
 
-export function publicCoordinate(value: number, status: string) {
+export function publicCoordinate(
+  value: number,
+  status: string,
+  source: 'live' | 'registered' = 'live',
+) {
+  if (source === 'registered') return Math.round(value * 100) / 100
   return coarseLocationStatuses.includes(status) ? Math.round(value * 1000) / 1000 : value
 }
 
@@ -36,10 +42,24 @@ router.get('/tracking/:token', async (request, response) => {
     supabase.from('booking_events').select('from_status,to_status,note,created_at').eq('booking_id', booking.id).order('created_at', { ascending: true }),
     supabase.from('vendor_location_updates').select('latitude,longitude,accuracy_metres,recorded_at').eq('booking_id', booking.id).order('recorded_at', { ascending: false }).limit(1).maybeSingle(),
     booking.vehicle_id ? supabase.from('vehicles').select('registration_number').eq('id', booking.vehicle_id).maybeSingle() : Promise.resolve({ data: null, error: null }),
-    booking.driver_id && driverVisibleStatuses.includes(booking.status) ? supabase.from('drivers').select('name').eq('id', booking.driver_id).maybeSingle() : Promise.resolve({ data: null, error: null }),
+    booking.driver_id && driverVisibleStatuses.includes(booking.status) ? supabase.from('drivers').select('name,latitude,longitude').eq('id', booking.driver_id).maybeSingle() : Promise.resolve({ data: null, error: null }),
   ])
   const queryError = eventsResult.error ?? locationResult.error ?? vehicleResult.error ?? driverResult.error
   if (queryError) return response.status(500).json({ error: queryError.message })
+
+  const lastLocation = resolveTrackingLocation(
+    booking.status,
+    locationResult.data && {
+      latitude: locationResult.data.latitude,
+      longitude: locationResult.data.longitude,
+      accuracy: locationResult.data.accuracy_metres,
+      recordedAt: locationResult.data.recorded_at,
+    },
+    driverResult.data && {
+      latitude: driverResult.data.latitude,
+      longitude: driverResult.data.longitude,
+    },
+  )
 
   response.json({
     bookingReference: booking.reference,
@@ -47,18 +67,27 @@ router.get('/tracking/:token', async (request, response) => {
     expectedDelivery: booking.scheduled_for,
     vehicle: vehicleResult.data?.registration_number ?? null,
     driver: publicDriverName(booking.status, driverResult.data?.name),
-    lastLocation: locationResult.data ? {
-      latitude: publicCoordinate(locationResult.data.latitude, booking.status),
-      longitude: publicCoordinate(locationResult.data.longitude, booking.status),
-      accuracy: locationResult.data.accuracy_metres,
-      recordedAt: locationResult.data.recorded_at,
+    lastLocation: lastLocation ? {
+      latitude: publicCoordinate(
+        lastLocation.latitude,
+        booking.status,
+        lastLocation.source,
+      ),
+      longitude: publicCoordinate(
+        lastLocation.longitude,
+        booking.status,
+        lastLocation.source,
+      ),
+      accuracy: lastLocation.accuracy,
+      recordedAt: lastLocation.recordedAt,
+      source: lastLocation.source,
     } : null,
     events: (eventsResult.data ?? []).map((event) => ({
       status: event.to_status,
       note: event.note,
       createdAt: event.created_at,
     })),
-    trackingAvailable: Boolean(locationResult.data),
+    trackingAvailable: lastLocation !== null,
   })
 })
 
