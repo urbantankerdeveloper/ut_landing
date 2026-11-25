@@ -42,6 +42,14 @@ backend/hostinger-upload.zip
 Upload that ZIP through the Node.js Web App in hPanel. The script excludes `.git`, `node_modules`, environment files, and test files.
 The staged archive includes `.npmrc` with `omit=dev`; hPanel should install with `npm ci --omit=dev` (or confirm `.npmrc` is honored). Do not install TypeScript or test dependencies in production.
 
+## Frontend blank page after deployment
+
+The frontend uses content-hashed JavaScript files under `/assets/`. If an old page requests a bundle that is no longer present, Apache must return a 404 for that asset rather than rewrite the request to `index.html`; otherwise the browser tries to parse HTML as JavaScript. The frontend `.htaccess` excludes missing assets from the SPA fallback and prevents those 404s from being cached as immutable bundles.
+
+The build ships ordinary JavaScript and CSS files and leaves compression to Hostinger. Do not add `.br`/`.gz` rewrites, `Content-Encoding` overrides, or Apache compression filters; combining these with Hostinger's compression can make the browser receive compressed bytes as JavaScript and show `Invalid or unexpected token`.
+
+Deploy the latest frontend build, including the hidden `dist/.htaccess` file. Then purge Hostinger's CDN/cache and hard-refresh the browser. If the page still requests an old bundle, clear the site's stored data/service worker and reload. A valid bundle response should have a JavaScript content type and JavaScript body; a missing bundle should return 404, never the app's HTML shell.
+
 ## Runtime environment variables
 
 Enter values in hPanel's environment-variable settings; never put real credentials in the ZIP. Names below come from the backend runtime configuration schema.

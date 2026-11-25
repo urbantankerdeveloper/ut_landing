@@ -2,7 +2,13 @@ Options -Indexes -MultiViews
 RewriteEngine On
 RewriteBase /
 
+# Missing build assets must not be rewritten to the SPA shell or cached as JavaScript.
+RewriteCond %{REQUEST_URI} ^/assets/
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^ - [E=missing_asset:1]
+
 # Serve real files and folders directly; every other path (including /track/<token>) loads the single-page app.
+RewriteCond %{REQUEST_URI} !^/assets/
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^ index.html [L]
@@ -20,6 +26,7 @@ RewriteRule ^ index.html [L]
   Header always set X-Frame-Options "DENY"
   Header always set Permissions-Policy "camera=(self), microphone=(), geolocation=(self)"
   Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+  Header always set Cache-Control "no-store" env=missing_asset
   # API origins are filled at build time by scripts/prepare-deploy-config.mjs from VITE_API_BASE_URL and SUPABASE_REF.
   Header always set Content-Security-Policy "default-src 'self'; script-src 'self' https://checkout.razorpay.com https://maps.googleapis.com; style-src 'self'; font-src 'self'; img-src 'self' data: blob: https://*.tile.openstreetmap.org https://*.razorpay.com https://<SUPABASE_REF>.supabase.co https://*.googleapis.com https://*.gstatic.com https://*.ggpht.com; connect-src 'self' __API_ORIGIN__ __REALTIME_WS_ORIGIN__ https://nominatim.openstreetmap.org https://*.razorpay.com https://<SUPABASE_REF>.supabase.co https://maps.googleapis.com; frame-src https://*.razorpay.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 </IfModule>
@@ -43,58 +50,9 @@ RewriteRule ^ index.html [L]
   AddType image/x-icon .ico
 </IfModule>
 
-<FilesMatch "\.(?:js|mjs)\.(?:br|gz)$">
-  ForceType text/javascript
-</FilesMatch>
-<FilesMatch "\.css\.(?:br|gz)$">
-  ForceType text/css
-</FilesMatch>
-<FilesMatch "\.json\.(?:br|gz)$">
-  ForceType application/json
-</FilesMatch>
-<FilesMatch "\.webmanifest\.(?:br|gz)$">
-  ForceType application/manifest+json
-</FilesMatch>
-<FilesMatch "\.html\.(?:br|gz)$">
-  ForceType text/html
-</FilesMatch>
-<FilesMatch "\.svg\.(?:br|gz)$">
-  ForceType image/svg+xml
-</FilesMatch>
-<FilesMatch "\.xml\.(?:br|gz)$">
-  ForceType application/xml
-</FilesMatch>
-
-<IfModule mod_brotli.c>
-  AddOutputFilterByType BROTLI_COMPRESS text/html text/plain text/xml text/css text/javascript application/javascript application/json application/xml application/font-woff2 image/svg+xml
-</IfModule>
-
-<IfModule mod_deflate.c>
-  <IfModule !mod_brotli.c>
-    AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/json application/xml application/font-woff2 image/svg+xml
-  </IfModule>
-</IfModule>
-
 <IfModule mod_headers.c>
   Header append Vary Accept-Encoding
 </IfModule>
-
-# Prefer precompressed assets; the build creates matching .br and .gz siblings.
-RewriteCond %{HTTP:Accept-Encoding} br
-RewriteCond %{REQUEST_FILENAME}\.br -f
-RewriteRule ^(.+\.(?:js|css|svg|html|json|txt|xml|webmanifest))$ $1.br [L]
-RewriteCond %{HTTP:Accept-Encoding} gzip
-RewriteCond %{REQUEST_FILENAME}\.gz -f
-RewriteRule ^(.+\.(?:js|css|svg|html|json|txt|xml|webmanifest))$ $1.gz [L]
-
-<FilesMatch "\.br$">
-  Header set Content-Encoding br
-  Header set Vary Accept-Encoding
-</FilesMatch>
-<FilesMatch "\.gz$">
-  Header set Content-Encoding gzip
-  Header set Vary Accept-Encoding
-</FilesMatch>
 
 <IfModule mod_expires.c>
   ExpiresActive On
@@ -108,7 +66,7 @@ RewriteRule ^(.+\.(?:js|css|svg|html|json|txt|xml|webmanifest))$ $1.gz [L]
 </FilesMatch>
 
 <IfModule mod_headers.c>
-  <If "%{REQUEST_URI} =~ m#^/assets/#">
+  <If "%{REQUEST_URI} =~ m#^/assets/# && -f %{REQUEST_FILENAME}">
     Header set Cache-Control "public, max-age=31536000, immutable"
   </If>
 </IfModule>

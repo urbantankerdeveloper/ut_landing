@@ -1,9 +1,8 @@
 import react from '@vitejs/plugin-react'
 import { createHash } from 'node:crypto'
-import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { constants as zlibConstants, brotliCompressSync, gzipSync } from 'node:zlib'
 import { visualizer } from 'rollup-plugin-visualizer'
 import { defineConfig, type Plugin } from 'vite'
 
@@ -41,39 +40,12 @@ function serviceWorkerShell(): Plugin {
   }
 }
 
-function precompressedAssets(): Plugin {
-  let outDir = ''
-  return {
-    name: 'urban-tanker-precompressed-assets',
-    apply: 'build',
-    configResolved(config) {
-      outDir = resolve(config.root, config.build.outDir)
-    },
-    closeBundle() {
-      const visit = (directory: string) => {
-        for (const entry of readdirSync(directory, { withFileTypes: true })) {
-          const path = resolve(directory, entry.name)
-          if (entry.isDirectory()) {
-            visit(path)
-          } else if (/\.(?:js|css|svg|html|json|txt|xml|webmanifest)$/.test(entry.name)) {
-            const source = readFileSync(path)
-            writeFileSync(`${path}.br`, brotliCompressSync(source, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 11 } }))
-            writeFileSync(`${path}.gz`, gzipSync(source, { level: 9 }))
-          }
-        }
-      }
-      visit(outDir)
-    },
-  }
-}
-
 export default defineConfig(({ mode }) => {
   const apiTarget = `http://localhost:${backendPort()}`
   return {
     plugins: [
       react(),
       serviceWorkerShell(),
-      precompressedAssets(),
       mode === 'analyze'
         ? visualizer({ filename: 'stats/bundle.html', template: 'treemap', gzipSize: true, brotliSize: true }) as Plugin
         : false,
