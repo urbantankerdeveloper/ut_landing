@@ -19,6 +19,12 @@
 .location-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .location-picker-modal { display: grid; gap: 16px; width: 100%; max-width: 100%; min-width: 0; }
 .location-picker-modal .modal-required-note { display: flex; align-items: center; gap: 6px; }
+.coordinate-picker-field { min-width: 0; padding: 12px; margin: 0; border: 1px solid #d8e6e1; border-radius: 10px; }
+.coordinate-picker-field legend { padding: 0 5px; font-size: 13px; font-weight: 650; }
+.coordinate-picker-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.coordinate-picker-value,.coordinate-picker-empty { display: flex; align-items: center; gap: 7px; margin: 9px 0 0; color: #456b67; font-size: 12px; }
+.coordinate-picker-map { display: grid; gap: 14px; width: min(100%, 680px); }
+.coordinate-picker-map > p { margin: 0; color: #456b67; font-size: 13px; }
 .location-selected-name { display: flex; align-items: center; gap: 7px; padding: 10px 12px; margin: 0; color: #0d5f59; background: #e7f6f1; border-radius: 8px; font-size: 13px; font-weight: 650; }
 .location-lookup-error { padding: 10px 12px; margin: 0; color: #8a3d2b; background: #fff0eb; border-radius: 8px; font-size: 12px; }
 .tracking-live-map { position: relative; }

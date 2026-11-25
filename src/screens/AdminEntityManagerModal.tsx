@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Pencil, Plus, Search, ShieldCheck, Trash2, Truck, UserRound, Users } from 'lucide-react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { adminApi } from '../api/admin'
+import { CoordinatePickerField } from '../components/CoordinatePickerField'
 import { adminQueryKeys, useAdminCustomers, useAdminDrivers, useAdminVehicles, useAdminVendors } from '../hooks/useAdminData'
 import { Modal } from '../components/Modal'
 import { adminEntitiesContent as c } from '../content/admin-entities'
@@ -119,8 +120,7 @@ export function AdminEntityManagerModal({ entity, onNotice }: Props) {
         <label>{copy.fields.phone}<input name="phone" type="tel" required /></label>
         <label>{copy.fields.businessName}<input name="businessName" required /></label>
         <label>{copy.fields.serviceZone}<input name="serviceZone" required /></label>
-        <label>Latitude (optional)<input name="latitude" type="number" min="-90" max="90" step="any" /></label>
-        <label>Longitude (optional)<input name="longitude" type="number" min="-180" max="180" step="any" /></label>
+        <CoordinatePickerField onNotice={onNotice} />
       </>}
       {entity === 'customers' && <>
         <label>{copy.fields.name}<input name="name" required autoFocus /></label>
@@ -133,8 +133,7 @@ export function AdminEntityManagerModal({ entity, onNotice }: Props) {
         <label>{copy.fields.driverName}<input name="name" required autoFocus /></label>
         <label>{copy.fields.mobile}<input name="phone" type="tel" required /></label>
         <label>{copy.fields.licence}<input name="licence" required /></label>
-        <label>Latitude (optional)<input name="latitude" type="number" min="-90" max="90" step="any" /></label>
-        <label>Longitude (optional)<input name="longitude" type="number" min="-180" max="180" step="any" /></label>
+        <CoordinatePickerField onNotice={onNotice} />
       </>}
       {entity === 'fleet' && <>
         <label>{copy.fields.registrationNumber}<input name="registration" required autoFocus /></label>
@@ -142,5 +141,5 @@ export function AdminEntityManagerModal({ entity, onNotice }: Props) {
       </>}
       <button className="button button-primary button-large" type="submit" disabled={create.isPending || ((entity === 'drivers' || entity === 'fleet') && (!vendors.data?.length || vendors.isError))}><Plus size={15} /> {create.isPending ? c.common.creating : c.common.createRecord}</button>
     </form></Modal>}
-    {editing && <Modal title={copy.editRecord(editing.name)} onClose={() => setEditing(null)}><form className="modal-form" onSubmit={saveEdit}><label>{entity === 'fleet' ? copy.fields.registrationNumber : copy.fields.name}<input name="name" defaultValue={editing.name} required autoFocus /></label>{(entity === 'vendors' || entity === 'drivers') && <><label>Latitude (optional)<input name="latitude" type="number" min="-90" max="90" step="any" defaultValue={editing.latitude ?? ''} /></label><label>Longitude (optional)<input name="longitude" type="number" min="-180" max="180" step="any" defaultValue={editing.longitude ?? ''} /></label></>}<button className="button button-primary button-large" type="submit">{copy.saveChanges}</button></form></Modal>}</section>
+    {editing && <Modal title={copy.editRecord(editing.name)} onClose={() => setEditing(null)}><form className="modal-form" onSubmit={saveEdit}><label>{entity === 'fleet' ? copy.fields.registrationNumber : copy.fields.name}<input name="name" defaultValue={editing.name} required autoFocus /></label>{(entity === 'vendors' || entity === 'drivers') && <CoordinatePickerField initialLatitude={editing.latitude} initialLongitude={editing.longitude} onNotice={onNotice} />}<button className="button button-primary button-large" type="submit">{copy.saveChanges}</button></form></Modal>}</section>
 }

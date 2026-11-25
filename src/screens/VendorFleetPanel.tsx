@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Save, Truck, UserRound } from 'lucide-react'
 import { demoDataEnabled } from '../constants/demo'
+import { CoordinatePickerField } from '../components/CoordinatePickerField'
 import { useCreateVendorDriver, useCreateVendorVehicle, useUpdateVendorDriver, useUpdateVendorVehicle, useVendorDrivers, useVendorVehicles } from '../hooks/useVendorData'
 import { vendorContent as c } from '../content/vendor'
 import { parseOptionalCoordinates } from '../utils/locationCoordinates'
@@ -159,8 +160,7 @@ export function VendorFleetPanel({ mode, onNotice }: Props) {
         <label>{c.fleet.drivers.name}<input name="name" placeholder={c.fleet.drivers.namePlaceholder} required /></label>
         <label>{c.fleet.drivers.mobile}<input name="mobileE164" inputMode="numeric" placeholder={c.fleet.drivers.mobilePlaceholder} required /></label>
         <label>{c.fleet.drivers.licence}<input name="licenceNumber" placeholder={c.fleet.drivers.licenceNumberPlaceholder} required /></label>
-        <label>Latitude (optional)<input name="latitude" type="number" min="-90" max="90" step="any" /></label>
-        <label>Longitude (optional)<input name="longitude" type="number" min="-180" max="180" step="any" /></label>
+        <CoordinatePickerField onNotice={onNotice} />
         <button className="button button-primary" disabled={createDriver.isPending}>{c.fleet.drivers.addDriver}</button>
       </form>
       <div className="vendor-fleet-list">
@@ -170,8 +170,11 @@ export function VendorFleetPanel({ mode, onNotice }: Props) {
             <label>{c.fleet.drivers.name}<input name="name" defaultValue={driver.name} required /></label>
             <label>{c.fleet.drivers.mobile}<input name="mobileE164" defaultValue={driver.mobile_e164} inputMode="numeric" required /></label>
             <label>{c.fleet.drivers.licence}<input name="licenceNumber" defaultValue={driver.licence_number ?? ''} placeholder={c.fleet.drivers.licenceNumberPlaceholder} required /></label>
-            <label>Latitude (optional)<input name="latitude" type="number" min="-90" max="90" step="any" defaultValue={driver.latitude ?? ''} /></label>
-            <label>Longitude (optional)<input name="longitude" type="number" min="-180" max="180" step="any" defaultValue={driver.longitude ?? ''} /></label>
+            <CoordinatePickerField
+              initialLatitude={driver.latitude}
+              initialLongitude={driver.longitude}
+              onNotice={onNotice}
+            />
             <label className="vendor-active-toggle"><input name="isActive" type="checkbox" defaultChecked={driver.is_active} /> {c.fleet.active}</label>
             <span className="status-tag">{driver.verification}</span>
             <button className="button button-quiet" disabled={savingDriverId === driver.id}><Save size={14} /> {savingDriverId === driver.id ? c.common.saving : c.common.save}</button>

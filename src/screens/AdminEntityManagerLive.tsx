@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Pencil, Plus, Search, ShieldCheck, Trash2, Truck, UserRound, Users } from 'lucide-react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { adminApi } from '../api/admin'
+import { CoordinatePickerField } from '../components/CoordinatePickerField'
 import { adminQueryKeys, useAdminCustomers, useAdminDrivers, useAdminVehicles, useAdminVendors } from '../hooks/useAdminData'
 import { Modal } from '../components/Modal'
 import { AdminCustomerSelfie } from './AdminCustomerSelfie'
@@ -208,8 +209,7 @@ export function AdminEntityManagerLive({ entity, onNotice }: Props) {
                     {live.serviceZones.map((zone) => <option key={zone.id} value={zone.label}>{zone.label}</option>)}
                   </select>
                 </label>
-                <label>Latitude (optional)<input name="latitude" type="number" min="-90" max="90" step="any" /></label>
-                <label>Longitude (optional)<input name="longitude" type="number" min="-180" max="180" step="any" /></label>
+                <CoordinatePickerField onNotice={onNotice} />
               </>
             )}
             {entity === 'customers' && <label>{live.fields.password}<input name="password" type="password" minLength={8} required /></label>}
@@ -217,8 +217,7 @@ export function AdminEntityManagerLive({ entity, onNotice }: Props) {
               <>
                 <label>{live.fields.vendorId}<input name="vendorId" required /></label>
                 <label>{live.fields.licence}<input name="licence" required /></label>
-                <label>Latitude (optional)<input name="latitude" type="number" min="-90" max="90" step="any" /></label>
-                <label>Longitude (optional)<input name="longitude" type="number" min="-180" max="180" step="any" /></label>
+                <CoordinatePickerField onNotice={onNotice} />
               </>
             )}
             {entity === 'fleet' && (
@@ -261,8 +260,11 @@ export function AdminEntityManagerLive({ entity, onNotice }: Props) {
             }}
           >
             <label>{live.fields.businessName}<input name="businessName" defaultValue={editingVendor.name} required /></label>
-            <label>Latitude (optional)<input name="latitude" type="number" min="-90" max="90" step="any" defaultValue={editingVendor.latitude ?? ''} /></label>
-            <label>Longitude (optional)<input name="longitude" type="number" min="-180" max="180" step="any" defaultValue={editingVendor.longitude ?? ''} /></label>
+            <CoordinatePickerField
+              initialLatitude={editingVendor.latitude}
+              initialLongitude={editingVendor.longitude}
+              onNotice={onNotice}
+            />
             <button className="button button-primary button-large" type="submit">{live.saving}</button>
           </form>
         </Modal>
@@ -306,8 +308,7 @@ export function AdminEntityManagerLive({ entity, onNotice }: Props) {
                 {live.serviceZones.map((zone) => <option key={zone.id} value={zone.label}>{zone.label}</option>)}
               </select>
             </label>
-            <label>Latitude (optional)<input name="latitude" type="number" min="-90" max="90" step="any" /></label>
-            <label>Longitude (optional)<input name="longitude" type="number" min="-180" max="180" step="any" /></label>
+            <CoordinatePickerField onNotice={onNotice} />
             <button className="button button-primary button-large" disabled={provisionVendor.isPending} type="submit">
               {provisionVendor.isPending ? live.saving : live.addToVendorReview}
             </button>
