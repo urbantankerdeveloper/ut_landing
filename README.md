@@ -30,6 +30,12 @@ npm run reference:list
 
 The reference server intentionally fails when port `4174` is occupied instead of switching ports silently.
 
+## Local production frontend with API
+
+Run `npm start` from the repository root to build the production frontend, serve it at `http://127.0.0.1:4173`, and start the backend in development mode at `http://127.0.0.1:8080`. The backend uses development mode locally because production CORS requires HTTPS origins.
+
+Before starting, set `VITE_API_BASE_URL=http://127.0.0.1:8080` in the ignored root `.env.production.local` file and configure `backend/.env.local` with `NODE_ENV=development`, the local port, and your development service credentials. Preserve `SUPABASE_REF` in the root production environment file because the frontend build uses it. Do not commit credentials. Rebuild with the production environment before deploying; this local build is configured for localhost.
+
 ## Database setup
 
 The canonical install, including security hardening, is `backend/supabase/001_initial.sql`. `npm run db:reset` in `backend/` applies it by dropping and recreating the `public` schema; application data is deleted, while Supabase-managed authentication data is preserved. Use it only for a disposable/test database. The reset script requires `NODE_ENV=test`, an explicitly allowed project ref, and `CONFIRM_DATABASE_RESET=URBAN_TANKER_RESET`.
