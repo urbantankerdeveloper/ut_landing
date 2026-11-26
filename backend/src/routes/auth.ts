@@ -493,6 +493,49 @@ type ProfileRow = {
   theme_mode: string | null
   selfie_required: boolean | null
   approval_status: string | null
+  admin_approval_status?: string | null
+  is_active?: boolean | null
+}
+
+function blockUnapprovedAdminAccess(response: Response, profile: Pick<ProfileRow, 'role'> & { admin_approval_status?: string | null; is_active?: boolean | null }) {
+  if (!config.featureFlags.admin_approval_required_enabled || profile.role !== 'admin') return false
+  if (profile.is_active === false) {
+    response.status(403).json({
+      code: 'ADMIN_ACCESS_DEACTIVATED',
+      error: 'Your admin access has been deactivated',
+    })
+    return true
+  }
+  if (profile.admin_approval_status === 'approved') return false
+  const rejected = profile.admin_approval_status === 'rejected'
+  response.status(403).json({
+    code: rejected ? 'ADMIN_ACCESS_REJECTED' : 'ADMIN_ACCESS_PENDING',
+    error: rejected
+      ? 'Your admin access request was rejected'
+      : 'Your admin access request is pending approval',
+  })
+  return true
+}
+
+async function adminAccessAllowed(response: Response, profile: ProfileRow) {
+  if (!config.featureFlags.admin_approval_required_enabled || profile.role !== 'admin') return true
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('admin_approval_status,is_active')
+    .eq('id', profile.id)
+    .maybeSingle()
+  if (error) {
+    logFailure('auth.admin_approval_lookup_failed', response.locals.requestId, error.message)
+    response.status(500).json({ error: verificationFailedMessage })
+    return false
+  }
+  profile.admin_approval_status = data?.admin_approval_status ?? null
+  profile.is_active = data?.is_active ?? null
+  return !blockUnapprovedAdminAccess(response, {
+    role: profile.role,
+    admin_approval_status: data?.admin_approval_status,
+    is_active: data?.is_active,
+  })
 }
 
 function phoneProfileFields(profile: Pick<ProfileRow, 'phone_e164' | 'phone_verified' | 'phone_verified_at'>) {
@@ -957,6 +1000,7 @@ router.post('/phone/verify-otp', phoneOtpVerifyLimit, async (request, response) 
   let authUser: { id: string; email?: string | null }
   if (existingProfile) {
     profile = existingProfile
+    if (!(await adminAccessAllowed(response, profile))) return
     const { data: existingUser, error: userError } = await authSupabase.auth.admin.getUserById(profile.id)
     if (userError || !existingUser.user?.email) {
       return response.status(403).json({ error: 'The phone account is unavailable.' })
@@ -1104,8 +1148,12 @@ router.post('/email/verify-otp', emailOtpVerifyLimit, async (request, response) 
       return response.status(500).json({ error: verificationFailedMessage })
     }
     let existing = profile as ProfileRow | null
+    if (existing && !(await adminAccessAllowed(response, existing))) return
     const pendingApproval = (existing?.role === 'admin' || existing?.role === 'vendor') && existing.approval_status === 'pending'
-    if (!existing || (!['customer', 'vendor'].includes(existing.role) && !pendingApproval)) {
+    const approvedAdminCanUseEmailCode = config.featureFlags.admin_approval_required_enabled
+      && existing?.role === 'admin'
+      && existing.admin_approval_status === 'approved'
+    if (!existing || (!['customer', 'vendor'].includes(existing.role) && !pendingApproval && !approvedAdminCanUseEmailCode)) {
       return response.status(403).json({ error: 'This account cannot sign in here.' })
     }
     if (phoneChallengeId && phoneE164 && phoneOtp) {
@@ -1281,6 +1329,7 @@ router.post('/login', loginLimit, loginAccountLimit, async (request, response) =
   if (error || !data.session || !data.user) return response.status(401).json({ error: 'Invalid credentials' })
   const { data: profile, error: profileError } = await supabase.from('profiles').select('id,role,full_name,username,phone_e164,phone_verified,phone_verified_at,theme_mode,selfie_required,approval_status').eq('id', data.user.id).single()
   if (profileError || !profile) return response.status(403).json({ error: 'Account profile is unavailable.' })
+  if (!(await adminAccessAllowed(response, profile as ProfileRow))) return
   if ((profile.role === 'admin' || profile.role === 'vendor') && profile.approval_status !== 'approved') {
     return response.status(403).json({ error: adminApprovalPendingMessage })
   }
@@ -1504,6 +1553,15 @@ router.post('/refresh', async (request, response) => {
   if (!refreshToken) return response.status(401).json({ error: 'Refresh token required' })
   const { data, error } = await authSupabase.auth.refreshSession({ refresh_token: refreshToken })
   if (error || !data.session) return response.status(401).json({ error: 'Session expired' })
+  if (config.featureFlags.admin_approval_required_enabled && data.user) {
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id,role,full_name,username,phone_e164,phone_verified,phone_verified_at,theme_mode,selfie_required,approval_status')
+      .eq('id', data.user.id)
+      .maybeSingle()
+    if (profileError || !profile) return response.status(403).json({ error: 'Account profile is unavailable.' })
+    if (!(await adminAccessAllowed(response, profile as ProfileRow))) return
+  }
   setRefreshCookie(response, data.session.refresh_token)
   return response.json({ accessToken: data.session.access_token, ...refreshTokenForClient(request.header('x-client-platform'), data.session.refresh_token) })
 })
@@ -1513,7 +1571,11 @@ router.post('/mobile-refresh', async (request, response) => {
   if (!parsed.success) return response.status(400).json({ error: 'Refresh token required' })
   const { data, error } = await authSupabase.auth.refreshSession({ refresh_token: parsed.data.refreshToken })
   if (error || !data.session || !data.user) return response.status(401).json({ error: 'Session expired' })
-  const { data: profile } = await supabase.from('profiles').select('id,role,full_name,username,phone_e164,phone_verified,phone_verified_at,theme_mode,selfie_required').eq('id', data.user.id).single()
+  const { data: profile, error: profileError } = await supabase.from('profiles').select('id,role,full_name,username,phone_e164,phone_verified,phone_verified_at,theme_mode,selfie_required').eq('id', data.user.id).single()
+  if (config.featureFlags.admin_approval_required_enabled) {
+    if (profileError || !profile) return response.status(403).json({ error: 'Account profile is unavailable.' })
+    if (!(await adminAccessAllowed(response, profile as ProfileRow))) return
+  }
   return response.json({ accessToken: data.session.access_token, ...refreshTokenForClient(request.header('x-client-platform'), data.session.refresh_token), user: { id: data.user.id, email: data.user.email, username: profile?.username ?? data.user.email, name: profile?.full_name ?? data.user.email, role: profile?.role ?? 'customer', themeMode: profile?.theme_mode ?? 'system', selfieRequired: profile?.selfie_required === true, ...(profile ? phoneProfileFields(profile as ProfileRow) : { phone: '', phoneVerified: false }) } })
 })
 

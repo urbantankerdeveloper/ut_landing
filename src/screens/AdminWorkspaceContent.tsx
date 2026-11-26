@@ -20,6 +20,7 @@ import { AdminPricingScreen } from './AdminPricingScreen'
 import { AdminNotificationsPanel } from './AdminNotificationsPanel'
 import { AdminWhatsAppTemplatesScreen } from './AdminWhatsAppTemplatesScreen'
 import { AdminSmsTemplatesScreen } from './AdminSmsTemplatesScreen'
+import { AdminAccessRequestsScreen } from './AdminAccessRequestsScreen'
 import { useAdminAnalyticsSummary } from '../hooks/useAdminData'
 import { adminApi } from '../api/admin'
 import { adminEntitiesContent as c } from '../content/admin-entities'
@@ -35,6 +36,9 @@ export function AdminWorkspaceContent({ item, onNotice }: Props) {
   const open = (next: DialogState) => setDialog(next)
   const finish = (message: string) => { close(); onNotice(message) }
   if (item === 'notifications') return <AdminNotificationsPanel onNotice={onNotice} />
+  if (item === 'admin-users' || item === 'admin-access-requests') {
+    return <AdminAccessRequestsScreen onNotice={onNotice} />
+  }
   if (item === 'analytics' && !demoDataEnabled) return <AdminAnalyticsScreen />
   if (item === 'system-health') return <AdminSystemHealthScreen />
   if (item === 'whatsapp-templates') return <AdminWhatsAppTemplatesScreen onNotice={onNotice} />

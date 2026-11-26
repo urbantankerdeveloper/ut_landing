@@ -3099,3 +3099,100 @@ commit;
 
 alter table public.bookings
   add column if not exists tracking_confirmation_email_sent_at timestamptz;
+
+-- Additive admin-access approval support. The nullable column addition avoids
+-- rewriting profiles; existing administrators are backfilled as approved.
+alter table public.profiles
+  add column if not exists admin_approval_status text;
+
+alter table public.profiles
+  add column if not exists is_active boolean not null default true;
+
+update public.profiles
+set admin_approval_status = 'approved'
+where role = 'admin'
+  and admin_approval_status is null;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'profiles_admin_approval_status_check'
+      and conrelid = 'public.profiles'::regclass
+  ) then
+    alter table public.profiles
+      add constraint profiles_admin_approval_status_check
+      check (admin_approval_status is null or admin_approval_status in ('pending', 'approved', 'rejected')) not valid;
+  end if;
+end $$;
+
+create table if not exists public.admin_access_requests (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  email text not null,
+  phone_e164 text not null,
+  reason text not null,
+  status text not null default 'pending'
+    check (status in ('pending', 'approved', 'rejected')),
+  requested_at timestamptz not null default now(),
+  reviewed_by uuid references public.profiles(id) on delete set null,
+  reviewed_at timestamptz,
+  provisioned_user_id uuid references auth.users(id) on delete set null
+);
+
+create index if not exists admin_access_requests_pending_idx
+  on public.admin_access_requests (requested_at)
+  where status = 'pending';
+
+create unique index if not exists admin_access_requests_active_email_idx
+  on public.admin_access_requests (lower(email))
+  where status in ('pending', 'approved');
+
+create unique index if not exists admin_access_requests_active_phone_idx
+  on public.admin_access_requests (phone_e164)
+  where status in ('pending', 'approved');
+
+alter table public.admin_access_requests enable row level security;
+revoke all on public.admin_access_requests from public, anon, authenticated;
+grant all on public.admin_access_requests to service_role;
+
+-- Performance indexes consolidated from 002_performance_indexes.sql.
+create index if not exists vendors_owner_profile_idx on public.vendors (owner_profile_id);
+create index if not exists vendors_online_approved_idx on public.vendors (service_zone)
+  where is_online = true and verification = 'approved';
+create index if not exists profiles_admin_idx on public.profiles (id) where role = 'admin';
+create index if not exists bookings_order_group_idx on public.bookings (order_group_id)
+  where order_group_id is not null;
+create index if not exists bookings_vehicle_idx on public.bookings (vehicle_id) where vehicle_id is not null;
+create index if not exists order_fulfilments_order_idx on public.order_fulfilments (order_id);
+create index if not exists order_fulfilments_legacy_booking_idx on public.order_fulfilments (legacy_booking_id)
+  where legacy_booking_id is not null;
+create index if not exists order_items_legacy_booking_idx on public.order_items (legacy_booking_id)
+  where legacy_booking_id is not null;
+create index if not exists order_offers_fulfilment_idx on public.order_offers (fulfilment_id);
+create index if not exists invoices_booking_idx on public.invoices (booking_id);
+create index if not exists invoices_order_idx on public.invoices (order_id) where order_id is not null;
+create index if not exists notifications_offer_booking_idx on public.notifications ((payload->>'bookingId'))
+  where event_type = 'vendor_order_created';
+create index if not exists ratings_booking_idx on public.ratings (booking_id);
+create index if not exists ratings_customer_idx on public.ratings (customer_id);
+create index if not exists complaints_booking_idx on public.complaints (booking_id);
+create index if not exists complaints_customer_idx on public.complaints (customer_id);
+create index if not exists subscriptions_customer_idx on public.subscriptions (customer_id);
+create index if not exists wallet_transactions_customer_idx on public.wallet_transactions (customer_id);
+create index if not exists customer_memberships_customer_idx on public.customer_memberships (customer_id);
+create index if not exists driver_attendance_driver_idx on public.driver_attendance (driver_id);
+create index if not exists driver_attendance_vendor_idx on public.driver_attendance (vendor_id);
+create index if not exists vendor_location_updates_vendor_idx on public.vendor_location_updates (vendor_id);
+create index if not exists order_fulfilment_ledger_vendor_idx on public.order_fulfilment_ledger (vendor_id);
+create index if not exists order_fulfilment_ledger_order_idx on public.order_fulfilment_ledger (order_id);
+create index if not exists order_admin_audit_order_idx on public.order_admin_audit (order_id);
+create index if not exists order_fulfilment_ratings_order_idx on public.order_fulfilment_ratings (order_id);
+create index if not exists audit_logs_created_idx on public.audit_logs (created_at);
+create index if not exists audit_logs_entity_idx on public.audit_logs (entity_type, entity_id, created_at desc);
+
+drop index if exists public.vendor_location_booking_recorded_idx;
+drop index if exists public.bookings_tracking_token_hash_idx;
+
+notify pgrst, 'reload schema';

@@ -16,6 +16,7 @@ describe('parseFeatureFlags', () => {
       admin_dashboard_v2_enabled: false,
       area_availability_enabled: false,
       partner_application_otp_enabled: false,
+      admin_approval_required_enabled: false,
       address_geocoding_enabled: false,
       invoice_generation_enabled: false,
       wallet_enabled: false,
