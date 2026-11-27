@@ -1,11 +1,20 @@
 import { databaseFailure, failure } from '../lib/httpErrors.js'
 import express, { Router } from 'express'
+import { z } from 'zod'
 import { requireAuth, requireRole } from '../middleware/auth.js'
 import { supabase } from '../supabase.js'
 import { listWindow, sendList, type ListWindow } from '../lib/listParams.js'
 import { cachedCatalog } from '../services/catalogCache.js'
 import { config } from '../config.js'
 import { DEFAULT_VENDOR_SHARE_RATE, vendorAccrualPaise } from '../services/pricingMath.js'
+import {
+  salesPeriodWindows,
+  salesRowsFromFulfilments,
+  summarizeSales,
+  type SalesFulfilment,
+  type SalesOrder,
+  type SalesPeriod,
+} from '../lib/salesReports.js'
 const exactCount = (range: ListWindow) => (range.mode === 'paged' ? { count: 'exact' as const } : undefined)
 const legacyRouterAuth = (request: express.Request, response: express.Response, next: express.NextFunction) => config.featureFlags.AUTH_MOUNT_ONCE ? next() : requireAuth(request, response, next)
 const router = Router(); router.use(legacyRouterAuth, requireRole('vendor'))
@@ -125,6 +134,132 @@ router.get('/orders', async (request, response) => {
   const { data, error, hasMore } = await loadVendorOrders(vendor.id, offset, pageSize)
   if (error) return databaseFailure(response, 'vendor.database_error', error, 500)
   response.json({ rows: data ?? [], nextOffset: hasMore ? offset + pageSize : null })
+})
+router.get('/reports/sales', async (request, response) => {
+  const parsed = z.object({
+    period: z.enum(['day', 'week', 'month']).default('day'),
+  }).safeParse(request.query)
+  if (!parsed.success) return response.status(400).json({ error: 'Invalid sales report period.' })
+
+  const { data: vendor, error: vendorError } = await supabase
+    .from('vendors')
+    .select('id')
+    .eq('owner_profile_id', request.authUser!.id)
+    .maybeSingle()
+  if (vendorError) return databaseFailure(response, 'vendor.sales_vendor_lookup_failed', vendorError, 500)
+  if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' })
+
+  const period = parsed.data.period as SalesPeriod
+  const windows = salesPeriodWindows(period)
+  const loadRows = async (from: string, to: string) => {
+    const rows: SalesOrder[] = []
+    for (let offset = 0; ; offset += 1000) {
+      const { data, error } = await supabase.from('bookings')
+        .select('id,service_code,quoted_amount_paise,created_at')
+        .eq('vendor_id', vendor.id)
+        .gte('created_at', from)
+        .lt('created_at', to)
+        .order('created_at', { ascending: true })
+        .range(offset, offset + 999)
+      if (error) return { rows: null, error }
+      const page = (data ?? []) as SalesOrder[]
+      rows.push(...page)
+      if (page.length < 1000) break
+    }
+    return { rows, error: null }
+  }
+  const loadMultiServiceRows = async (from: string, to: string) => {
+    const rows: SalesOrder[] = []
+    if (!config.MULTI_SERVICE_ORDERS_ENABLED) return { rows, error: null }
+    for (let offset = 0; ; offset += 1000) {
+      const { data, error } = await supabase.from('order_fulfilments')
+        .select('id,legacy_booking_id,created_at,order_fulfilment_items(order_items(locked_price_paise,delivery_charge_paise,discount_paise,service_types(code)))')
+        .eq('vendor_id', vendor.id)
+        .gte('created_at', from)
+        .lt('created_at', to)
+        .order('created_at', { ascending: true })
+        .range(offset, offset + 999)
+      if (error) return { rows: null, error }
+      const page = (data ?? []) as SalesFulfilment[]
+      rows.push(...salesRowsFromFulfilments(page))
+      if (page.length < 1000) break
+    }
+    return { rows, error: null }
+  }
+  const [currentResult, previousResult, currentMultiResult, previousMultiResult] = await Promise.all([
+    loadRows(windows.current.from, windows.current.to),
+    loadRows(windows.previous.from, windows.previous.to),
+    loadMultiServiceRows(windows.current.from, windows.current.to),
+    loadMultiServiceRows(windows.previous.from, windows.previous.to),
+  ])
+  const reportError =
+    currentResult.error ??
+    previousResult.error ??
+    currentMultiResult.error ??
+    previousMultiResult.error
+  if (reportError) {
+    return databaseFailure(
+      response,
+      'vendor.sales_report_failed',
+      reportError,
+      500,
+    )
+  }
+
+  const currentBookingIds = new Set((currentResult.rows ?? []).map((row) => row.id))
+  const previousBookingIds = new Set((previousResult.rows ?? []).map((row) => row.id))
+  const currentRows = [
+    ...(currentResult.rows ?? []),
+    ...(currentMultiResult.rows ?? []).filter(
+      (row) => !row.legacyBookingId || !currentBookingIds.has(row.legacyBookingId),
+    ),
+  ]
+  const previousRows = [
+    ...(previousResult.rows ?? []),
+    ...(previousMultiResult.rows ?? []).filter(
+      (row) => !row.legacyBookingId || !previousBookingIds.has(row.legacyBookingId),
+    ),
+  ]
+  const current = summarizeSales(currentRows, windows.currentFromDate, windows.days)
+  const previous = summarizeSales(previousRows, windows.previousFromDate, windows.days)
+  const serviceCodes = [...new Set(current.breakdown.map((item) => item.serviceCode))]
+  const [servicesResult, serviceTypesResult] = await Promise.all([
+    serviceCodes.length
+      ? supabase.from('service_catalog').select('code,name').in('code', serviceCodes)
+      : Promise.resolve({ data: [], error: null }),
+    serviceCodes.length && config.MULTI_SERVICE_ORDERS_ENABLED
+      ? supabase.from('service_types').select('code,name').in('code', serviceCodes)
+      : Promise.resolve({ data: [], error: null }),
+  ])
+  if (servicesResult.error || serviceTypesResult.error) {
+    return databaseFailure(
+      response,
+      'vendor.sales_services_failed',
+      servicesResult.error ?? serviceTypesResult.error,
+      500,
+    )
+  }
+  const serviceNames = new Map([
+    ...(servicesResult.data ?? []).map((service) => [service.code, service.name] as const),
+    ...(serviceTypesResult.data ?? []).map((service) => [service.code, service.name] as const),
+  ])
+
+  response.json({
+    period,
+    from: windows.currentFromDate,
+    to: windows.currentToDate,
+    previousFrom: windows.previousFromDate,
+    previousTo: windows.previousToDate,
+    totalPaise: current.totalPaise,
+    previousTotalPaise: previous.totalPaise,
+    orderCount: current.orderCount,
+    dailyTotalsPaise: current.dailyTotalsPaise,
+    breakdown: current.breakdown.map((item) => ({
+      service: serviceNames.get(item.serviceCode) ?? item.serviceCode,
+      orders: item.orders,
+      amountPaise: item.amountPaise,
+    })),
+  })
 })
 router.get('/vehicles', async (request, response) => { const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', request.authUser!.id).single(); if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' }); const listRange = listWindow(request.query); const { data, error, count } = await supabase.from('vehicles').select('id,registration_number,capacity_litres,is_active,verification', exactCount(listRange)).eq('vendor_id', vendor.id).order('registration_number').range(listRange.from, listRange.to); if (error) return databaseFailure(response, 'vendor.database_error', error, 500); sendList(response, listRange, data ?? [], count) })
 router.get('/drivers', async (request, response) => { const { data: vendor } = await supabase.from('vendors').select('id').eq('owner_profile_id', request.authUser!.id).single(); if (!vendor) return response.status(404).json({ error: 'Vendor profile not found' }); const listRange = listWindow(request.query); const { data, error, count } = await supabase.from('drivers').select('id,name,mobile_e164,latitude,longitude,is_active,verification', exactCount(listRange)).eq('vendor_id', vendor.id).order('name').range(listRange.from, listRange.to); if (error) return databaseFailure(response, 'vendor.database_error', error, 500); sendList(response, listRange, data ?? [], count) })

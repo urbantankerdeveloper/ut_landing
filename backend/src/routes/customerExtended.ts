@@ -30,7 +30,10 @@ router.use('/wallet', (_request, response, next) => {
   next()
 })
 const deliveryOtpLimit = rateLimit({ windowMs: 10 * 60 * 1000, limit: 3, standardHeaders: true, legacyHeaders: false, store: limiterStore('rl:customerExtended:deliveryOtp:', 'open'), passOnStoreError: true, keyGenerator: (request) => `${request.authUser!.id}:${request.params.orderId}`, message: { error: 'Too many delivery codes requested for this order. Try again later.' } })
-const statusSchema = z.object({ status: z.enum(['cancelled']) })
+const statusSchema = z.object({
+  status: z.enum(['cancelled']),
+  reason: z.string().trim().min(2).max(500).optional(),
+})
 router.get('/orders/:orderId/tracking', async (request, response) => {
   const { data: booking, error: bookingError } = await supabase
     .from('bookings')
@@ -207,7 +210,12 @@ router.patch('/orders/:orderId/status', async (request, response) => {
   if (bookingError) return databaseFailure(response, 'customerExtended.database_error', bookingError, 500)
   if (!booking) return response.status(404).json({ error: 'Booking not found' })
   if (!canCustomerCancelBooking(booking.status)) return response.status(409).json({ error: 'A booking can only be cancelled before the vendor accepts it.' })
-  const { data, error } = await transitionBooking({ bookingId: booking.id, actorId: customerId, status: 'cancelled', cancellationReason: 'Cancelled by customer' })
+  const { data, error } = await transitionBooking({
+    bookingId: booking.id,
+    actorId: customerId,
+    status: 'cancelled',
+    cancellationReason: parsed.data.reason ?? 'Cancelled by customer',
+  })
   if (error || !data) return failure(response, 409, 'Booking cannot be cancelled in its current state.', 'customer.cancel_failed', error)
   void notifyCustomerOfBookingStatus(booking.id, 'cancelled')
   response.json(data)
