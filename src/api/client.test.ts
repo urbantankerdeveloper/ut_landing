@@ -29,6 +29,30 @@ describe('apiFetch', () => {
     expect(useAuthStore.getState().accessToken).toBe('refreshed-token')
   })
 
+  it('restores a persisted session before the first protected request', async () => {
+    useAuthStore.setState({
+      user: { id: 'admin-1', username: 'admin', name: 'Admin', role: 'admin' },
+      accessToken: null,
+    })
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ accessToken: 'restored-token' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(apiFetch<{ ok: boolean }>('/admin/dashboard-summary')).resolves.toEqual({ ok: true })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[0][0]).toEqual(expect.stringMatching(/\/api\/auth\/refresh$/))
+    const requestHeaders = fetchMock.mock.calls[1][1].headers as Headers
+    expect(requestHeaders.get('Authorization')).toBe('Bearer restored-token')
+  })
+
   it('exposes the response status through ApiError', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 422 })))
 

@@ -140,6 +140,11 @@ async function requestWithRetries<T>(path: string, init: RequestInit, retry: boo
 }
 
 async function apiFetchOnce<T>(path: string, init: RequestInit, retry: boolean, timeoutMs?: number): Promise<T> {
+  const auth = useAuthStore.getState()
+  if (retry && auth.user && !auth.accessToken && !path.startsWith('/auth/')) {
+    if (!await refreshSession()) return apiFetchOnce<T>(path, init, false, timeoutMs)
+  }
+
   const timed = createTimedSignal(init.signal, timeoutMs)
   try {
     const headers = new Headers(init.headers)
