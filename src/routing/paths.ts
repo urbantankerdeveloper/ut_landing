@@ -15,6 +15,7 @@ export const screenPaths: Record<ScreenId, string> = {
   about: '/about',
   account: '/account',
   login: '/login',
+  'request-admin-access': '/request-admin-access',
   'customer-workspace': '/workspace/customer',
   'vendor-workspace': '/workspace/vendor',
   'admin-workspace': '/workspace/admin',
@@ -22,7 +23,7 @@ export const screenPaths: Record<ScreenId, string> = {
 }
 
 // Screens that search engines may index. Account, sign-in, workspace and tracking-token pages are kept out of the index.
-export const publicScreens = new Set<ScreenId>(['home', 'services', 'subscriptions', 'booking', 'yearly-contract', 'coupons', 'tracking', 'partner', 'terms', 'policy', 'about'])
+export const publicScreens = new Set<ScreenId>(['home', 'services', 'subscriptions', 'booking', 'yearly-contract', 'coupons', 'tracking', 'partner', 'request-admin-access', 'terms', 'policy', 'about'])
 
 const workspaceRoles: WorkspaceRole[] = ['customer', 'vendor', 'admin', 'dispatcher']
 

@@ -37,6 +37,15 @@ until those sections pass focused validation.
   the race-condition backstop, so this section adds no duplicate index.
   Booking-contact OTP does not update a profile phone and is intentionally
   unaffected.
+- `admin_approval_required_enabled` defaults to `false`. When enabled, login
+  requires `profiles.admin_approval_status = 'approved'` and an active profile
+  for administrator accounts, and enables public admin-access requests plus
+  approve/reject actions. Admin-user listing and approved-account
+  deactivate/reactivate actions remain available while the flag is off.
+  Apply `backend/supabase/006_admin_access_approval.sql` before enabling it;
+  that additive migration adds `admin_approval_status` and `is_active`, then
+  backfills all existing administrators as approved. Never apply its backfill
+  beyond local or staging without explicit approval.
 - `mpin_cooldown_enabled` is checked by
   `urban_tanker_app/lib/app/app_controller.dart` in `unlockWithMpin`.
 - `manual_assignment_mode_enabled` is resolved by

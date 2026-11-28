@@ -410,3 +410,75 @@ describe('admin order status events', () => {
     expect(mocks.notifyCustomerOfBookingStatus).toHaveBeenCalledWith(BOOKING_ID, 'pending_vendor')
   })
 })
+
+describe('dispatcher order support actions', () => {
+  it('returns only the assigned driver contact for dispatchers', async () => {
+    config.featureFlags.AUTH_MOUNT_ONCE = false
+    setResults('bookings', {
+      data: {
+        id: BOOKING_ID,
+        vendor_id: 'vendor-1',
+        driver_id: 'driver-1',
+        status: 'en_route',
+      },
+      error: null,
+    })
+    setResults('drivers', {
+      data: {
+        id: 'driver-1',
+        name: 'Driver One',
+        mobile_e164: '+919876543210',
+      },
+      error: null,
+    })
+
+    const response = await request(buildApp())
+      .get(`/api/admin/orders/${BOOKING_ID}/driver-contact`)
+      .set('x-test-role', 'dispatcher')
+
+    expect(response.status).toBe(200)
+    expect(response.body).toEqual({
+      driverId: 'driver-1',
+      name: 'Driver One',
+      phone: '+919876543210',
+    })
+  })
+
+  it('does not expose driver contact information to customers', async () => {
+    config.featureFlags.AUTH_MOUNT_ONCE = false
+
+    const response = await request(buildApp())
+      .get(`/api/admin/orders/${BOOKING_ID}/driver-contact`)
+      .set('x-test-role', 'customer')
+
+    expect(response.status).toBe(403)
+  })
+
+  it('creates an in-app/push delay update for an active booking customer', async () => {
+    config.featureFlags.AUTH_MOUNT_ONCE = false
+    setResults('bookings', {
+      data: {
+        id: BOOKING_ID,
+        customer_id: 'customer-1',
+        status: 'en_route',
+      },
+      error: null,
+    })
+    mocks.notifyCustomer.mockResolvedValueOnce({ id: 'notification-1' })
+
+    const response = await request(buildApp())
+      .post(`/api/admin/orders/${BOOKING_ID}/notify-customer`)
+      .set('x-test-role', 'dispatcher')
+      .send({ message: 'Your delivery is delayed.' })
+
+    expect(response.status).toBe(201)
+    expect(response.body).toEqual({ notified: true, reason: null })
+    expect(mocks.notifyCustomer).toHaveBeenCalledWith({
+      customerId: 'customer-1',
+      eventType: 'booking_dispatcher_delay',
+      title: 'Delivery update',
+      detail: 'Your delivery is delayed.',
+      bookingId: BOOKING_ID,
+    })
+  })
+})

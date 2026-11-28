@@ -10,6 +10,7 @@ import { failure } from '../lib/httpErrors.js'
 import { listWindow, sendList, type ListWindow } from '../lib/listParams.js'
 import { invalidateCatalog } from '../services/catalogCache.js'
 import { invalidateAuthProfile } from '../services/authCache.js'
+import { salesRowsFromFulfilments, type SalesFulfilment } from '../lib/salesReports.js'
 const exactCount = (range: ListWindow) => (range.mode === 'paged' ? { count: 'exact' as const } : undefined)
 const legacyRouterAuth = (request: express.Request, response: express.Response, next: express.NextFunction) => config.featureFlags.AUTH_MOUNT_ONCE ? next() : requireAuth(request, response, next)
 const adminOnly = requireRole('admin')
@@ -81,9 +82,13 @@ router.post('/reports', adminOnly, async (request, response) => {
     status: z.string().trim().min(1).max(80).optional(),
     service: z.string().trim().min(1).max(80).optional(),
     customerType: z.enum(['registered', 'guest']).optional(),
+    vendorId: z.string().uuid().optional(),
   }).refine((value) => value.from <= value.to, {
     path: ['to'],
     message: 'The report end date must be on or after the start date.',
+  }).refine((value) => !value.vendorId || value.type === 'revenue', {
+    path: ['vendorId'],
+    message: 'Vendor filtering is only supported for revenue reports.',
   }).safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Invalid report request', details: parsed.error.flatten() })
   let query = supabase.from('bookings').select('*')
@@ -93,11 +98,55 @@ router.post('/reports', adminOnly, async (request, response) => {
   if (parsed.data.status) query = query.eq('status', parsed.data.status)
   if (parsed.data.service) query = query.eq('service_code', parsed.data.service)
   if (parsed.data.customerType) query = query.eq('customer_type', parsed.data.customerType)
+  if (parsed.data.vendorId) query = query.eq('vendor_id', parsed.data.vendorId)
   const { data, error } = await query.order('created_at', { ascending: false })
   if (error) return databaseFailure(response, 'admin.database_error', error, 500)
   const bookings = data ?? []
   let rows: unknown[] = bookings
+  if (
+    parsed.data.type === 'revenue' &&
+    parsed.data.vendorId &&
+    config.MULTI_SERVICE_ORDERS_ENABLED
+  ) {
+    const fulfilments: SalesFulfilment[] = []
+    for (let offset = 0; ; offset += 1000) {
+      let fulfilmentQuery = supabase.from('order_fulfilments')
+        .select('id,legacy_booking_id,created_at,orders(customer_id),order_fulfilment_items(order_items(locked_price_paise,delivery_charge_paise,discount_paise,service_types(code)))')
+        .eq('vendor_id', parsed.data.vendorId)
+        .gte('created_at', `${parsed.data.from}T00:00:00.000Z`)
+        .lte('created_at', `${parsed.data.to}T23:59:59.999Z`)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + 999)
+      if (parsed.data.status) fulfilmentQuery = fulfilmentQuery.eq('status', parsed.data.status)
+      const { data: fulfilmentPage, error: fulfilmentError } = await fulfilmentQuery
+      if (fulfilmentError) {
+        return databaseFailure(response, 'admin.report_fulfilments_failed', fulfilmentError, 500)
+      }
+      const page = (fulfilmentPage ?? []) as SalesFulfilment[]
+      fulfilments.push(...page)
+      if (page.length < 1000) break
+    }
+    const bookingIds = new Set(
+      bookings.map((booking) => booking.id).filter((id): id is string => typeof id === 'string'),
+    )
+    const filteredFulfilments = fulfilments.filter((fulfilment) => {
+      if (!parsed.data.customerType) return true
+      const order = Array.isArray(fulfilment.orders)
+        ? fulfilment.orders[0]
+        : fulfilment.orders
+      const isRegistered = Boolean(order?.customer_id)
+      return parsed.data.customerType === 'registered' ? isRegistered : !isRegistered
+    })
+    const fulfilmentRows = salesRowsFromFulfilments(filteredFulfilments, bookingIds)
+      .filter((row) => !parsed.data.service || row.service_code === parsed.data.service)
+      .map((row) => ({ ...row, vendor_id: parsed.data.vendorId }))
+    rows = [...bookings, ...fulfilmentRows]
+  }
   let total = bookings.reduce((sum, row) => sum + Number(row.quoted_amount_paise ?? 0) / 100, 0)
+  if (rows.length > bookings.length) {
+    total += (rows.slice(bookings.length) as Array<{ quoted_amount_paise: number }>)
+      .reduce((sum, row) => sum + Number(row.quoted_amount_paise ?? 0) / 100, 0)
+  }
   if (parsed.data.type === 'vendors') {
     const vendorIds = [...new Set(bookings.flatMap((row) =>
       typeof row.vendor_id === 'string' ? [row.vendor_id] : [],

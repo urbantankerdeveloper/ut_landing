@@ -106,6 +106,7 @@ export const workspaceContent = {
       fleet: 'Tanker fleet',
       drivers: 'Drivers',
       customers: 'Customers',
+      adminUsers: 'Admin Users',
       onboarding: 'Onboard vendor',
       services: 'Services',
       finance: 'Finance',

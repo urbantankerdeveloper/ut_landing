@@ -1,12 +1,15 @@
 import express from 'express'
 import request from 'supertest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { config } from '../config.js'
 
 const mocks = vi.hoisted(() => ({
   respond: vi.fn<(table: string, ops: Array<{ name: string; args: unknown[] }>) => unknown>(),
   createSignedUrl: vi.fn(),
   reportBookings: [] as Array<Record<string, unknown>>,
+  reportFulfilments: [] as Array<Record<string, unknown>>,
   reportVendors: [] as Array<{ id: string; business_name: string }>,
+  reportQueries: [] as Array<Array<{ name: string; args: unknown[] }>>,
 }))
 
 function chain(table: string, ops: Array<{ name: string; args: unknown[] }> = []): unknown {
@@ -41,6 +44,7 @@ vi.mock('../middleware/auth.js', () => ({
 import adminRouter from './admin.js'
 
 const APPLICATION_ID = '44444444-4444-4444-8444-444444444444'
+const multiServiceOrdersEnabled = config.MULTI_SERVICE_ORDERS_ENABLED
 
 function buildApp() {
   const app = express()
@@ -50,17 +54,22 @@ function buildApp() {
 }
 
 beforeEach(() => {
+  config.MULTI_SERVICE_ORDERS_ENABLED = multiServiceOrdersEnabled
   mocks.reportBookings = []
+  mocks.reportFulfilments = []
   mocks.reportVendors = []
+  mocks.reportQueries = []
   mocks.createSignedUrl.mockReset()
   mocks.createSignedUrl.mockResolvedValue({
     data: { signedUrl: 'https://storage.example/download' },
     error: null,
   })
   mocks.respond.mockReset()
-  mocks.respond.mockImplementation((table) => {
+  mocks.respond.mockImplementation((table, operations) => {
+    if (table === 'bookings') mocks.reportQueries.push(operations)
     if (table === 'partner_applications') return { data: { id: APPLICATION_ID }, error: null }
     if (table === 'bookings') return { data: mocks.reportBookings, error: null }
+    if (table === 'order_fulfilments') return { data: mocks.reportFulfilments, error: null }
     if (table === 'vendors') return { data: mocks.reportVendors, error: null }
     if (table === 'partner_application_history') {
       return {
@@ -155,6 +164,88 @@ describe('POST /reports', () => {
       { name: 'eq', args: ['service_code', 'Water tanker'] },
       { name: 'eq', args: ['customer_type', 'guest'] },
     ]))
+  })
+
+  it('filters revenue rows by the selected vendor on the server', async () => {
+    const vendorId = '55555555-5555-4555-8555-555555555555'
+    const response = await request(buildApp()).post('/reports').send({
+      type: 'revenue',
+      from: '2026-11-01',
+      to: '2026-11-18',
+      vendorId,
+    })
+    expect(response.status).toBe(200)
+    expect(mocks.reportQueries[0]).toContainEqual({
+      name: 'eq',
+      args: ['vendor_id', vendorId],
+    })
+  })
+
+  it('includes vendor multi-service quotes without double-counting legacy bookings', async () => {
+    const vendorId = '55555555-5555-4555-8555-555555555555'
+    config.MULTI_SERVICE_ORDERS_ENABLED = true
+    mocks.reportBookings = [{
+      id: 'booking-1',
+      vendor_id: vendorId,
+      service_code: 'WATER',
+      quoted_amount_paise: 90000,
+      created_at: '2026-11-18T10:00:00.000Z',
+    }]
+    mocks.reportFulfilments = [
+      {
+        id: 'legacy-fulfilment',
+        legacy_booking_id: 'booking-1',
+        created_at: '2026-11-18T10:00:00.000Z',
+        order_fulfilment_items: [{
+          order_items: {
+            locked_price_paise: 90000,
+            service_types: { code: 'WATER' },
+          },
+        }],
+      },
+      {
+        id: 'multi-fulfilment',
+        created_at: '2026-11-18T11:00:00.000Z',
+        orders: { customer_id: 'customer-1' },
+        order_fulfilment_items: [{
+          order_items: {
+            locked_price_paise: 8000,
+            delivery_charge_paise: 200,
+            discount_paise: 100,
+            service_types: { code: 'SEWAGE' },
+          },
+        }],
+      },
+    ]
+
+    const response = await request(buildApp()).post('/reports').send({
+      type: 'revenue',
+      from: '2026-11-01',
+      to: '2026-11-18',
+      vendorId,
+    })
+
+    expect(response.status).toBe(200)
+    expect(response.body.total).toBe(981)
+    expect(response.body.rows).toHaveLength(2)
+    expect(response.body.rows[1]).toMatchObject({
+      id: 'multi-fulfilment',
+      vendor_id: vendorId,
+      service_code: 'SEWAGE',
+      quoted_amount_paise: 8100,
+    })
+  })
+
+  it('rejects vendor filtering for non-revenue report types', async () => {
+    const response = await request(buildApp()).post('/reports').send({
+      type: 'orders',
+      from: '2026-11-01',
+      to: '2026-11-18',
+      vendorId: '55555555-5555-4555-8555-555555555555',
+    })
+
+    expect(response.status).toBe(400)
+    expect(mocks.respond.mock.calls.some(([table]) => table === 'bookings')).toBe(false)
   })
 
   it('groups vendor performance by assigned vendor and includes completion totals', async () => {

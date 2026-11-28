@@ -31,7 +31,7 @@ function requireCoordinatePair(value: { latitude?: number; longitude?: number },
   }
 }
 const legacyRouterAuth = (request: express.Request, response: express.Response, next: express.NextFunction) => config.featureFlags.AUTH_MOUNT_ONCE ? next() : requireAuth(request, response, next)
-const router = Router(); router.use(legacyRouterAuth, (request, response, next) => { const role = request.profile?.role; if (role === 'admin') return next(); if (role === 'dispatcher' && (/^\/alerts(?:\/[^/]+)?$/.test(request.path) || /^\/orders\/[^/]+\/(assignment|status|cancel)$/.test(request.path))) return next(); return response.status(403).json({ error: 'Insufficient permissions' }) }); router.use(['/system/health', '/storage/cleanup', '/services', '/services/:id/pricing', '/payments', '/payouts', '/dispatch-settings'], requireRole('admin'))
+const router = Router(); router.use(legacyRouterAuth, (request, response, next) => { const role = request.profile?.role; if (role === 'admin') return next(); if (role === 'dispatcher' && (/^\/alerts(?:\/[^/]+)?$/.test(request.path) || /^\/orders\/[^/]+\/(assignment|status|cancel|driver-contact|notify-customer)$/.test(request.path))) return next(); return response.status(403).json({ error: 'Insufficient permissions' }) }); router.use(['/system/health', '/storage/cleanup', '/services', '/services/:id/pricing', '/payments', '/payouts', '/dispatch-settings'], requireRole('admin'))
 const optionSurchargesPaiseSchema = z.record(z.enum(['capacity', 'waterType', 'serviceType', 'grade', 'pump', 'materialType']), z.record(z.string().min(1).max(100), z.number().int().nonnegative().max(1_000_000_000))).optional()
 router.use('/services', async (request, response, next) => {
   if (!['POST', 'PATCH'].includes(request.method)) return next()
@@ -162,6 +162,61 @@ router.delete('/drivers/:id', async (request, response) => { const { error } = a
 router.post('/drivers', async (request, response) => { const parsed = z.object({ vendorId: z.string().uuid(), name: z.string().min(2), mobileE164: z.string().regex(/^\d{10}$/), licenceNumber: z.string().min(3), ...optionalCoordinateFields }).superRefine(requireCoordinatePair).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid driver' }); const { data, error } = await supabase.from('drivers').insert({ vendor_id: parsed.data.vendorId, name: parsed.data.name, mobile_e164: parsed.data.mobileE164, licence_number: parsed.data.licenceNumber, latitude: parsed.data.latitude, longitude: parsed.data.longitude, verification: 'pending', is_active: false }).select().single(); if (error) return databaseFailure(response, 'adminExtended.database_error', error, 400); response.status(201).json(data) })
 router.get('/drivers', async (request, response) => { const listRange = listWindow(request.query); const { data, error, count } = await supabase.from('drivers').select('id,vendor_id,name,mobile_e164,licence_number,latitude,longitude,is_active,verification,metadata', exactCount(listRange)).order('name', { ascending: true }).range(listRange.from, listRange.to); if (error) return databaseFailure(response, 'adminExtended.database_error', error, 500); sendList(response, listRange, data ?? [], count) })
 router.patch('/orders/:id/assignment', async (request, response) => { const parsed = z.object({ vendorId: z.string().uuid().optional(), vehicleId: z.string().uuid().optional(), driverId: z.string().uuid().optional() }).refine((value) => value.vendorId || value.vehicleId || value.driverId, { message: 'At least one assignment is required' }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid assignment' }); const { data, error } = await transitionBooking({ bookingId: request.params.id, actorId: request.authUser!.id, status: 'vendor_assigned', vendorId: parsed.data.vendorId, vehicleId: parsed.data.vehicleId, driverId: parsed.data.driverId }); if (error || !data) return failure(response, error?.message.includes('NOT_FOUND') ? 404 : 409, error?.message.includes('NOT_FOUND') ? 'Booking not found.' : 'The booking cannot be updated in its current state.', 'adminExtended.transition_failed', error); const assignment = data as { customer_id?: string; vendor_id?: string }; emitRealtime('booking.updated', { bookingId: request.params.id, status: 'vendor_assigned' }, assignment.customer_id); if (assignment.vendor_id) emitRealtimeToVendor(assignment.vendor_id, 'booking.updated', { bookingId: request.params.id, status: 'vendor_assigned' }); void notifyCustomerOfBookingStatus(request.params.id, 'vendor_assigned'); response.json(data) })
+router.get('/orders/:id/driver-contact', async (request, response) => {
+  const parsedId = z.string().uuid().safeParse(request.params.id)
+  if (!parsedId.success) return response.status(400).json({ error: 'Invalid booking ID.' })
+  const { data: booking, error: bookingError } = await supabase.from('bookings')
+    .select('id,driver_id,vendor_id,status')
+    .eq('id', parsedId.data)
+    .maybeSingle()
+  if (bookingError) return databaseFailure(response, 'adminExtended.driver_contact_booking_failed', bookingError, 500)
+  if (!booking) return response.status(404).json({ error: 'Booking not found.' })
+  if (!booking.driver_id || !booking.vendor_id) {
+    return response.status(409).json({ error: 'No driver is assigned to this booking.' })
+  }
+  const { data: driver, error: driverError } = await supabase.from('drivers')
+    .select('id,name,mobile_e164')
+    .eq('id', booking.driver_id)
+    .eq('vendor_id', booking.vendor_id)
+    .maybeSingle()
+  if (driverError) return databaseFailure(response, 'adminExtended.driver_contact_lookup_failed', driverError, 500)
+  if (!driver) return response.status(404).json({ error: 'Assigned driver not found.' })
+  response.json({ driverId: driver.id, name: driver.name, phone: driver.mobile_e164 })
+})
+router.post('/orders/:id/notify-customer', async (request, response) => {
+  const parsedId = z.string().uuid().safeParse(request.params.id)
+  const parsedBody = z.object({
+    message: z.string().trim().min(2).max(500),
+  }).safeParse(request.body)
+  if (!parsedId.success || !parsedBody.success) {
+    return response.status(400).json({ error: 'A valid booking ID and message are required.' })
+  }
+  const { data: booking, error: bookingError } = await supabase.from('bookings')
+    .select('id,customer_id,status')
+    .eq('id', parsedId.data)
+    .maybeSingle()
+  if (bookingError) return databaseFailure(response, 'adminExtended.dispatch_notification_booking_failed', bookingError, 500)
+  if (!booking) return response.status(404).json({ error: 'Booking not found.' })
+  if (!['pending_vendor', 'vendor_assigned', 'accepted', 'en_route', 'arrived'].includes(booking.status)) {
+    return response.status(409).json({ error: 'Customer updates are only available for active bookings.' })
+  }
+  if (!booking.customer_id) return response.status(409).json({ error: 'This booking has no registered customer account.' })
+  try {
+    const notification = await notifyCustomer({
+      customerId: booking.customer_id,
+      eventType: 'booking_dispatcher_delay',
+      title: 'Delivery update',
+      detail: parsedBody.data.message,
+      bookingId: booking.id,
+    })
+    response.status(201).json({
+      notified: notification !== null,
+      reason: notification === null ? 'notifications_disabled' : null,
+    })
+  } catch (error) {
+    return failure(response, 500, 'The customer notification could not be created.', 'adminExtended.dispatch_notification_failed', error)
+  }
+})
 router.patch('/orders/:id/status', async (request, response) => {
   const parsed = z.object({ status: z.enum(['pending_vendor', 'vendor_assigned', 'accepted', 'en_route', 'arrived', 'delivered']) }).safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Invalid booking status' })

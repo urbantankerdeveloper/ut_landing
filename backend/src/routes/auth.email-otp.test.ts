@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   getUserById: vi.fn(),
   verifyOtp: vi.fn(),
   signInWithPassword: vi.fn(),
+  refreshSession: vi.fn(),
   isEmailConfigured: vi.fn(() => true),
   sendEmail: vi.fn(),
   sendTemplateWhatsApp: vi.fn(),
@@ -54,6 +55,7 @@ vi.mock('../supabase.js', () => ({
       },
       verifyOtp: (...args: unknown[]) => mocks.verifyOtp(...args),
       signInWithPassword: (...args: unknown[]) => mocks.signInWithPassword(...args),
+      refreshSession: (...args: unknown[]) => mocks.refreshSession(...args),
     },
   },
 }))
@@ -125,6 +127,7 @@ beforeEach(() => {
   mocks.sendTemplateSms.mockReset()
   mocks.sendTemplateSms.mockResolvedValue({ queued: false, reason: 'SMS unavailable' })
   mocks.recentPhoneChallenge = null
+  config.featureFlags.admin_approval_required_enabled = false
   config.featureFlags.otp_sms_fallback_enabled = true
   mocks.createUser.mockReset()
   mocks.createUser.mockResolvedValue({ data: { user: { id: 'user-1' } }, error: null })
@@ -140,6 +143,14 @@ beforeEach(() => {
   mocks.verifyOtp.mockResolvedValue({ data: { session: { access_token: 'access-token', refresh_token: 'refresh-token' }, user: { id: 'user-1', email: 'new@example.com' } }, error: null })
   mocks.signInWithPassword.mockReset()
   mocks.signInWithPassword.mockResolvedValue({ data: { session: { access_token: 'access-token', refresh_token: 'refresh-token' } }, error: null })
+  mocks.refreshSession.mockReset()
+  mocks.refreshSession.mockResolvedValue({
+    data: {
+      session: { access_token: 'access-token', refresh_token: 'refresh-token' },
+      user: { id: 'user-1', email: 'admin@example.com' },
+    },
+    error: null,
+  })
   mocks.isEmailConfigured.mockReturnValue(true)
   mocks.sendEmail.mockReset()
   mocks.sendEmail.mockResolvedValue({ queued: true })
@@ -148,6 +159,183 @@ beforeEach(() => {
   mocks.authUser.id = 'user-1'
   mocks.authUser.email = 'guest@example.com'
   mocks.authUser.email_confirmed_at = '2026-01-01T00:00:00.000Z'
+})
+
+describe('POST /login admin access approval', () => {
+  const adminProfile = {
+    id: 'user-1',
+    role: 'admin',
+    full_name: 'Admin User',
+    username: 'admin.user',
+    phone_e164: '+919876543210',
+    phone_verified: true,
+    phone_verified_at: '2026-01-01T00:00:00.000Z',
+    theme_mode: 'system',
+    selfie_required: false,
+    approval_status: 'approved',
+  }
+
+  beforeEach(() => {
+    config.featureFlags.admin_approval_required_enabled = true
+    mocks.signInWithPassword.mockResolvedValue({
+      data: {
+        session: { access_token: 'access-token', refresh_token: 'refresh-token' },
+        user: { id: 'user-1', email: 'admin@example.com' },
+      },
+      error: null,
+    })
+  })
+
+  it.each([
+    ['pending', 'ADMIN_ACCESS_PENDING', 'Your admin access request is pending approval'],
+    ['rejected', 'ADMIN_ACCESS_REJECTED', 'Your admin access request was rejected'],
+  ])('blocks a %s administrator with a specific login message', async (status, code, message) => {
+    mocks.respond.mockImplementation((table, ops) => {
+      if (table === 'profiles' && ops[ops.length - 1]?.name === 'single') {
+        return { data: adminProfile, error: null }
+      }
+      if (table === 'profiles' && ops[ops.length - 1]?.name === 'maybeSingle') {
+        return { data: { admin_approval_status: status }, error: null }
+      }
+      return { data: null, error: null }
+    })
+
+    const response = await request(buildApp()).post('/login').send({
+      email: 'admin@example.com',
+      password: 'correct-password',
+    })
+
+    expect(response.status).toBe(403)
+    expect(response.body).toEqual({ code, error: message })
+  })
+
+  it('blocks a deactivated administrator with the specific login message', async () => {
+    mocks.respond.mockImplementation((table, ops) => {
+      if (table === 'profiles' && ops[ops.length - 1]?.name === 'single') {
+        return { data: adminProfile, error: null }
+      }
+      if (table === 'profiles' && ops[ops.length - 1]?.name === 'maybeSingle') {
+        return { data: { admin_approval_status: 'approved', is_active: false }, error: null }
+      }
+      return { data: null, error: null }
+    })
+
+    const response = await request(buildApp()).post('/login').send({
+      email: 'admin@example.com',
+      password: 'correct-password',
+    })
+
+    expect(response.status).toBe(403)
+    expect(response.body).toEqual({
+      code: 'ADMIN_ACCESS_DEACTIVATED',
+      error: 'Your admin access has been deactivated',
+    })
+  })
+
+  it('allows an existing approved admin account to log in with the flag enabled', async () => {
+    mocks.respond.mockImplementation((table, ops) => {
+      if (table === 'profiles' && ops[ops.length - 1]?.name === 'single') {
+        return { data: adminProfile, error: null }
+      }
+      if (table === 'profiles' && ops[ops.length - 1]?.name === 'maybeSingle') {
+        return { data: { admin_approval_status: 'approved', is_active: true }, error: null }
+      }
+      return { data: null, error: null }
+    })
+
+    const response = await request(buildApp()).post('/login').send({
+      email: 'admin@example.com',
+      password: 'correct-password',
+    })
+
+    expect(response.status).toBe(200)
+    expect(response.body.user.role).toBe('admin')
+  })
+
+  it('does not perform the new approval check when the feature flag is off', async () => {
+    config.featureFlags.admin_approval_required_enabled = false
+    mocks.respond.mockImplementation((table, ops) => {
+      if (table === 'profiles' && ops[ops.length - 1]?.name === 'single') {
+        return { data: adminProfile, error: null }
+      }
+      return { data: null, error: null }
+    })
+
+    const response = await request(buildApp()).post('/login').send({
+      email: 'admin@example.com',
+      password: 'correct-password',
+    })
+
+    expect(response.status).toBe(200)
+    expect(response.body.user.role).toBe('admin')
+    expect(mocks.respond.mock.calls.filter(([table]) => table === 'profiles')).toHaveLength(1)
+  })
+})
+
+describe.each(['/refresh', '/mobile-refresh'])('%s admin access approval', (path) => {
+  const adminProfile = {
+    id: 'user-1',
+    role: 'admin',
+    full_name: 'Admin User',
+    username: 'admin.user',
+    phone_e164: '+919876543210',
+    phone_verified: true,
+    phone_verified_at: '2026-01-01T00:00:00.000Z',
+    theme_mode: 'system',
+    selfie_required: false,
+    approval_status: 'approved',
+  }
+
+  beforeEach(() => {
+    config.featureFlags.admin_approval_required_enabled = true
+    mocks.respond.mockImplementation((table, ops) => {
+      if (table !== 'profiles') return { data: null, error: null }
+      const approvalStatusQuery = ops.some((op) =>
+        op.name === 'select' && String(op.args[0]).includes('admin_approval_status'),
+      )
+      return {
+        data: approvalStatusQuery
+          ? { admin_approval_status: 'approved' }
+          : adminProfile,
+        error: null,
+      }
+    })
+  })
+
+  it.each([
+    ['pending', 'ADMIN_ACCESS_PENDING', 'Your admin access request is pending approval'],
+    ['rejected', 'ADMIN_ACCESS_REJECTED', 'Your admin access request was rejected'],
+  ])('blocks a %s administrator from refreshing a session', async (status, code, message) => {
+    mocks.respond.mockImplementation((table, ops) => {
+      if (table !== 'profiles') return { data: null, error: null }
+      const approvalStatusQuery = ops.some((op) =>
+        op.name === 'select' && String(op.args[0]).includes('admin_approval_status'),
+      )
+      return {
+        data: approvalStatusQuery
+          ? { admin_approval_status: status }
+          : adminProfile,
+        error: null,
+      }
+    })
+
+    const requestBuilder = request(buildApp()).post(path)
+    if (path === '/refresh') requestBuilder.set('Origin', config.FRONTEND_ORIGIN)
+    const response = await requestBuilder.send({ refreshToken: 'r'.repeat(32) })
+
+    expect(response.status).toBe(403)
+    expect(response.body).toEqual({ code, error: message })
+  })
+
+  it('allows an approved administrator to refresh a session', async () => {
+    const requestBuilder = request(buildApp()).post(path)
+    if (path === '/refresh') requestBuilder.set('Origin', config.FRONTEND_ORIGIN)
+    const response = await requestBuilder.send({ refreshToken: 'r'.repeat(32) })
+
+    expect(response.status).toBe(200)
+    expect(response.body.accessToken).toBe('access-token')
+    if (path === '/mobile-refresh') expect(response.body.user.role).toBe('admin')
+  })
 })
 
 describe('POST /signup', () => {

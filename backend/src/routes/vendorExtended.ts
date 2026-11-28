@@ -36,7 +36,7 @@ async function vendorId(userId: string) {
 function ownedStoragePath(path: string, userId: string) { return path.startsWith(`${userId}/`) && !path.includes('..') }
 const maxDeliveryOtpAttempts = 5
 router.get('/profile', async (request, response) => {
-  const { data, error } = await supabase.from('vendors').select('id,business_name,service_zone,latitude,longitude').eq('owner_profile_id', request.authUser!.id).maybeSingle()
+  const { data, error } = await supabase.from('vendors').select('id,business_name,service_zone,latitude,longitude,verification,is_online').eq('owner_profile_id', request.authUser!.id).maybeSingle()
   if (error) return databaseFailure(response, 'vendorExtended.database_error', error, 500)
   if (!data) return response.status(404).json({ error: 'Vendor profile not found' })
   response.json(data)

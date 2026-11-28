@@ -23,6 +23,7 @@ export const router = createBrowserRouter([
       { path: 'about', element: <ScreenRenderer screen="about" /> },
       { path: 'account', element: <ScreenRenderer screen="account" /> },
       { path: 'login', element: <ScreenRenderer screen="login" /> },
+      { path: 'request-admin-access', element: <ScreenRenderer screen="request-admin-access" /> },
       { path: 'workspace/:role', element: <WorkspaceRoute /> },
       { path: 'track/:token', element: <TrackingRoute /> },
       { path: '*', element: <Navigate to="/" replace /> },

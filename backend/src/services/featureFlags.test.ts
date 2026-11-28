@@ -4,10 +4,12 @@ import { defaultFeatureFlags, resolveFeatureFlags } from './featureFlags.js'
 describe('resolveFeatureFlags', () => {
   it('uses the documented defaults and applies boolean overrides', () => {
     expect(resolveFeatureFlags()).toEqual(defaultFeatureFlags)
+    expect(defaultFeatureFlags.admin_approval_required_enabled).toBe(false)
     expect(resolveFeatureFlags('{"duplicate_phone_check_enabled":false}')).toEqual({
       ...defaultFeatureFlags,
       duplicate_phone_check_enabled: false,
     })
+    expect(resolveFeatureFlags('{"admin_approval_required_enabled":true}').admin_approval_required_enabled).toBe(true)
   })
 
   it('keeps online checkout enabled by default when the wallet is disabled', () => {

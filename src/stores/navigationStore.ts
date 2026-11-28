@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 
 // Screens map to URLs in routing/paths.ts. The store keeps only UI state that is not part of the URL.
-export type ScreenId = 'home' | 'services' | 'subscriptions' | 'booking' | 'yearly-contract' | 'coupons' | 'tracking' | 'partner' | 'terms' | 'policy' | 'account' | 'login' | 'about' | 'customer-workspace' | 'vendor-workspace' | 'admin-workspace' | 'dispatcher-workspace'
+export type ScreenId = 'home' | 'services' | 'subscriptions' | 'booking' | 'yearly-contract' | 'coupons' | 'tracking' | 'partner' | 'terms' | 'policy' | 'account' | 'login' | 'request-admin-access' | 'about' | 'customer-workspace' | 'vendor-workspace' | 'admin-workspace' | 'dispatcher-workspace'
 export type WorkspaceRole = 'customer' | 'vendor' | 'admin' | 'dispatcher'
 type NavigationState = { mobileMenuOpen: boolean; partnerFormDirty: boolean; bookingCompleted: boolean; setMobileMenuOpen: (open: boolean) => void; setPartnerFormDirty: (dirty: boolean) => void; setBookingCompleted: (completed: boolean) => void }
 

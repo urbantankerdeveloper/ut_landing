@@ -19,6 +19,7 @@ const titles: Record<ScreenId, string> = {
   policy: c.appShell.documentTitles.policy,
   account: c.appShell.documentTitles.account,
   login: c.appShell.documentTitles.login,
+  'request-admin-access': c.appShell.documentTitles['request-admin-access'],
   about: c.appShell.documentTitles.about,
   'customer-workspace': c.appShell.documentTitles.customerWorkspace,
   'vendor-workspace': c.appShell.documentTitles.vendorWorkspace,

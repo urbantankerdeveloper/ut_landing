@@ -13,6 +13,7 @@ const featureFlagNames = [
   'admin_dashboard_v2_enabled',
   'area_availability_enabled',
   'partner_application_otp_enabled',
+  'admin_approval_required_enabled',
   'address_geocoding_enabled',
   'invoice_generation_enabled',
   'wallet_enabled',
