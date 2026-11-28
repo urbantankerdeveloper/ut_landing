@@ -15,7 +15,7 @@ import { deliveryVerificationMethod } from '../services/deliveryVerification.js'
 import { listWindow, sendList, type ListWindow } from '../lib/listParams.js'
 import { config } from '../config.js'
 import { createInvoiceIfEligible } from '../services/invoices.js'
-import { getCachedVendorId, invalidateAuthVendor } from '../services/authCache.js'
+import { getCachedVendorId } from '../services/authCache.js'
 const exactCount = (range: ListWindow) => (range.mode === 'paged' ? { count: 'exact' as const } : undefined)
 const optionalCoordinateFields = {
   latitude: z.number().finite().min(-90).max(90).optional(),
