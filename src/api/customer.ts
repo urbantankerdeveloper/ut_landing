@@ -45,6 +45,7 @@ export type CustomerPhoneVerification = { phone: string; verified: boolean; phon
 export type PublicTracking = {
   bookingReference: string
   status: string
+  serviceName?: string
   expectedDelivery?: string | null
   vehicle?: string | null
   driver?: string | null
@@ -52,6 +53,8 @@ export type PublicTracking = {
   events: { status: string; note?: string | null; createdAt: string }[]
   trackingAvailable: boolean
 }
+export type PublicTrackingOtpChallenge = { challengeId: string; expiresInSeconds: number; message: string }
+export type PublicTrackingResult = PublicTracking & { accessToken: string; expiresAt: string }
 const bookingStatusMap: Record<string, string> = { pending_vendor: 'pending_vendor', vendor_assigned: 'vendor_assigned', accepted: 'accepted', en_route: 'en_route', arrived: 'arrived', delivered: 'delivered', cancelled: 'cancelled' }
 function normalizeBooking(item: Record<string, unknown>): CustomerBooking {
   const orderItems = Array.isArray(item.items)
@@ -251,6 +254,9 @@ export const customerApi = {
   rateMultiServiceFulfilment: (fulfilmentId: string, rating: number, review?: string) => apiFetch<unknown>(`/customer/multi-service-fulfilments/${fulfilmentId}/ratings`, { method: 'POST', body: JSON.stringify({ rating, review }) }),
   tracking: (orderId: string) => apiFetch<TrackingSnapshot>(`/customer/orders/${orderId}/tracking`),
   publicTracking: (token: string) => apiFetch<PublicTracking>(`/public/tracking/${encodeURIComponent(token)}`),
+  requestPublicTrackingOtp: (payload: { reference: string; phone: string }) => apiFetch<PublicTrackingOtpChallenge>('/public/tracking/request-otp', { method: 'POST', body: JSON.stringify(payload) }),
+  verifyPublicTrackingOtp: (payload: { reference: string; phone: string; challengeId: string; otp: string }) => apiFetch<PublicTrackingResult>('/public/tracking/verify-otp', { method: 'POST', body: JSON.stringify(payload) }),
+  publicTrackingDetails: (payload: { reference: string; accessToken: string }) => apiFetch<PublicTracking>('/public/tracking/details', { method: 'POST', body: JSON.stringify(payload) }),
   requestDeliveryOtp: (orderId: string) => apiFetch<{ otp: string; expiresAt: string; smsSent: boolean }>(`/customer/orders/${orderId}/delivery-otp`, { method: 'POST' }),
   rescheduleBooking: (orderId: string, scheduledFor: string) => apiFetch<CustomerBooking>(`/customer/orders/${orderId}/reschedule`, { method: 'PATCH', body: JSON.stringify({ scheduledFor }) }),
   cancelBooking: (orderId: string) => apiFetch<CustomerBooking>(`/customer/orders/${orderId}/status`, { method: 'PATCH', successMessage: feedbackContent.success.cancelled, body: JSON.stringify({ status: 'cancelled' }) }),

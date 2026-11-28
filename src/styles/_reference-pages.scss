@@ -11,6 +11,17 @@
 .reference-copy-card p { color: colors.$muted; font-size: 13px; }
 .reference-card-icon { display: grid; place-items: center; width: 42px; height: 42px; color: colors.$aqua; background: colors.$teal-50; border-radius: 12px; }
 .public-reference-screen .customer-operation-panel { max-width: 980px; padding: 24px; margin: 0; background: #fff; border: 1px solid colors.$line; border-radius: 16px; }
+.public-order-tracking { display: grid; max-width: 980px; gap: 18px; }
+.public-order-lookup-card { margin: 0; }
+.public-order-lookup-card > p { margin: 0 0 18px; }
+.public-order-lookup-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: end; }
+.public-order-lookup-form label { display: grid; gap: 6px; color: colors.$ink; font-size: 12px; font-weight: 800; }
+.public-order-lookup-form input { width: 100%; min-width: 0; min-height: 48px; padding: 11px 13px; color: colors.$ink; background: colors.$white; border: 1px solid colors.$line; border-radius: 9px; }
+.public-order-lookup-form input:focus { border-color: colors.$aqua; outline: 0; box-shadow: 0 0 0 3px rgba(colors.$aqua, .13); }
+.public-order-lookup-form .button { min-height: 48px; grid-column: 1 / -1; justify-self: start; }
+.tracking-lookup-notice { margin: 14px 0 0 !important; color: colors.$aqua-dark !important; font-size: 12px !important; }
+.tracking-lookup-error { padding: 11px 13px; margin: 12px 0 0; color: #99483d; background: #fff0ee; border-radius: 9px; font-size: 12px; }
+.tracking-lookup-another { justify-self: start; }
 .home-screen .service-showcase-card { display: flex; min-height: 380px; flex-direction: column; padding: 32px; border-radius: 24px; }
 .home-screen .service-showcase-card:first-child { grid-column: span 2; height: 286px; min-height: 0; }
 .home-screen .service-showcase-card:nth-child(2) { height: 286px; min-height: 0; }
@@ -41,4 +52,4 @@
 .home-screen .service-showcase-card:first-child .service-disclosure { border-color: colors.$teal-200; }
 .home-screen .service-showcase-card:first-child .service-disclosure summary, .home-screen .service-showcase-card:first-child .service-disclosure p { color: colors.$teal-200; }
 @media (max-width: 980px) { .home-screen .service-showcase-card:first-child { grid-column: span 1; } }
-@media (max-width: 760px) { .public-reference-screen { padding: 42px 20px 60px; }.public-reference-grid { grid-template-columns: 1fr; }.public-reference-screen .section-intro h1 { font-size: 42px; }.home-screen .service-showcase-card:first-child, .home-screen .service-showcase-card:nth-child(2) { height: auto; min-height: 380px; } }
+@media (max-width: 760px) { .public-reference-screen { padding: 42px 20px 60px; }.public-reference-grid { grid-template-columns: 1fr; }.public-reference-screen .section-intro h1 { font-size: 42px; }.public-order-lookup-form { grid-template-columns: 1fr; }.public-order-lookup-form .button { grid-column: auto; width: 100%; }.home-screen .service-showcase-card:first-child, .home-screen .service-showcase-card:nth-child(2) { height: auto; min-height: 380px; } }

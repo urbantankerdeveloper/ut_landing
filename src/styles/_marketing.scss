@@ -1,6 +1,170 @@
 @use '../theme/colors';
 @use '../theme/typography';
 
+html.service-backgrounds-enabled .marketing-page-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+html.service-backgrounds-enabled .marketing-page-hero-media,
+html.service-backgrounds-enabled .service-artwork {
+  position: relative;
+  overflow: hidden;
+  background: colors.$teal-900;
+}
+
+html.service-backgrounds-enabled .marketing-page-hero-media {
+  position: absolute;
+  z-index: -2;
+  inset: 0;
+}
+
+html.service-backgrounds-enabled .marketing-page-hero-media::after {
+  position: absolute;
+  background: linear-gradient(90deg, rgba(colors.$teal-900, .96), rgba(colors.$teal-900, .58));
+  content: '';
+  inset: 0;
+}
+
+html.service-backgrounds-enabled .marketing-page-hero-media .service-artwork,
+html.service-backgrounds-enabled .marketing-page-hero-media picture,
+html.service-backgrounds-enabled .marketing-page-hero-media img,
+html.service-backgrounds-enabled .service-artwork picture,
+html.service-backgrounds-enabled .service-artwork img,
+html.service-backgrounds-enabled .service-artwork-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+html.service-backgrounds-enabled .marketing-service-card-media {
+  width: calc(100% + 40px);
+  height: 170px;
+  margin: -20px -20px 18px;
+  border-radius: 17px 17px 0 0;
+}
+
+.js-reveal .marketing-bottom-cta,
+.js-reveal .marketing-closing {
+  transition: opacity 700ms cubic-bezier(.2,.7,.2,1), transform 700ms cubic-bezier(.2,.7,.2,1);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  html.service-backgrounds-enabled:not(.landing-3d-disabled) .marketing-service-card,
+  html:not(.landing-3d-disabled) .marketing-plan-card,
+  html:not(.landing-3d-disabled) .marketing-about-card {
+    transform-style: preserve-3d;
+    transition: transform 220ms ease, box-shadow 220ms ease;
+  }
+
+  html.service-backgrounds-enabled:not(.landing-3d-disabled) .marketing-service-card:hover,
+  html.service-backgrounds-enabled:not(.landing-3d-disabled) .marketing-service-card:focus-within,
+  html:not(.landing-3d-disabled) .marketing-plan-card:hover,
+  html:not(.landing-3d-disabled) .marketing-plan-card:focus-within,
+  html:not(.landing-3d-disabled) .marketing-about-card:hover,
+  html:not(.landing-3d-disabled) .marketing-about-card:focus-within {
+    transform: perspective(900px) rotateX(var(--tilt-x, 1deg)) rotateY(var(--tilt-y, -2deg)) translateY(-4px);
+    box-shadow: 0 24px 44px rgba(colors.$teal-900, .16);
+  }
+
+  html.service-backgrounds-enabled:not(.landing-3d-disabled) .marketing-service-card::after,
+  html:not(.landing-3d-disabled) .marketing-plan-card::after {
+    position: absolute;
+    width: 180px;
+    height: 180px;
+    pointer-events: none;
+    background: radial-gradient(circle, rgba(colors.$white, .24), transparent 68%);
+    content: '';
+    opacity: 0;
+    transform: translate(var(--highlight-x, -40%), var(--highlight-y, -40%));
+  }
+
+  html.service-backgrounds-enabled:not(.landing-3d-disabled) .marketing-service-card:hover::after,
+  html:not(.landing-3d-disabled) .marketing-plan-card:hover::after { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marketing-service-card,
+  .marketing-plan-card,
+  .marketing-about-card,
+  .marketing-service-icon,
+  .marketing-step-icon {
+    transform: none !important;
+    animation: none !important;
+  }
+
+  @media (min-width: 761px) {
+    html:not(.landing-3d-disabled) .js-reveal .marketing-plan-grid .marketing-plan-card:not(.is-revealed):not(.reveal-disabled) {
+      transform-style: preserve-3d;
+      transform-origin: center bottom;
+      backface-visibility: hidden;
+    }
+
+    html:not(.landing-3d-disabled) .js-reveal .marketing-plan-grid .plan-card-fan-0:not(.is-revealed):not(.reveal-disabled) {
+      transform: perspective(1000px) rotateY(12deg) translateX(18px) scale(.96);
+    }
+
+    html:not(.landing-3d-disabled) .js-reveal .marketing-plan-grid .plan-card-fan-1:not(.is-revealed):not(.reveal-disabled) {
+      transform: perspective(1000px) translateY(14px) scale(.96);
+    }
+
+    html:not(.landing-3d-disabled) .js-reveal .marketing-plan-grid .plan-card-fan-2:not(.is-revealed):not(.reveal-disabled) {
+      transform: perspective(1000px) rotateY(-12deg) translateX(-18px) scale(.96);
+    }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    html:not(.landing-3d-disabled) .marketing-plan-card.is-featured.is-revealed::before {
+      position: absolute;
+      z-index: 0;
+      top: -18px;
+      right: 12%;
+      width: 76%;
+      height: 48px;
+      pointer-events: none;
+      background: radial-gradient(ellipse, rgba(colors.$aqua, .35), transparent 70%);
+      content: '';
+      animation: plan-glow-float 3.8s ease-in-out infinite alternate;
+    }
+
+    html:not(.landing-3d-disabled) .marketing-plan-card.is-featured > * {
+      position: relative;
+      z-index: 1;
+    }
+  }
+
+  @keyframes plan-glow-float {
+    from { opacity: .45; transform: translateY(4px) scale(.92); }
+    to { opacity: .9; transform: translateY(-5px) scale(1.04); }
+  }
+
+  .home-webgl-hero {
+    position: absolute;
+    z-index: -1;
+    width: 44%;
+    height: 74%;
+    right: 2%;
+    bottom: 4%;
+    pointer-events: none;
+  }
+
+  @supports (animation-timeline: view()) {
+    .marketing-process::before,
+    .marketing-step-grid::before {
+      transform-origin: left;
+      animation: landing-progress linear both;
+      animation-timeline: view();
+    }
+  }
+
+  @keyframes landing-progress {
+    from { transform: scaleX(.05); opacity: .35; }
+    to { transform: scaleX(1); opacity: 1; }
+  }
+}
+
 .marketing-shell {
   width: min(calc(100% - 48px), 1184px);
   margin-right: auto;
@@ -784,4 +948,19 @@
   .marketing-service-card:hover {
     transform: none;
   }
+}
+
+@media (min-width: 761px) and (prefers-reduced-motion: no-preference) {
+  html:not(.landing-3d-disabled) .js-reveal .marketing-plan-grid .marketing-plan-card.is-revealed:not(.reveal-disabled) {
+    animation: plan-card-arrive 760ms cubic-bezier(.2,.7,.2,1) both;
+  }
+
+  html:not(.landing-3d-disabled) .js-reveal .marketing-plan-grid .plan-card-fan-0.is-revealed { animation-delay: 80ms; }
+  html:not(.landing-3d-disabled) .js-reveal .marketing-plan-grid .plan-card-fan-1.is-revealed { animation-delay: 180ms; }
+  html:not(.landing-3d-disabled) .js-reveal .marketing-plan-grid .plan-card-fan-2.is-revealed { animation-delay: 280ms; }
+}
+
+@keyframes plan-card-arrive {
+  from { opacity: 0; transform: perspective(1000px) rotateY(12deg) translateY(18px) scale(.94); }
+  to { opacity: 1; transform: perspective(1000px) rotateY(0) translateY(0) scale(1); }
 }

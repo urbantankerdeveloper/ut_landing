@@ -186,3 +186,7 @@ IMPLEMENTATION_BACKLOG.md
 !docs/api-migration.md
 !backend/scripts/bench/README.md
 /backend/hostinger-upload.zip
+scripts/image-originals/
+!docs/landing-motion.md
+!docs/image-prompts.md
+!docs/image-credits.md

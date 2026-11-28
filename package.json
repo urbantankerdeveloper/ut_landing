@@ -25,7 +25,10 @@
     "test:realtime:smoke": "node e2e/realtime-smoke.mjs",
     "lighthouse:home": "lighthouse http://localhost:4173/ --preset=perf --throttling-method=devtools --only-categories=performance --form-factor=mobile --screenEmulation.mobile=true --chrome-flags=\"--headless --no-sandbox\" --output=json --output-path=stats/lighthouse-home.json",
     "reference": "node scripts/serve-reference.mjs",
-    "reference:list": "node scripts/serve-reference.mjs --list"
+    "reference:list": "node scripts/serve-reference.mjs --list",
+    "images:fetch": "node scripts/fetch-stock-images.mjs",
+    "images:optimize": "node scripts/optimize-images.mjs",
+    "docs:image-credits": "node scripts/generate-image-credits.mjs"
   },
   "dependencies": {
     "@fontsource/dm-mono": "^5.3.0",
@@ -43,6 +46,7 @@
     "react-leaflet": "^5.0.0",
     "react-router": "^7.18.5",
     "socket.io-client": "^4.8.4",
+    "three": "^0.187.0",
     "zod": "^4.6.7",
     "zustand": "^5.0.8"
   },
@@ -54,6 +58,7 @@
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
+    "@types/three": "^0.187.0",
     "@vitejs/plugin-react": "^6.1.1",
     "concurrently": "^10.0.6",
     "eslint": "^10.10.0",
@@ -63,6 +68,7 @@
     "lighthouse": "^13.6.0",
     "rollup-plugin-visualizer": "^7.1.1",
     "sass": "^1.86.0",
+    "sharp": "^0.35.5",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.72.1",
     "vite": "^8.3.0",

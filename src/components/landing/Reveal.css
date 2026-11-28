@@ -1,0 +1,20 @@
+.js-reveal .landing-reveal:not(.is-revealed):not(.reveal-disabled) {
+  opacity: 0;
+  will-change: transform, opacity;
+}
+.js-reveal .reveal-fade-up:not(.is-revealed):not(.reveal-disabled) { transform: translateY(28px); }
+.js-reveal .reveal-fade-in:not(.is-revealed):not(.reveal-disabled) { transform: none; }
+.js-reveal .reveal-slide-left:not(.is-revealed):not(.reveal-disabled) { transform: translateX(-36px); }
+.js-reveal .reveal-slide-right:not(.is-revealed):not(.reveal-disabled) { transform: translateX(36px); }
+.js-reveal .reveal-scale-in:not(.is-revealed):not(.reveal-disabled) { transform: scale(.94); }
+.js-reveal .reveal-blur-in:not(.is-revealed):not(.reveal-disabled) { filter: blur(8px); transform: translateY(10px); }
+.landing-reveal {
+  opacity: 1;
+  transition: opacity 700ms cubic-bezier(.2,.7,.2,1), transform 700ms cubic-bezier(.2,.7,.2,1), filter 700ms cubic-bezier(.2,.7,.2,1);
+}
+.landing-reveal.is-revealed { opacity: 1; filter: none; transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .js-reveal .landing-reveal:not(.is-revealed),
+  .landing-reveal { opacity: 1 !important; filter: none !important; transform: none !important; transition: none !important; }
+}

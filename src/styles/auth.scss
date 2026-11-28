@@ -176,9 +176,49 @@
     }
 }
 
+@media (min-width: 901px) {
+    .auth-screen {
+        height: 100svh;
+        min-height: 100svh;
+        overflow: hidden;
+    }
+
+    .auth-story {
+        height: 100%;
+        min-height: 0;
+    }
+
+    .auth-panel {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        min-height: 0;
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior-y: contain;
+    }
+
+    .auth-panel-inner {
+        flex: 0 0 auto;
+        margin: auto;
+    }
+}
+
 @media (max-width: 600px) {
     .auth-screen {
         background: colors.$white;
+    }
+
+    @media (max-width: 900px) {
+        .auth-panel {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .auth-panel-inner {
+            flex: 0 0 auto;
+            margin-block: auto;
+        }
     }
 
     .auth-panel {
