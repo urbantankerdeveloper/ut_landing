@@ -20,6 +20,7 @@ import { AdminPricingScreen } from './AdminPricingScreen'
 import { AdminNotificationsPanel } from './AdminNotificationsPanel'
 import { AdminWhatsAppTemplatesScreen } from './AdminWhatsAppTemplatesScreen'
 import { AdminSmsTemplatesScreen } from './AdminSmsTemplatesScreen'
+import { AdminEmailTemplatesScreen } from './AdminEmailTemplatesScreen'
 import { AdminAccessRequestsScreen } from './AdminAccessRequestsScreen'
 import { useAdminAnalyticsSummary } from '../hooks/useAdminData'
 import { adminApi } from '../api/admin'
@@ -43,6 +44,7 @@ export function AdminWorkspaceContent({ item, onNotice }: Props) {
   if (item === 'system-health') return <AdminSystemHealthScreen />
   if (item === 'whatsapp-templates') return <AdminWhatsAppTemplatesScreen onNotice={onNotice} />
   if (item === 'sms-templates') return <AdminSmsTemplatesScreen onNotice={onNotice} />
+  if (item === 'email-templates') return <AdminEmailTemplatesScreen onNotice={onNotice} />
   if (item === 'bookings' && !demoDataEnabled) return <AdminBookingOperationsScreen onNotice={onNotice} />
   if (item === 'pricing' && !demoDataEnabled) return <AdminPricingScreen onNotice={onNotice} />
   if (['subscriptions', 'contracts', 'enquiries'].includes(item) && !demoDataEnabled) return <AdminProgramsScreen kind={item as 'subscriptions' | 'contracts' | 'enquiries'} onNotice={onNotice} />

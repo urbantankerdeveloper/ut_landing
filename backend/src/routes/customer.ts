@@ -343,10 +343,19 @@ function bookingInsert(data: z.infer<typeof bookingSchema>, services: ReturnType
   }
 }
 type CreatedBooking = { id: string; reference: string; vendor_id: string | null; quoted_amount_paise?: number; payment_method?: string; order_group_id?: string | null; order_group_reference?: string | null; order_group_size?: number | null }
+async function saveBookingNotificationEmail(customerId: string, bookingIds: string[], email?: string) {
+  if (!bookingIds.length) return
+  const { error } = await supabase.from('bookings')
+    .update({ customer_email: email ?? null })
+    .eq('customer_id', customerId)
+    .in('id', bookingIds)
+  if (error) throw new Error(`Booking notification email could not be saved: ${error.message}`)
+}
 async function createBookingAndNotifications(input: {
   customerId: string
   reference: string
   idempotencyKey?: string
+  notificationEmail?: string
   booking: ReturnType<typeof bookingInsert>
   vendors: Awaited<ReturnType<typeof findNearbyVendors>>
   payment?: { provider: string; amount_paise: number; currency: string; status: string }
@@ -364,6 +373,7 @@ async function createBookingAndNotifications(input: {
   })
   if (error) throw error
   const result = data as { booking: CreatedBooking; created: boolean }
+  if (result?.booking?.id) await saveBookingNotificationEmail(input.customerId, [result.booking.id], input.notificationEmail)
   if (result?.booking?.id) notifyNearbyVendors(input.vendors, result.booking, result.created)
   const sendTrackingConfirmation = input.sendTrackingConfirmation
     ?? input.booking.payment_method !== 'gateway'
@@ -377,6 +387,7 @@ async function createMultiServiceBookings(input: {
   groupId: string
   groupReference: string
   idempotencyKey?: string
+  notificationEmail?: string
   services: ReturnType<typeof getBookingServices>
   data: z.infer<typeof bookingSchema>
   taskAmountsPaise: number[]
@@ -409,6 +420,7 @@ async function createMultiServiceBookings(input: {
   if (!Array.isArray(result?.bookings) || !result.bookings.length) {
     throw new Error('The grouped booking response was invalid.')
   }
+  await saveBookingNotificationEmail(input.customerId, result.bookings.map((booking) => booking.id), input.notificationEmail)
   for (const booking of result.bookings) notifyNearbyVendors(input.vendors, booking, result.created)
   const customerPhone = input.data.phone ? toE164IndianMobile(input.data.phone) : null
   if (input.data.paymentMethod !== 'gateway') {
@@ -599,6 +611,9 @@ async function placeQuotedBooking(request: Request, response: Response, includeQ
   if (!(await requireAccountPhoneVerification(customerId, response))) return
   const parsed = bookingSchema.safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Invalid booking', details: parsed.error.flatten() })
+  const notificationEmail = request.authUser!.email?.toLowerCase().endsWith('@guest.urbantanker.local')
+    ? parsed.data.notificationEmail
+    : undefined
   if (!parsed.data.paymentMethod) return response.status(400).json({ error: 'Choose a payment method: wallet, online payment, or cash on delivery.' })
   if (parsed.data.paymentMethod === 'wallet' && !config.featureFlags.wallet_enabled) return response.status(403).json({ error: 'Wallet is currently disabled. Choose another payment method.' })
   if (parsed.data.paymentMethod === 'gateway' && !config.featureFlags.online_payment_enabled) return response.status(503).json({ error: 'Online payments are currently unavailable. Please choose cash on delivery.' })
@@ -638,6 +653,11 @@ async function placeQuotedBooking(request: Request, response: Response, includeQ
     const { data: existing, error: existingError } = await supabase.from('bookings').select('id,reference,vendor_id,quoted_amount_paise,payment_method').eq('customer_id', customerId).eq('idempotency_key', parsed.data.idempotencyKey).maybeSingle()
     if (existingError) return databaseFailure(response, 'customer.booking_failed', existingError, 500)
     if (existing) {
+    try {
+      await saveBookingNotificationEmail(customerId, [existing.id], notificationEmail)
+    } catch (emailError) {
+      return databaseFailure(response, 'customer.booking_email_save_failed', emailError, 500)
+    }
       const group = splitServices
         ? await supabase.from('bookings').select('order_group_id,order_group_reference,order_group_size').eq('id', existing.id).maybeSingle()
         : null
@@ -690,6 +710,7 @@ async function placeQuotedBooking(request: Request, response: Response, includeQ
         groupId: crypto.randomUUID(),
         groupReference: bookingReference(),
         idempotencyKey: parsed.data.idempotencyKey,
+        notificationEmail,
         services,
         data: parsed.data,
         taskAmountsPaise: quote.invoiceLineItems
@@ -704,6 +725,7 @@ async function placeQuotedBooking(request: Request, response: Response, includeQ
         customerId,
         reference: bookingReference(),
         idempotencyKey: parsed.data.idempotencyKey,
+        notificationEmail,
         booking: bookingInsert(
           parsed.data,
           services,

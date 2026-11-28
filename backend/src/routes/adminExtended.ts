@@ -14,6 +14,7 @@ import { invalidateAuthProfile, invalidateAuthVendor } from '../services/authCac
 import { getManualAssignmentModeEnabled, setManualAssignmentModeEnabled } from '../services/manualAssignmentMode.js'
 import { failure } from '../lib/httpErrors.js'
 import { notifyCustomerOfBookingStatus, notifyCustomerOfBookingWhatsApp } from '../services/bookingNotifications.js'
+import { notifyVendorByProfileId } from '../services/vendorNotifications.js'
 import { logger } from '../lib/logger.js'
 import { toE164IndianMobile } from '../lib/phone.js'
 import { listWindow, sendList, type ListWindow } from '../lib/listParams.js'
@@ -129,7 +130,35 @@ router.patch('/dispatch-settings', async (request, response) => {
   }
 })
 router.post('/notifications', async (request, response) => { const parsed = z.object({ customerId: z.string().uuid(), title: z.string().min(2).max(120), detail: z.string().min(1).max(2000), eventType: z.string().min(2).max(80).default('admin_message'), bookingId: z.string().uuid().optional() }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid notification' }); try { const data = await notifyCustomer({ customerId: parsed.data.customerId, title: parsed.data.title, detail: parsed.data.detail, eventType: parsed.data.eventType, bookingId: parsed.data.bookingId }); response.status(201).json(data) } catch (error) { failure(response, 400, 'Notification could not be created.', 'adminExtended.notification_failed', error) } })
-router.patch('/vendors/:id/status', async (request, response) => { const parsed = z.object({ status: z.enum(['pending','approved','rejected','suspended']).optional(), isOnline: z.boolean().optional() }).refine((value) => value.status !== undefined || value.isOnline !== undefined).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid vendor status' }); const { data: current, error: currentError } = await supabase.from('vendors').select('verification,owner_profile_id').eq('id', request.params.id).single(); if (currentError || !current) return response.status(404).json({ error: 'Vendor not found' }); const nextVerification = parsed.data.status ?? current.verification; if (parsed.data.isOnline === true && nextVerification !== 'approved') return response.status(409).json({ error: 'Approve the vendor before setting them active.' }); const online = parsed.data.status && parsed.data.status !== 'approved' ? false : parsed.data.isOnline; const update = Object.fromEntries(Object.entries({ verification: parsed.data.status, is_online: online }).filter(([, value]) => value !== undefined)); const { data, error } = await supabase.from('vendors').update(update).eq('id', request.params.id).select().single(); if (error) return databaseFailure(response, 'adminExtended.database_error', error, 400); if (current.owner_profile_id) await invalidateAuthVendor(current.owner_profile_id); response.json(data) })
+router.patch('/vendors/:id/status', async (request, response) => {
+  const parsed = z.object({
+    status: z.enum(['pending', 'approved', 'rejected', 'suspended']).optional(),
+    isOnline: z.boolean().optional(),
+  }).refine((value) => value.status !== undefined || value.isOnline !== undefined).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Invalid vendor status' })
+  const { data: current, error: currentError } = await supabase
+    .from('vendors')
+    .select('verification,owner_profile_id,business_name')
+    .eq('id', request.params.id)
+    .single()
+  if (currentError || !current) return response.status(404).json({ error: 'Vendor not found' })
+  const nextVerification = parsed.data.status ?? current.verification
+  if (parsed.data.isOnline === true && nextVerification !== 'approved') return response.status(409).json({ error: 'Approve the vendor before setting them active.' })
+  const online = parsed.data.status && parsed.data.status !== 'approved' ? false : parsed.data.isOnline
+  const update = Object.fromEntries(Object.entries({ verification: parsed.data.status, is_online: online }).filter(([, value]) => value !== undefined))
+  const { data, error } = await supabase.from('vendors').update(update).eq('id', request.params.id).select().single()
+  if (error) return databaseFailure(response, 'adminExtended.database_error', error, 400)
+  if (current.owner_profile_id) await invalidateAuthVendor(current.owner_profile_id)
+  if (current.verification !== nextVerification && (nextVerification === 'approved' || nextVerification === 'rejected')) {
+    void notifyVendorByProfileId(
+      current.owner_profile_id,
+      nextVerification === 'approved' ? 'vendor_profile_approved' : 'vendor_profile_rejected',
+      { businessName: current.business_name ?? 'Your business' },
+      `vendor_profile_${nextVerification}`,
+    )
+  }
+  response.json(data)
+})
 router.patch('/vendors/:id', async (request, response) => { const parsed = z.object({ businessName: z.string().min(2).optional(), phone: z.string().regex(/^\d{10}$/).optional(), serviceZone: z.string().min(2).optional(), latitude: z.number().finite().min(-90).max(90).optional(), longitude: z.number().finite().min(-180).max(180).optional() }).superRefine((value, context) => { if ((value.latitude === undefined) !== (value.longitude === undefined)) context.addIssue({ code: 'custom', message: 'Latitude and longitude must be provided together.' }) }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid vendor update' }); const { data, error } = await supabase.from('vendors').update(Object.fromEntries(Object.entries({ business_name: parsed.data.businessName, phone_e164: parsed.data.phone, service_zone: parsed.data.serviceZone, latitude: parsed.data.latitude, longitude: parsed.data.longitude }).filter(([, value]) => value !== undefined))).eq('id', request.params.id).select().single(); if (error) return databaseFailure(response, 'adminExtended.database_error', error, 400); response.json(data) })
 router.delete('/vendors/:id', async (request, response) => { const { data: vendor } = await supabase.from('vendors').select('owner_profile_id').eq('id', request.params.id).single(); if (!vendor) return response.status(404).json({ error: 'Vendor not found' }); const { error } = await supabase.from('vendors').delete().eq('id', request.params.id); if (error) return databaseFailure(response, 'adminExtended.vendor_delete_failed', error, 400); if (vendor.owner_profile_id) { await invalidateAuthVendor(vendor.owner_profile_id); await invalidateAuthProfile(vendor.owner_profile_id); const { error: authError } = await supabase.auth.admin.deleteUser(vendor.owner_profile_id); if (authError) return failure(response, 500, 'The vendor profile was removed, but the login could not be deleted. Contact engineering.', 'adminExtended.vendor_auth_delete_failed', authError) } response.status(204).send() })
 router.post('/vendors/:profileId/provision', async (request, response) => {
@@ -150,7 +179,37 @@ router.post('/vendors/:profileId/provision', async (request, response) => {
 })
 router.post('/vendors', async (request, response) => { const parsed = z.object({ email: z.string().email(), password: z.string().min(8), name: z.string().min(2).max(60), phone: z.string().regex(/^\d{10}$/), businessName: z.string().min(2), serviceZone: z.string().min(2), latitude: z.number().finite().min(-90).max(90).optional(), longitude: z.number().finite().min(-180).max(180).optional() }).superRefine((value, context) => { if ((value.latitude === undefined) !== (value.longitude === undefined)) context.addIssue({ code: 'custom', message: 'Latitude and longitude must be provided together.' }) }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid vendor' }); const { data: auth, error: authError } = await supabase.auth.admin.createUser({ email: parsed.data.email, password: parsed.data.password, email_confirm: true, user_metadata: { full_name: parsed.data.name, phone: parsed.data.phone }, app_metadata: { role: 'vendor' } }); if (authError || !auth.user) return failure(response, 400, 'Vendor user could not be created.', 'adminExtended.vendor_user_failed', authError); const { error: profileError } = await supabase.from('profiles').upsert({ id: auth.user.id, full_name: parsed.data.name, phone_e164: toE164IndianMobile(parsed.data.phone), role: 'vendor' }); if (profileError) return databaseFailure(response, 'adminExtended.database_error', profileError, 400); await invalidateAuthProfile(auth.user.id); const { data, error } = await supabase.from('vendors').insert({ owner_profile_id: auth.user.id, business_name: parsed.data.businessName, phone_e164: parsed.data.phone, service_zone: parsed.data.serviceZone, latitude: parsed.data.latitude, longitude: parsed.data.longitude, verification: 'pending' }).select().single(); if (error) return databaseFailure(response, 'adminExtended.database_error', error, 400); await invalidateAuthVendor(auth.user.id); response.status(201).json(data) })
 router.get('/admin-accounts', async (request, response) => { const status = z.enum(['pending', 'approved', 'rejected']).optional().safeParse(request.query.status); if (!status.success) return response.status(400).json({ error: 'Invalid status filter' }); let query = supabase.from('profiles').select('id,full_name,username,role,approval_status,created_at').in('role', ['admin', 'vendor']).order('created_at', { ascending: false }); if (status.data) query = query.eq('approval_status', status.data); const { data, error } = await query; if (error) return databaseFailure(response, 'adminExtended.database_error', error, 500); response.json(data ?? []) })
-router.patch('/admin-accounts/:id/approval', async (request, response) => { const parsed = z.object({ status: z.enum(['approved', 'rejected']) }).safeParse(request.body); if (!parsed.success || !z.string().uuid().safeParse(request.params.id).success) return response.status(400).json({ error: 'Invalid approval status' }); if (request.params.id === request.profile?.id) return response.status(409).json({ error: 'You cannot change your own approval status.' }); const { data, error } = await supabase.from('profiles').update({ approval_status: parsed.data.status }).eq('id', request.params.id).in('role', ['admin', 'vendor']).select('id,full_name,username,role,approval_status').maybeSingle(); if (error) return databaseFailure(response, 'adminExtended.database_error', error, 400); if (!data) return response.status(404).json({ error: 'Account not found' }); response.json(data) })
+router.patch('/admin-accounts/:id/approval', async (request, response) => {
+  const parsed = z.object({ status: z.enum(['approved', 'rejected']) }).safeParse(request.body)
+  if (!parsed.success || !z.string().uuid().safeParse(request.params.id).success) return response.status(400).json({ error: 'Invalid approval status' })
+  if (request.params.id === request.profile?.id) return response.status(409).json({ error: 'You cannot change your own approval status.' })
+  const { data: current, error: currentError } = await supabase
+    .from('profiles')
+    .select('id,full_name,role,approval_status')
+    .eq('id', request.params.id)
+    .in('role', ['admin', 'vendor'])
+    .maybeSingle()
+  if (currentError) return databaseFailure(response, 'adminExtended.database_error', currentError, 400)
+  if (!current) return response.status(404).json({ error: 'Account not found' })
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({ approval_status: parsed.data.status })
+    .eq('id', request.params.id)
+    .in('role', ['admin', 'vendor'])
+    .select('id,full_name,username,role,approval_status')
+    .maybeSingle()
+  if (error) return databaseFailure(response, 'adminExtended.database_error', error, 400)
+  if (!data) return response.status(404).json({ error: 'Account not found' })
+  if (current.role === 'vendor' && current.approval_status !== parsed.data.status) {
+    void notifyVendorByProfileId(
+      current.id,
+      parsed.data.status === 'approved' ? 'vendor_account_approved' : 'vendor_account_rejected',
+      { name: current.full_name ?? 'Vendor' },
+      `vendor_account_${parsed.data.status}`,
+    )
+  }
+  response.json(data)
+})
 router.patch('/vehicles/:id/status', async (request, response) => { const parsed = z.object({ verification: z.enum(['pending','approved','rejected','suspended']), isActive: z.boolean().optional() }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid vehicle status' }); const { data, error } = await supabase.from('vehicles').update(Object.fromEntries(Object.entries({ verification: parsed.data.verification, is_active: parsed.data.isActive }).filter(([, value]) => value !== undefined))).eq('id', request.params.id).select().single(); if (error) return databaseFailure(response, 'adminExtended.database_error', error, 400); response.json(data) })
 router.patch('/vehicles/:id', async (request, response) => { const parsed = z.object({ registrationNumber: z.string().min(3).optional(), capacityLitres: z.number().int().positive().optional(), supportedServices: z.array(z.string()).optional() }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid vehicle update' }); const { data, error } = await supabase.from('vehicles').update(Object.fromEntries(Object.entries({ registration_number: parsed.data.registrationNumber, capacity_litres: parsed.data.capacityLitres, supported_services: parsed.data.supportedServices }).filter(([, value]) => value !== undefined))).eq('id', request.params.id).select().single(); if (error) return databaseFailure(response, 'adminExtended.database_error', error, 400); response.json(data) })
 router.delete('/vehicles/:id', async (request, response) => { const { error } = await supabase.from('vehicles').delete().eq('id', request.params.id); if (error) return databaseFailure(response, 'adminExtended.database_error', error, 400); response.status(204).send() })

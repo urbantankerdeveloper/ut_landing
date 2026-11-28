@@ -24,6 +24,15 @@ describe('request schemas', () => {
   it('accepts a valid login payload', () => { expect(credentialsSchema.safeParse({ email: 'user@example.com', password: 'password123' }).success).toBe(true) })
   it('rejects a short password', () => { expect(credentialsSchema.safeParse({ email: 'user@example.com', password: 'short' }).success).toBe(false) })
   it('requires booking location and date', () => { expect(bookingSchema.safeParse({ serviceId: 'water', location: 'ECR', deliveryDate: soon(2) }).success).toBe(true); expect(bookingSchema.safeParse({ serviceId: 'water' }).success).toBe(false) })
+  it('accepts an optional booking email and normalizes it for guest notifications', () => {
+    const base = { serviceId: 'water', location: 'ECR', deliveryDate: soon(2) }
+    expect(bookingSchema.safeParse({ ...base, notificationEmail: '' }).success).toBe(true)
+    expect(bookingSchema.safeParse({ ...base, notificationEmail: ' Guest@Example.com ' })).toMatchObject({
+      success: true,
+      data: { notificationEmail: 'guest@example.com' },
+    })
+    expect(bookingSchema.safeParse({ ...base, notificationEmail: 'not-an-email' }).success).toBe(false)
+  })
   it('does not default a missing payment method, so the route can reject it', () => {
     const parsed = bookingSchema.safeParse({ serviceId: 'water', location: 'ECR', deliveryDate: soon(2) })
     expect(parsed.success && parsed.data.paymentMethod).toBeUndefined()

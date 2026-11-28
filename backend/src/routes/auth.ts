@@ -11,6 +11,7 @@ import { isEmailConfigured, sendEmail } from '../services/providers.js'
 import { sendTemplateWhatsApp } from '../services/whatsapp.js'
 import { sendTemplateSms } from '../services/sms.js'
 import { emailCodeEmail, passwordResetEmail } from '../services/signupEmail.js'
+import { sendTemplateEmail } from '../services/emailTemplates.js'
 import { hashOtp, otpMatches } from '../services/otp.js'
 import { config } from '../config.js'
 import { logger } from '../lib/logger.js'
@@ -385,9 +386,14 @@ async function issueEmailCode(requestId: unknown, email: string, purpose: EmailC
   }
   // Same as WhatsApp: the default-code mode skips real delivery (local and test only, enforced in config).
   if (config.USE_DEFAULT_VERIFICATION_CODE) return { ok: true, challengeId: challenge.id }
-  const template = emailCodeEmail(otp, purpose)
   try {
-    const delivery = await sendEmail(email, template.subject, template.html)
+    let delivery
+    if (purpose === 'signup') {
+      delivery = await sendTemplateEmail('user_registration_otp', email, { otp })
+    } else {
+      const template = emailCodeEmail(otp, purpose)
+      delivery = await sendEmail(email, template.subject, template.html)
+    }
     if (!delivery.queued) throw new Error(delivery.reason)
   } catch (deliveryError) {
     const { error: cleanupError } = await supabase.from('email_otp_challenges').delete().eq('id', challenge.id)

@@ -30,7 +30,7 @@ function TrackingChooser({ token, onBrowser }: { token: string; onBrowser: () =>
   </TrackingShell>
 }
 
-function TrackingDetails({ tracking, onRefresh, refreshing }: { tracking: PublicTracking; onRefresh: () => void; refreshing: boolean }) {
+export function TrackingDetails({ tracking, onRefresh, refreshing = false }: { tracking: PublicTracking; onRefresh: () => void; refreshing?: boolean }) {
   const currentIndex = statuses.indexOf(tracking.status)
   return <TrackingShell>
     <div className="section-intro"><p className="eyebrow">{c.eyebrow}</p><h1>{c.details.bookingPrefix}<em>{tracking.bookingReference}</em></h1><p>{statusLabels[tracking.status] ?? c.status.fallback}</p></div>
@@ -38,7 +38,7 @@ function TrackingDetails({ tracking, onRefresh, refreshing }: { tracking: Public
       <div className="view-panel-heading"><div><p className="eyebrow">{c.details.deliveryStatusEyebrow}</p><h2>{statusLabels[tracking.status] ?? tracking.status}</h2></div><button className="button button-quiet" onClick={onRefresh} disabled={refreshing}><RefreshCw size={14} /> {c.details.refresh}</button></div>
       <div className="tracking-timeline">{statuses.map((status, index) => <span className={index <= currentIndex ? 'is-complete' : ''} key={status}>{statusLabels[status]}</span>)}</div>
       {tracking.lastLocation ? <><LiveTrackingMap latitude={tracking.lastLocation.latitude} longitude={tracking.lastLocation.longitude} lastUpdated={tracking.lastLocation.recordedAt} />{tracking.lastLocation.source === 'registered' && <p className="tracking-location-source-note">{c.details.registeredLocationNote}</p>}</> : <div className="tracking-map-empty"><MapPin size={22} /><b>{c.details.waitingTitle}</b><p>{c.details.waitingBody}</p></div>}
-      <div className="tracking-details"><span><b>{c.details.vehicleLabel}</b>{tracking.vehicle ?? c.details.vehicleFallback}</span><span><b>{c.details.driverLabel}</b>{tracking.driver ?? c.details.driverFallback}</span><span><b>{c.details.expectedLabel}</b>{tracking.expectedDelivery ? new Date(tracking.expectedDelivery).toLocaleString() : c.details.expectedFallback}</span></div>
+      <div className="tracking-details"><span><b>{c.details.serviceLabel}</b>{tracking.serviceName ?? c.details.serviceFallback}</span><span><b>{c.details.vehicleLabel}</b>{tracking.vehicle ?? c.details.vehicleFallback}</span><span><b>{c.details.driverLabel}</b>{tracking.driver ?? c.details.driverFallback}</span><span><b>{c.details.expectedLabel}</b>{tracking.expectedDelivery ? new Date(tracking.expectedDelivery).toLocaleString() : c.details.expectedFallback}</span></div>
     </section>
     <section className="reference-copy-card public-tracking-card"><p className="eyebrow">{c.timeline.eyebrow}</p><h2>{c.timeline.heading}</h2><div className="public-tracking-events">{tracking.events.map((event) => <article key={`${event.status}-${event.createdAt}`}><Truck size={16} /><div><b>{statusLabels[event.status] ?? event.status}</b><p>{event.note ?? c.timeline.eventFallbackNote}</p></div><time>{new Date(event.createdAt).toLocaleString()}</time></article>)}</div></section>
   </TrackingShell>

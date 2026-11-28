@@ -4,8 +4,20 @@ import type { ServiceEnquiryCategory } from '../api/customer'
 import { useAppNavigation } from '../routing/useAppNavigation'
 import { servicesContent as c } from '../content/services'
 import { ServiceEnquiryDialog } from './ServiceEnquiryDialog'
+import { Reveal } from '../components/landing/Reveal'
+import { ServiceArtwork, type ServiceArtworkSlot } from '../components/landing/ServiceArtwork'
 
 type ItemId = (typeof c.items)[number]['id']
+const serviceBackgroundsEnabled = import.meta.env.VITE_SERVICE_BACKGROUNDS === 'true'
+
+const itemArtwork: Record<ItemId, ServiceArtworkSlot> = {
+  water: 'water-tanker',
+  sewage: 'sewage-septic',
+  borewell: 'borewell',
+  rmc: 'rmc-mixer',
+  emptyTanker: 'empty-tanker',
+  tankCleaning: 'tank-cleaning',
+}
 
 const itemIcons: Record<ItemId, LucideIcon> = {
   water: Droplets,
@@ -29,20 +41,49 @@ export default function MarketingServicesScreen() {
 
   return (
     <div className="marketing-page">
-      <section className="marketing-page-hero marketing-shell">
-        <p className="marketing-eyebrow">{c.intro.eyebrow}</p>
-        <h1>{c.intro.title}</h1>
-        <p>{c.intro.body}</p>
-        <button className="button button-primary" onClick={() => requestService()}>
-          {c.requestService} <ArrowRight size={15} />
-        </button>
-      </section>
+      {serviceBackgroundsEnabled ? (
+        <Reveal as="section" className="marketing-page-hero marketing-shell" variant="fade-in">
+          <div className="marketing-page-hero-media" aria-hidden="true">
+            <ServiceArtwork slot="services-hero" eager alt="" />
+          </div>
+          <p className="marketing-eyebrow">{c.intro.eyebrow}</p>
+          <h1>{c.intro.title}</h1>
+          <p>{c.intro.body}</p>
+          <button className="button button-primary" onClick={() => requestService()}>
+            {c.requestService} <ArrowRight size={15} />
+          </button>
+        </Reveal>
+      ) : (
+        <section className="marketing-page-hero marketing-shell">
+          <p className="marketing-eyebrow">{c.intro.eyebrow}</p>
+          <h1>{c.intro.title}</h1>
+          <p>{c.intro.body}</p>
+          <button className="button button-primary" onClick={() => requestService()}>
+            {c.requestService} <ArrowRight size={15} />
+          </button>
+        </section>
+      )}
       <section className="marketing-section marketing-services">
         <div className="marketing-shell">
           <div className="marketing-service-grid marketing-service-grid-detail">
             {c.items.map((item) => {
               const Icon = itemIcons[item.id]
-              return (
+              return serviceBackgroundsEnabled ? (
+                <Reveal as="article" className="marketing-service-card marketing-service-card-detail" key={item.id} variant="scale-in" stagger={120}>
+                  <ServiceArtwork slot={itemArtwork[item.id]} className="marketing-service-card-media" alt={`${item.name} service`} />
+                  <span className="marketing-service-icon"><Icon size={24} /></span>
+                  <p className="marketing-card-kicker">{item.category}</p>
+                  <h2>{item.name}</h2>
+                  <p>{item.description}</p>
+                  <ul>
+                    <li><Check size={15} />{item.features}</li>
+                    <li><Check size={15} />{c.sharedFeature}</li>
+                  </ul>
+                  <button className="marketing-inline-link" onClick={() => requestService(item.id)}>
+                    {c.requestService} <ArrowRight size={14} />
+                  </button>
+                </Reveal>
+              ) : (
                 <article className="marketing-service-card marketing-service-card-detail" key={item.id}>
                   <span className="marketing-service-icon"><Icon size={24} /></span>
                   <p className="marketing-card-kicker">{item.category}</p>

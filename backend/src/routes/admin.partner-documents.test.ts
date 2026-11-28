@@ -10,6 +10,14 @@ const mocks = vi.hoisted(() => ({
   reportFulfilments: [] as Array<Record<string, unknown>>,
   reportVendors: [] as Array<{ id: string; business_name: string }>,
   reportQueries: [] as Array<Array<{ name: string; args: unknown[] }>>,
+  partnerApplication: {
+    id: '44444444-4444-4444-8444-444444444444',
+    status: 'submitted',
+    email: 'vendor@example.com',
+    business_name: 'Example Vendor',
+    reference: 'PA-100',
+  } as Record<string, unknown>,
+  notifyVendorByEmail: vi.fn(),
 }))
 
 function chain(table: string, ops: Array<{ name: string; args: unknown[] }> = []): unknown {
@@ -40,6 +48,9 @@ vi.mock('../middleware/auth.js', () => ({
     next()
   },
 }))
+vi.mock('../services/vendorNotifications.js', () => ({
+  notifyVendorByEmail: (...args: unknown[]) => mocks.notifyVendorByEmail(...args),
+}))
 
 import adminRouter from './admin.js'
 
@@ -59,6 +70,15 @@ beforeEach(() => {
   mocks.reportFulfilments = []
   mocks.reportVendors = []
   mocks.reportQueries = []
+  mocks.partnerApplication = {
+    id: APPLICATION_ID,
+    status: 'submitted',
+    email: 'vendor@example.com',
+    business_name: 'Example Vendor',
+    reference: 'PA-100',
+  }
+  mocks.notifyVendorByEmail.mockReset()
+  mocks.notifyVendorByEmail.mockResolvedValue(undefined)
   mocks.createSignedUrl.mockReset()
   mocks.createSignedUrl.mockResolvedValue({
     data: { signedUrl: 'https://storage.example/download' },
@@ -67,7 +87,11 @@ beforeEach(() => {
   mocks.respond.mockReset()
   mocks.respond.mockImplementation((table, operations) => {
     if (table === 'bookings') mocks.reportQueries.push(operations)
-    if (table === 'partner_applications') return { data: { id: APPLICATION_ID }, error: null }
+    if (table === 'partner_applications') {
+      const update = operations.find((operation) => operation.name === 'update')?.args[0] as Record<string, unknown> | undefined
+      if (update) mocks.partnerApplication = { ...mocks.partnerApplication, ...update }
+      return { data: mocks.partnerApplication, error: null }
+    }
     if (table === 'bookings') return { data: mocks.reportBookings, error: null }
     if (table === 'order_fulfilments') return { data: mocks.reportFulfilments, error: null }
     if (table === 'vendors') return { data: mocks.reportVendors, error: null }
@@ -119,6 +143,23 @@ describe('GET /partner-applications/:id/history', () => {
 })
 
 describe('PATCH /partner-applications/:id', () => {
+  it('emails the applicant once when the application is approved', async () => {
+    const app = buildApp()
+    const patch = () => request(app)
+      .patch(`/partner-applications/${APPLICATION_ID}`)
+      .send({ status: 'approved' })
+
+    expect((await patch()).status).toBe(200)
+    expect((await patch()).status).toBe(200)
+    expect(mocks.notifyVendorByEmail).toHaveBeenCalledTimes(1)
+    expect(mocks.notifyVendorByEmail).toHaveBeenCalledWith(
+      'vendor@example.com',
+      'vendor_application_approved',
+      expect.objectContaining({ businessName: 'Example Vendor', reference: 'PA-100' }),
+      'partner_application_approved',
+    )
+  })
+
   it('accepts the additional-information review status and records the review note', async () => {
     const response = await request(buildApp())
       .patch(`/partner-applications/${APPLICATION_ID}`)

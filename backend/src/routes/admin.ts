@@ -11,6 +11,7 @@ import { listWindow, sendList, type ListWindow } from '../lib/listParams.js'
 import { invalidateCatalog } from '../services/catalogCache.js'
 import { invalidateAuthProfile } from '../services/authCache.js'
 import { salesRowsFromFulfilments, type SalesFulfilment } from '../lib/salesReports.js'
+import { notifyVendorByEmail } from '../services/vendorNotifications.js'
 const exactCount = (range: ListWindow) => (range.mode === 'paged' ? { count: 'exact' as const } : undefined)
 const legacyRouterAuth = (request: express.Request, response: express.Response, next: express.NextFunction) => config.featureFlags.AUTH_MOUNT_ONCE ? next() : requireAuth(request, response, next)
 const adminOnly = requireRole('admin')
@@ -216,6 +217,49 @@ router.get('/partner-applications/:id/documents', adminOnly, async (request, res
   if (signError) return failure(response, 500, 'Partner documents could not be prepared for download.', 'admin.partner_application_document_sign_failed', signError)
   response.json(signedDocuments)
 })
-router.patch('/partner-applications/:id', requireRole('admin'), async (request, response) => { const parsed = z.object({ status: z.enum(['submitted', 'under_review', 'additional_info_required', 'approved', 'rejected']), reviewNote: z.string().trim().max(2000).optional() }).safeParse(request.body); if (!parsed.success) return response.status(400).json({ error: 'Invalid partner application review.' }); const { data, error } = await supabase.from('partner_applications').update({ status: parsed.data.status, review_note: parsed.data.reviewNote ?? null, reviewed_by: request.authUser!.id, reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', request.params.id).select().single(); if (error) return databaseFailure(response, 'admin.database_error', error, 400); response.json(data) })
+router.patch('/partner-applications/:id', requireRole('admin'), async (request, response) => {
+  const parsed = z.object({
+    status: z.enum(['submitted', 'under_review', 'additional_info_required', 'approved', 'rejected']),
+    reviewNote: z.string().trim().max(2000).optional(),
+  }).safeParse(request.body)
+  if (!parsed.success) return response.status(400).json({ error: 'Invalid partner application review.' })
+
+  const { data: current, error: currentError } = await supabase
+    .from('partner_applications')
+    .select('id,status,email,business_name,reference')
+    .eq('id', request.params.id)
+    .maybeSingle()
+  if (currentError) return databaseFailure(response, 'admin.database_error', currentError, 500)
+  if (!current) return response.status(404).json({ error: 'Partner application not found.' })
+
+  const { data, error } = await supabase
+    .from('partner_applications')
+    .update({
+      status: parsed.data.status,
+      review_note: parsed.data.reviewNote ?? null,
+      reviewed_by: request.authUser!.id,
+      reviewed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', request.params.id)
+    .select()
+    .single()
+  if (error) return databaseFailure(response, 'admin.database_error', error, 400)
+
+  if (current.status !== parsed.data.status && (parsed.data.status === 'approved' || parsed.data.status === 'rejected')) {
+    const approved = parsed.data.status === 'approved'
+    void notifyVendorByEmail(
+      current.email,
+      approved ? 'vendor_application_approved' : 'vendor_application_rejected',
+      {
+        businessName: current.business_name ?? 'Your business',
+        reference: current.reference ?? current.id,
+        reviewNote: parsed.data.reviewNote || 'Please contact our partnerships team if you have questions about this decision.',
+      },
+      `partner_application_${parsed.data.status}`,
+    )
+  }
+  response.json(data)
+})
 router.get('/audit-logs', adminOnly, async (request, response) => { const page = Math.max(1, Number(request.query.page ?? 1)); const pageSize = Math.min(100, Math.max(1, Number(request.query.pageSize ?? 50))); let query = supabase.from('audit_logs').select('*', { count: 'exact' }).order('created_at', { ascending: false }).range((page - 1) * pageSize, page * pageSize - 1); if (typeof request.query.actorId === 'string') query = query.eq('actor_id', request.query.actorId); if (typeof request.query.action === 'string') query = query.eq('action', request.query.action); if (typeof request.query.entityType === 'string') query = query.eq('entity_type', request.query.entityType); const { data, error, count } = await query; if (error) return databaseFailure(response, 'admin.database_error', error, 500); response.json({ rows: data ?? [], page, pageSize, total: count ?? 0 }) })
 export default router

@@ -18,6 +18,7 @@ import { isPhoneVerificationRequired, isPhoneVerified } from '../services/phoneV
 import { createInvoiceIfEligible } from '../services/invoices.js'
 import { debitWalletForBooking } from './customer.js'
 import { vendorAccrualPaise } from '../services/pricingMath.js'
+import { bookingNotificationEmailSchema } from '../lib/schemas.js'
 
 const customer = Router()
 const vendor = Router()
@@ -99,6 +100,7 @@ const createOrderSchema = z.object({
   paymentMethod: z.enum(['wallet', 'gateway', 'cod']),
   couponCode: z.string().trim().max(80).optional(),
   phone: z.string().regex(/^\d{10}$/).optional(),
+  notificationEmail: bookingNotificationEmailSchema,
   phoneVerificationChallengeId: z.string().uuid().optional(),
   items: z.array(z.object({
     serviceId: z.string().trim().min(1).max(80),
@@ -355,6 +357,9 @@ customer.post('/multi-service-orders', async (request, response) => {
   if (!(await customerHasAccountPhone(customerId, response))) return
   const parsed = createOrderSchema.safeParse(request.body)
   if (!parsed.success) return response.status(400).json({ error: 'Invalid multi-service order.', details: parsed.error.flatten() })
+  const notificationEmail = request.authUser!.email?.toLowerCase().endsWith('@guest.urbantanker.local')
+    ? parsed.data.notificationEmail
+    : undefined
   if (parsed.data.paymentMethod === 'wallet' && !config.featureFlags.wallet_enabled) return response.status(403).json({ error: 'Wallet is currently disabled. Choose another payment method.' })
   if (parsed.data.paymentMethod === 'gateway' && !config.featureFlags.online_payment_enabled) return response.status(503).json({ error: 'Online payments are currently unavailable. Please choose cash on delivery.' })
   if (parsed.data.idempotencyKey) {
@@ -362,6 +367,13 @@ customer.post('/multi-service-orders', async (request, response) => {
       .eq('customer_id', customerId).eq('idempotency_key', parsed.data.idempotencyKey).maybeSingle()
     if (previousError) return databaseFailure(response, 'multi_service.order_lookup_failed', previousError, 500)
     if (previous) {
+      if (previous.legacy_booking_id) {
+        const { error: emailError } = await supabase.from('bookings')
+          .update({ customer_email: notificationEmail ?? null })
+          .eq('id', previous.legacy_booking_id)
+          .eq('customer_id', customerId)
+        if (emailError) return databaseFailure(response, 'multi_service.booking_email_save_failed', emailError, 500)
+      }
       const { order, error } = await loadCustomerOrder(previous.id, customerId)
       if (error) return databaseFailure(response, 'multi_service.order_load_failed', error, 500)
       return response.status(200).json({ ...order, legacyBookingId: previous.legacy_booking_id })
@@ -473,6 +485,13 @@ customer.post('/multi-service-orders', async (request, response) => {
   const result = created as { created: boolean; order: { id: string }; legacyBookingId: string }
   if (!result.created && walletDebitId) await supabase.from('wallet_transactions').delete().eq('id', walletDebitId)
   if (!result?.order?.id) return failure(response, 500, 'Order could not be created.', 'multi_service.order_create_invalid_response')
+  if (result.legacyBookingId) {
+    const { error: emailError } = await supabase.from('bookings')
+      .update({ customer_email: notificationEmail ?? null })
+      .eq('id', result.legacyBookingId)
+      .eq('customer_id', customerId)
+    if (emailError) return databaseFailure(response, 'multi_service.booking_email_save_failed', emailError, 500)
+  }
   const { data: normalizedItems, error: itemLoadError } = await supabase.from('order_items')
     .select('id,service_type_id,latitude,longitude,status').eq('order_id', result.order.id)
   if (itemLoadError) return databaseFailure(response, 'multi_service.order_items_load_failed', itemLoadError, 500)

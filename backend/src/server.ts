@@ -21,6 +21,7 @@ import vendorExtendedRoutes from './routes/vendorExtended.js'
 import adminExtendedRoutes from './routes/adminExtended.js'
 import adminSmsTemplateRoutes from './routes/adminSmsTemplates.js'
 import adminWhatsAppTemplateRoutes from './routes/adminWhatsAppTemplates.js'
+import adminEmailTemplateRoutes from './routes/adminEmailTemplates.js'
 import paymentRoutes from './routes/payments.js'
 import uploadRoutes from './routes/uploads.js'
 import supportRoutes from './routes/support.js'
@@ -35,6 +36,7 @@ import { errorHandler } from './middleware/errors.js'
 import { startBackgroundJobs } from './services/jobs.js'
 import { supabase } from './supabase.js'
 import { setRealtimeServer } from './services/realtime.js'
+import { socketIoTransportOptions } from './services/socketIoOptions.js'
 import { closeRedisPair, createRedisPair, rateLimitStoreFor, socketAdapterFor, warnIfSingleInstanceInProduction } from './services/scaling.js'
 import { requestObservability } from './middleware/observability.js'
 import { createHealthRouter } from './routes/health.js'
@@ -79,7 +81,7 @@ app.use(helmet({
 })); app.use(cors(corsOptions)); app.use(compression()); app.use(rateLimit({ windowMs: 60_000, limit: 120, store: rateLimitStoreFor(redis), passOnStoreError: true, skip: (request) => request.path === '/health' || request.path === '/health/ready' || (request.method === 'GET' && !request.path.startsWith('/api/') && !request.path.startsWith('/socket.io')) })); app.use(express.json({ limit: '2mb', verify: (request, _response, buffer) => { if ((request as typeof request & { originalUrl?: string }).originalUrl === '/api/payment/razorpay/webhook') (request as typeof request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer) } }))
 app.use(requestObservability(config.SLOW_REQUEST_MS))
 app.use(createHealthRouter({ redisConfigured: Boolean(config.REDIS_URL) }))
-app.use('/api/config', configRoutes); app.use('/api/auth', authRoutes); app.use('/api/devices', deviceRoutes); app.use('/api/public', publicTrackingRoutes); app.use('/api/service-enquiries', serviceEnquiryRoutes); app.use('/api/customer', customerRoutes); app.use('/api/customer', customerExtendedRoutes); app.use('/api/customer', multiServiceCustomerRoutes); app.use('/api/vendor', ...(config.featureFlags.AUTH_MOUNT_ONCE ? [requireAuth] : []), vendorRoutes); app.use('/api/vendor', ...(config.featureFlags.AUTH_MOUNT_ONCE ? [requireAuth] : []), vendorExtendedRoutes); app.use('/api/vendor', ...(config.featureFlags.AUTH_MOUNT_ONCE ? [requireAuth] : []), multiServiceVendorRoutes); app.use('/api/admin', ...(config.featureFlags.AUTH_MOUNT_ONCE ? [requireAuth] : []), adminRoutes); app.use('/api/admin', ...(config.featureFlags.AUTH_MOUNT_ONCE ? [requireAuth] : []), adminExtendedRoutes); app.use('/api/admin', ...(config.featureFlags.AUTH_MOUNT_ONCE ? [requireAuth] : []), multiServiceAdminRoutes); app.use('/api/admin', ...(config.featureFlags.AUTH_MOUNT_ONCE ? [requireAuth] : []), adminSmsTemplateRoutes); app.use('/api/admin', ...(config.featureFlags.AUTH_MOUNT_ONCE ? [requireAuth] : []), adminWhatsAppTemplateRoutes); app.use('/api/admin-access', adminAccessRoutes); app.use('/api/payment', paymentRoutes); app.use('/api/uploads', uploadRoutes); app.use('/api/support', supportRoutes); app.use('/api/analytics', analyticsRoutes); app.use('/api/partner', partnerRoutes); app.use(errorHandler)
+app.use('/api/config', configRoutes); app.use('/api/auth', authRoutes); app.use('/api/devices', deviceRoutes); app.use('/api/public', publicTrackingRoutes); app.use('/api/service-enquiries', serviceEnquiryRoutes); app.use('/api/customer', customerRoutes); app.use('/api/customer', customerExtendedRoutes); app.use('/api/customer', multiServiceCustomerRoutes); app.use('/api/vendor', ...(config.featureFlags.AUTH_MOUNT_ONCE ? [requireAuth] : []), vendorRoutes); app.use('/api/vendor', ...(config.featureFlags.AUTH_MOUNT_ONCE ? [requireAuth] : []), vendorExtendedRoutes); app.use('/api/vendor', ...(config.featureFlags.AUTH_MOUNT_ONCE ? [requireAuth] : []), multiServiceVendorRoutes); app.use('/api/admin', ...(config.featureFlags.AUTH_MOUNT_ONCE ? [requireAuth] : []), adminRoutes); app.use('/api/admin', ...(config.featureFlags.AUTH_MOUNT_ONCE ? [requireAuth] : []), adminExtendedRoutes); app.use('/api/admin', ...(config.featureFlags.AUTH_MOUNT_ONCE ? [requireAuth] : []), multiServiceAdminRoutes); app.use('/api/admin', ...(config.featureFlags.AUTH_MOUNT_ONCE ? [requireAuth] : []), adminSmsTemplateRoutes); app.use('/api/admin', ...(config.featureFlags.AUTH_MOUNT_ONCE ? [requireAuth] : []), adminWhatsAppTemplateRoutes); app.use('/api/admin', ...(config.featureFlags.AUTH_MOUNT_ONCE ? [requireAuth] : []), adminEmailTemplateRoutes); app.use('/api/admin-access', adminAccessRoutes); app.use('/api/payment', paymentRoutes); app.use('/api/uploads', uploadRoutes); app.use('/api/support', supportRoutes); app.use('/api/analytics', analyticsRoutes); app.use('/api/partner', partnerRoutes); app.use(errorHandler)
 if (serveFrontend) app.use(express.static(frontendDist, { index: 'index.html', setHeaders: (response, filePath) => {
   if (filePath.endsWith('index.html')) {
     response.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
@@ -90,8 +92,9 @@ if (serveFrontend) app.use(express.static(frontendDist, { index: 'index.html', s
   }
 } }))
 if (serveFrontend) app.use((request, response, next) => { if (request.method !== 'GET' || request.path.startsWith('/api') || request.path.startsWith('/health') || request.path.startsWith('/socket.io')) return next(); response.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate'); response.sendFile(resolve(frontendDist, 'index.html')) })
-const io = new Server(httpServer, { cors: corsOptions, adapter: socketAdapterFor(redis) })
-logger.info('realtime.startup', { transports: ['polling', 'websocket'], websocketUpgrade: 'enabled', checkUrl: '/socket.io/' })
+const socketTransportOptions = socketIoTransportOptions(config.SOCKET_TRANSPORTS)
+const io = new Server(httpServer, { cors: corsOptions, adapter: socketAdapterFor(redis), ...socketTransportOptions })
+logger.info('realtime.startup', { transports: socketTransportOptions.transports, websocketUpgrade: socketTransportOptions.allowUpgrades, checkUrl: '/socket.io/' })
 io.use(async (socket, next) => {
   const rejectSocket = (reason: string, message: string, detail?: string) => {
     logger.warn('realtime.auth_failed', { reason, origin: socket.handshake.headers.origin ?? null, detail })

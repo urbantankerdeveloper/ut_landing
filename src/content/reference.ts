@@ -3,7 +3,7 @@ export const referenceContent = {
     eyebrow: 'LIVE SERVICE TRACKING',
     titleLead: 'Know where your',
     titleEmphasis: 'service stands.',
-    copy: 'Your active delivery status and live location updates stay connected to the booking flow.',
+    copy: 'Enter your order reference and verify the phone number used for booking to view delivery updates without signing in.',
   },
   coupons: {
     eyebrow: 'CURRENT SERVICE OFFERS',

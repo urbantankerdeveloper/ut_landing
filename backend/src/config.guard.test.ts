@@ -85,6 +85,21 @@ describe('production configuration guards', () => {
     expect(config.CORS_ORIGINS).toEqual(['https://urbantanker.com', 'https://www.urbantanker.com'])
   })
 
+  it('defaults socket transports and validates configured transport lists', async () => {
+    process.env = { ...original, ...base, NODE_ENV: 'test', SOCKET_TRANSPORTS: undefined }
+    const defaults = await import('./config.js')
+    expect(defaults.config.SOCKET_TRANSPORTS).toEqual(['polling', 'websocket'])
+
+    vi.resetModules()
+    process.env.SOCKET_TRANSPORTS = ' polling '
+    const pollingOnly = await import('./config.js')
+    expect(pollingOnly.config.SOCKET_TRANSPORTS).toEqual(['polling'])
+
+    vi.resetModules()
+    process.env.SOCKET_TRANSPORTS = 'polling,websockets'
+    await expect(import('./config.js')).rejects.toThrow('Invalid backend configuration')
+  })
+
   it('treats blank values from .env.example as unset', async () => {
     process.env = { ...original, ...base, SUPABASE_SECRET_KEY: '', SUPABASE_DB_URL: '', ADMIN_REGISTRATION_KEY: '' }
     const { config } = await import('./config.js')

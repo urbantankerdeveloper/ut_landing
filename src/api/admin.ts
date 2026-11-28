@@ -24,6 +24,7 @@ export type AdminEnquiryHistoryRecord = {
 export type AdminSystemHealth = { ok: boolean; migrations: Array<{ table: string; applied: boolean; error?: string }>; configuration: Record<string, boolean>; checkedAt: string }
 export type AdminNotification = { id: string; title: string; event_type: string; payload?: { detail?: string; bookingId?: string; reference?: string; status?: string }; read_at?: string; created_at: string }
 export type AdminSmsTemplate = { templateKey: string; body: string; variables: string[]; isActive: boolean; msg91TemplateId: string | null; updatedAt: string; isBuiltIn: boolean; allowedVariables: string[] | null }
+export type AdminEmailTemplate = { templateKey: string; subject: string; body: string; variables: string[]; isActive: boolean; updatedAt: string; allowedVariables: string[] }
 export type AdminWhatsAppTemplate = {
   templateKey: string
   body: string
@@ -129,6 +130,8 @@ export const adminApi = {
   smsTemplates: async () => (await apiFetch<{ rows: AdminSmsTemplate[] }>('/admin/sms-templates')).rows,
   createSmsTemplate: (payload: { templateKey: string; body: string; isActive: boolean; msg91TemplateId: string }) => apiFetch<AdminSmsTemplate>('/admin/sms-templates', { method: 'POST', body: JSON.stringify(payload) }),
   updateSmsTemplate: (key: string, payload: { body: string; isActive: boolean; msg91TemplateId: string }) => apiFetch<AdminSmsTemplate>(`/admin/sms-templates/${encodeURIComponent(key)}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  emailTemplates: async () => (await apiFetch<{ rows: AdminEmailTemplate[] }>('/admin/email-templates')).rows,
+  updateEmailTemplate: (key: string, payload: { subject: string; body: string }) => apiFetch<AdminEmailTemplate>(`/admin/email-templates/${encodeURIComponent(key)}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   refundPayment: (id: string, amount?: number) => apiFetch<unknown>(`/payment/payments/${id}/refund`, { method: 'POST', body: JSON.stringify(amount ? { amount } : {}) }),
   systemHealth: () => apiFetch<AdminSystemHealth>('/admin/system/health'),
   analyticsSummary: (days = 30) => apiFetch<AdminAnalyticsSummary>(`/analytics/summary?days=${days}`),

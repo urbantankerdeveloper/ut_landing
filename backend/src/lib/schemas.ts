@@ -10,6 +10,10 @@ export const coordinatesSchema = {
   longitude: z.number().finite().min(-180).max(180),
 }
 const deliveryDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => { const date = new Date(`${value}T00:00:00Z`); return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value }, { message: 'Enter a valid delivery date.' }).refine((value) => value >= istToday(), { message: 'Delivery date cannot be in the past.' })
+export const bookingNotificationEmailSchema = z.preprocess(
+  (value) => typeof value === 'string' && !value.trim() ? undefined : value,
+  z.string().trim().toLowerCase().email().max(160).optional(),
+)
 const bookingServiceSchema = z.object({
   serviceId: z.string().min(1),
   capacity: z.string().max(30).optional(),
@@ -43,6 +47,7 @@ export const bookingSchema = z.object({
   notes: z.string().max(1000).optional(),
   couponCode: z.string().max(80).optional(),
   phone: z.string().regex(/^\d{10}$/).optional(),
+  notificationEmail: bookingNotificationEmailSchema,
   phoneVerificationChallengeId: z.string().uuid().optional(),
   paymentMethod: z.enum(['wallet', 'gateway', 'cod']).optional(),
   latitude: z.number().finite().min(-90).max(90).optional(),

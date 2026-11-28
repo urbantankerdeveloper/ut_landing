@@ -1,6 +1,7 @@
 import { ArrowRight, CalendarClock, PauseCircle, ShieldCheck, type LucideIcon } from 'lucide-react'
 import { useAppNavigation } from '../routing/useAppNavigation'
 import { subscriptionsContent as c } from '../content/subscriptions'
+import { Reveal } from '../components/landing/Reveal'
 
 type FeatureId = (typeof c.features)[number]['id']
 
@@ -15,16 +16,16 @@ export default function MarketingSubscriptionsScreen() {
 
   return (
     <div className="marketing-page">
-      <section className="marketing-page-hero marketing-shell">
+      <Reveal as="section" className="marketing-page-hero marketing-shell" variant="fade-in">
         <p className="marketing-eyebrow">{c.intro.eyebrow}</p>
         <h1>{c.intro.title}</h1>
         <p>{c.intro.body}</p>
-      </section>
+      </Reveal>
       <section className="marketing-section marketing-pricing">
         <div className="marketing-shell">
           <div className="marketing-plan-grid">
-            {c.plans.map((plan) => (
-              <article className={`marketing-plan-card ${plan.featured ? 'is-featured' : ''}`} key={plan.id}>
+            {c.plans.map((plan, index) => (
+              <Reveal as="article" className={`marketing-plan-card plan-card-fan-${index} ${plan.featured ? 'is-featured' : ''}`} key={plan.id} variant="scale-in">
                 {plan.featured && <span className="marketing-plan-badge">{c.featuredBadge}</span>}
                 <h2>{plan.name}</h2>
                 <p>{plan.detail}</p>
@@ -32,7 +33,7 @@ export default function MarketingSubscriptionsScreen() {
                 <button className={`button ${plan.featured ? 'marketing-button-light' : 'button-primary'}`} onClick={() => navigate('booking')}>
                   {c.choosePlan} <ArrowRight size={15} />
                 </button>
-              </article>
+              </Reveal>
             ))}
           </div>
           <div className="marketing-feature-grid">

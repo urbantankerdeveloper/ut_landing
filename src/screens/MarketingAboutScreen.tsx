@@ -1,6 +1,7 @@
 import { ArrowRight, Check, Droplets, ShieldCheck, Truck, type LucideIcon } from 'lucide-react'
 import { useAppNavigation } from '../routing/useAppNavigation'
 import { aboutContent as c } from '../content/about'
+import { Reveal } from '../components/landing/Reveal'
 
 type CardId = (typeof c.cards)[number]['id']
 
@@ -15,14 +16,14 @@ export default function MarketingAboutScreen() {
 
   return (
     <div className="marketing-page">
-      <section className="marketing-page-hero marketing-shell">
+      <Reveal as="section" className="marketing-page-hero marketing-shell" variant="fade-in">
         <p className="marketing-eyebrow">{c.intro.eyebrow}</p>
         <h1>{c.intro.title}</h1>
         <p>{c.intro.body}</p>
         <button className="button button-primary" onClick={() => navigate('services')}>
           Explore our services <ArrowRight size={15} />
         </button>
-      </section>
+      </Reveal>
       <section className="marketing-about-section">
         <div className="marketing-shell">
           <div className="marketing-section-heading">
@@ -35,11 +36,11 @@ export default function MarketingAboutScreen() {
             {c.cards.map((card) => {
               const Icon = cardIcons[card.id]
               return (
-                <article className="marketing-about-card" key={card.id}>
+                <Reveal as="article" className="marketing-about-card" key={card.id} variant="slide-right" stagger={140}>
                   <span className="marketing-service-icon"><Icon size={22} /></span>
                   <h3>{card.title}</h3>
                   <p>{card.body}</p>
-                </article>
+                </Reveal>
               )
             })}
           </div>

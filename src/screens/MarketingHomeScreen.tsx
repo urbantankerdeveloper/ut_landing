@@ -1,9 +1,12 @@
 import { ArrowRight, Check, Construction, Droplets, LocateFixed, ShieldCheck, Truck, Waves, type LucideIcon } from 'lucide-react'
+import { lazy, Suspense } from 'react'
 import { useAppNavigation } from '../routing/useAppNavigation'
 import { DeliveryLocationChip } from '../components/DeliveryLocationChip'
 import { useAuthStore } from '../stores/authStore'
 import { shouldShowBookingButton } from '../constants/publicFeatures'
 import { homeContent as c } from '../content/home'
+import { Reveal } from '../components/landing/Reveal'
+const WebGLHero = lazy(() => import('../components/landing/WebGLHero'))
 
 type ServiceId = (typeof c.services)[number]['id']
 type BenefitId = (typeof c.benefits)[number]['id']
@@ -35,12 +38,20 @@ export default function MarketingHomeScreen() {
   const { navigate } = useAppNavigation()
   const user = useAuthStore((state) => state.user)
   const showBookingButton = shouldShowBookingButton(user?.role)
+  const connection = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection
+  const webglEnabled =
+    import.meta.env.VITE_HOME_WEBGL_HERO === 'true'
+    && window.matchMedia('(min-width: 768px)').matches
+    && !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    && !connection?.saveData
+    && (navigator.hardwareConcurrency ?? 0) >= 4
 
   return (
     <div className="marketing-home">
       <link rel="preload" as="image" href={heroSrc} imageSrcSet={heroSrcSet} imageSizes="100vw" fetchPriority="high" />
       <section className="marketing-hero">
         <img className="marketing-hero-image" src={heroSrc} srcSet={heroSrcSet} sizes="100vw" width={1920} height={960} fetchPriority="high" decoding="async" alt="" />
+        {webglEnabled && <Suspense fallback={null}><WebGLHero /></Suspense>}
         <div className="marketing-hero-content marketing-shell">
           <div className="marketing-hero-copy">
             <DeliveryLocationChip />
@@ -75,7 +86,7 @@ export default function MarketingHomeScreen() {
 
       <section className="marketing-section marketing-services">
         <div className="marketing-shell">
-          <div className="marketing-section-heading">
+          <Reveal as="section" className="marketing-section-heading" variant="fade-up">
             <div>
               <p className="marketing-eyebrow">{c.showcase.eyebrow}</p>
               <h2>{c.showcase.title}</h2>
@@ -84,18 +95,18 @@ export default function MarketingHomeScreen() {
             <button className="marketing-inline-link" onClick={() => navigate('services')}>
               {c.showcase.exploreAll} <ArrowRight size={15} />
             </button>
-          </div>
+          </Reveal>
           <div className="marketing-service-grid">
             {c.services.map((service) => {
               const Icon = serviceIcons[service.id]
               return (
-                <article className="marketing-service-card" key={service.id}>
+                <Reveal as="article" className="marketing-service-card" key={service.id} variant="scale-in" stagger={140}>
                   <span className="marketing-service-icon"><Icon size={23} /></span>
                   <p className="marketing-card-kicker">{service.category}</p>
                   <h3>{service.title}</h3>
                   <p>{service.copy}</p>
                   <div className="marketing-facts">{service.facts.map((fact) => <span key={fact}>{fact}</span>)}</div>
-                </article>
+                </Reveal>
               )
             })}
           </div>

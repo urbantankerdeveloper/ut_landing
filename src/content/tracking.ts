@@ -37,6 +37,8 @@ export const trackingContent = {
     driverFallback: 'Not assigned yet',
     expectedLabel: 'Expected delivery',
     expectedFallback: 'Updating shortly',
+    serviceLabel: 'Service',
+    serviceFallback: 'Service details unavailable',
   },
   timeline: {
     eyebrow: 'DELIVERY UPDATES',
@@ -46,5 +48,23 @@ export const trackingContent = {
   map: {
     attribution: '© OpenStreetMap contributors',
     legend: 'Fleet last known location',
+  },
+  orderLookup: {
+    title: 'Track an order',
+    copy: 'Enter the order reference from your confirmation and the phone number used when booking. We will send a verification code; no account sign-in is needed.',
+    referenceLabel: 'Order reference',
+    referencePlaceholder: 'e.g. UT-123456',
+    phoneLabel: 'Registered phone number',
+    phonePlaceholder: '10-digit mobile number',
+    requestCode: 'Send verification code',
+    otpLabel: 'Verification code',
+    otpPlaceholder: '6-digit code',
+    verifyCode: 'View order tracking',
+    requestAnother: 'Track another order',
+    requestNotice: 'If those details match an order, a code has been sent to the registered phone.',
+    verificationFailed: 'We could not verify this order. Check the reference, phone number, and code, then try again.',
+    refreshFailed: 'Tracking could not be refreshed. Please verify your phone number again.',
+    serviceName: 'Service',
+    expiresNotice: 'For privacy, order details are available for a limited time after phone verification.',
   },
 } as const
