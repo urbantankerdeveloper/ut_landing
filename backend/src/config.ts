@@ -11,10 +11,19 @@ loadEnv({ path: resolve(backendDirectory, '.env') })
 
 const optionalSecret = z.preprocess((value) => value === '' ? undefined : value, z.string().min(1).optional())
 const optionalEmail = z.preprocess((value) => value === '' ? undefined : value, z.string().email().optional())
+const socketTransportsSchema = z.string()
+  .default('polling,websocket')
+  .transform((value) => value.split(',').map((transport) => transport.trim()))
+  .pipe(
+    z.array(z.enum(['polling', 'websocket']))
+      .min(1)
+      .refine((transports) => new Set(transports).size === transports.length, 'SOCKET_TRANSPORTS must not contain duplicates'),
+  )
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production'], { error: 'NODE_ENV must be set to development, test, or production (see backend/.env.example)' }),
   PORT: z.coerce.number().default(8080),
   LOG_LEVEL: z.enum(['error', 'warn', 'success', 'info', 'debug']).default('info'),
+  SOCKET_TRANSPORTS: socketTransportsSchema,
   FRONTEND_ORIGIN: z.string().default('http://localhost:5173').transform((value) => value.replace(/\/+$/, '')),
   CORS_ORIGINS: z.string().optional(),
   SUPABASE_URL: z.string().url(),

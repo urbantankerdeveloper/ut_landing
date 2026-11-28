@@ -36,6 +36,7 @@ import { errorHandler } from './middleware/errors.js'
 import { startBackgroundJobs } from './services/jobs.js'
 import { supabase } from './supabase.js'
 import { setRealtimeServer } from './services/realtime.js'
+import { socketIoTransportOptions } from './services/socketIoOptions.js'
 import { closeRedisPair, createRedisPair, rateLimitStoreFor, socketAdapterFor, warnIfSingleInstanceInProduction } from './services/scaling.js'
 import { requestObservability } from './middleware/observability.js'
 import { createHealthRouter } from './routes/health.js'
@@ -91,8 +92,9 @@ if (serveFrontend) app.use(express.static(frontendDist, { index: 'index.html', s
   }
 } }))
 if (serveFrontend) app.use((request, response, next) => { if (request.method !== 'GET' || request.path.startsWith('/api') || request.path.startsWith('/health') || request.path.startsWith('/socket.io')) return next(); response.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate'); response.sendFile(resolve(frontendDist, 'index.html')) })
-const io = new Server(httpServer, { cors: corsOptions, adapter: socketAdapterFor(redis) })
-logger.info('realtime.startup', { transports: ['polling', 'websocket'], websocketUpgrade: 'enabled', checkUrl: '/socket.io/' })
+const socketTransportOptions = socketIoTransportOptions(config.SOCKET_TRANSPORTS)
+const io = new Server(httpServer, { cors: corsOptions, adapter: socketAdapterFor(redis), ...socketTransportOptions })
+logger.info('realtime.startup', { transports: socketTransportOptions.transports, websocketUpgrade: socketTransportOptions.allowUpgrades, checkUrl: '/socket.io/' })
 io.use(async (socket, next) => {
   const rejectSocket = (reason: string, message: string, detail?: string) => {
     logger.warn('realtime.auth_failed', { reason, origin: socket.handshake.headers.origin ?? null, detail })
