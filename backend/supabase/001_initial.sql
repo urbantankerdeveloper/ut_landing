@@ -31,9 +31,10 @@ create table if not exists public.vendors (id uuid primary key default gen_rando
 create table if not exists public.vehicles (id uuid primary key default gen_random_uuid(), vendor_id uuid not null references public.vendors(id) on delete cascade, registration_number text not null unique, capacity_litres integer, supported_services text[] not null default '{}', is_active boolean not null default true, metadata jsonb not null default '{}');
 create table if not exists public.drivers (id uuid primary key default gen_random_uuid(), vendor_id uuid not null references public.vendors(id) on delete cascade, name text not null, mobile_e164 text not null, licence_number text not null, latitude numeric(9,6), longitude numeric(9,6), is_active boolean not null default false, verification text not null default 'pending', metadata jsonb not null default '{}', constraint drivers_coordinates_pair_check check ((latitude is null) = (longitude is null) and (latitude is null or latitude between -90 and 90) and (longitude is null or longitude between -180 and 180)));
 create table if not exists public.service_catalog (id uuid primary key default gen_random_uuid(), code text unique not null, name text not null, description text, base_price_paise integer not null default 0, is_active boolean not null default true, config jsonb not null default '{}');
-create table if not exists public.bookings (id uuid primary key default gen_random_uuid(), reference text unique not null, customer_id uuid references public.profiles(id) on delete set null, idempotency_key uuid, vendor_id uuid references public.vendors(id), vehicle_id uuid references public.vehicles(id), service_code text not null references public.service_catalog(code), capacity_litres integer, scheduled_for timestamptz, address_text text not null, latitude numeric(9,6), longitude numeric(9,6), access_notes text, cancellation_reason text, service_details jsonb not null default '[]'::jsonb, quoted_amount_paise integer not null default 0, status public.booking_status not null default 'pending_vendor', delivery_otp_hash text, delivery_otp_expires_at timestamptz, delivery_otp_sms_sent boolean, tracking_token_hash text unique, tracking_token_v2_hash text unique, tracking_token_expires_at timestamptz, tracking_confirmation_sent_at timestamptz, tracking_confirmation_email_sent_at timestamptz, created_at timestamptz not null default now(), updated_at timestamptz not null default now());
+create table if not exists public.bookings (id uuid primary key default gen_random_uuid(), reference text unique not null, customer_id uuid references public.profiles(id) on delete set null, customer_email text, idempotency_key uuid, vendor_id uuid references public.vendors(id), vehicle_id uuid references public.vehicles(id), service_code text not null references public.service_catalog(code), capacity_litres integer, scheduled_for timestamptz, address_text text not null, latitude numeric(9,6), longitude numeric(9,6), access_notes text, cancellation_reason text, service_details jsonb not null default '[]'::jsonb, quoted_amount_paise integer not null default 0, status public.booking_status not null default 'pending_vendor', delivery_otp_hash text, delivery_otp_expires_at timestamptz, delivery_otp_sms_sent boolean, tracking_token_hash text unique, tracking_token_v2_hash text unique, tracking_token_expires_at timestamptz, tracking_confirmation_sent_at timestamptz, tracking_confirmation_email_sent_at timestamptz, created_at timestamptz not null default now(), updated_at timestamptz not null default now());
 create unique index if not exists bookings_customer_idempotency_key_idx on public.bookings(customer_id, idempotency_key) where idempotency_key is not null;
 alter table public.bookings add column if not exists cancellation_reason text;
+alter table public.bookings add column if not exists customer_email text;
 alter table public.bookings add column if not exists service_details jsonb not null default '[]'::jsonb;
 alter table public.bookings add column if not exists tracking_token_hash text unique;
 alter table public.bookings add column if not exists tracking_token_v2_hash text unique;
@@ -744,6 +745,19 @@ create table if not exists public.sms_templates (
 );
 alter table public.sms_templates add column if not exists msg91_template_id text;
 alter table public.sms_templates enable row level security;
+
+-- Email templates are separate from SMS/WhatsApp because email uses a subject and longer-form content.
+create table if not exists public.email_templates (
+  template_key text primary key,
+  subject text not null,
+  body text not null,
+  variables text[] not null default '{}',
+  is_active boolean not null default true,
+  updated_at timestamptz not null default now()
+);
+alter table public.email_templates enable row level security;
+revoke all on public.email_templates from public, anon, authenticated;
+grant all on public.email_templates to service_role;
 
 
 INSERT INTO public.sms_templates (template_key, body, variables)
@@ -1592,6 +1606,51 @@ alter table public.booking_checkouts enable row level security;
 insert into public.sms_templates (template_key, body, variables) values
   ('cod_switched_to_online', 'Urban Tanker: Booking {{reference}} is paid online. Do NOT collect any cash from the customer.', '{reference}'),
   ('cod_reverted_to_cash', 'Urban Tanker: Booking {{reference}} is back to cash on delivery. Collect the payment from the customer.', '{reference}')
+on conflict (template_key) do nothing;
+insert into public.email_templates (template_key, subject, body, variables) values
+  (
+    'guest_booking_confirmation',
+    'Your booking {{reference}} is confirmed',
+    E'Hello,\n\nYour Urban Tanker booking {{reference}} is confirmed. We have received your request and will keep you informed as the service partner is assigned, accepts the booking, and completes the delivery.\n\nYou can view your booking, check its scheduled details, and follow its progress here:\n{{trackingUrl}}\n\nPlease keep your contact number available for service updates. If any booking details need attention, contact Urban Tanker support and include your booking reference.',
+    '{reference,trackingUrl}'
+  ),
+  (
+    'booking_status_update',
+    'Booking {{reference}}: {{status}}',
+    E'Hello,\n\nThere is an update to your Urban Tanker booking {{reference}}.\n\n{{status}}\n{{detail}}\n\nTrack your booking: {{trackingUrl}}',
+    '{reference,status,detail,trackingUrl}'
+  ),
+  (
+    'vendor_acceptance',
+    'Your Urban Tanker delivery team is assigned',
+    E'Hello,\n\nA delivery team has been assigned to booking {{reference}}.\n\nVehicle: {{vehicle}}\nDriver: {{driver}}\n\nPlease keep your phone available and ensure the delivery location is accessible. Follow your delivery and review the booking details here:\n{{trackingUrl}}\n\n{{customerMapDetail}}\n\nContact Urban Tanker support if you need help with this booking.',
+    '{reference,vehicle,driver,trackingUrl,customerMapDetail}'
+  ),
+  (
+    'delivery_confirmation',
+    'Your booking {{reference}} is complete',
+    E'Hello,\n\nYour Urban Tanker delivery for booking {{reference}} has been marked complete.\n\nPlease check that your delivery is complete and contact our support team if anything needs attention. Thank you for choosing Urban Tanker; we appreciate your business.',
+    '{reference}'
+  )
+on conflict (template_key) do nothing;
+insert into public.email_templates (template_key, subject, body, variables) values
+  ('user_registration_otp', 'Confirm your Urban Tanker registration', E'Hello,\n\nWelcome to Urban Tanker. Enter verification code {{otp}} to confirm your email address and complete your registration.\n\nThis code expires in 10 minutes. For your security, never share it with anyone. If you did not request this code, you can ignore this email.', '{otp}'),
+  ('booking_pending_vendor', 'We received booking {{reference}}', E'Hello,\n\nWe have received booking {{reference}} and are finding a service partner for your request.\n\n{{detail}}\n\nThere is no action needed right now. We will email you again as soon as the booking moves to its next stage. You can check the latest information here:\n{{trackingUrl}}', '{reference,detail,trackingUrl}'),
+  ('booking_vendor_assigned', 'A service partner has been assigned to booking {{reference}}', E'Hello,\n\nA service partner has been assigned to your Urban Tanker booking {{reference}}.\n\n{{detail}}\n\nPlease keep your phone available in case the service partner needs to reach you. View the booking and its latest details here:\n{{trackingUrl}}', '{reference,detail,trackingUrl}'),
+  ('booking_accepted', 'Booking {{reference}} has been accepted', E'Hello,\n\nYour service partner has accepted booking {{reference}}.\n\n{{detail}}\n\nPlease make sure the delivery location is accessible at the scheduled time. You can review your booking here:\n{{trackingUrl}}', '{reference,detail,trackingUrl}'),
+  ('booking_en_route', 'Your delivery is on the way - booking {{reference}}', E'Hello,\n\nThe tanker for booking {{reference}} is on its way to your delivery location.\n\n{{detail}}\n\nPlease ensure someone is available to receive the delivery. Follow the latest progress here:\n{{trackingUrl}}', '{reference,detail,trackingUrl}'),
+  ('booking_arrived', 'Your tanker has arrived - booking {{reference}}', E'Hello,\n\nThe tanker for booking {{reference}} has arrived at the delivery location.\n\n{{detail}}\n\nPlease coordinate with the driver to complete your delivery. View the booking details here:\n{{trackingUrl}}', '{reference,detail,trackingUrl}'),
+  ('booking_cancelled', 'Booking {{reference}} has been cancelled', E'Hello,\n\nBooking {{reference}} has been cancelled.\n\n{{detail}}\n\nIf you did not request this cancellation or need help with the booking, please contact Urban Tanker support. You can review the booking here:\n{{trackingUrl}}', '{reference,detail,trackingUrl}'),
+  ('booking_payment_online', 'Payment received for booking {{reference}}', E'Hello,\n\nWe have received the online payment for booking {{reference}}.\n\n{{detail}}\n\nNo cash payment is due to the driver for this booking. View your booking and payment details here:\n{{trackingUrl}}', '{reference,detail,trackingUrl}'),
+  ('booking_payment_cod', 'Payment method updated for booking {{reference}}', E'Hello,\n\nThe payment method for booking {{reference}} has been updated to cash on delivery.\n\n{{detail}}\n\nPlease pay the amount shown in your booking when the delivery is completed. Review the latest details here:\n{{trackingUrl}}', '{reference,detail,trackingUrl}'),
+  ('booking_rescheduled', 'Booking {{reference}} has been rescheduled', E'Hello,\n\nThe schedule for booking {{reference}} has been changed.\n\n{{detail}}\n\nPlease check your booking for the latest delivery date and time, and contact support if the new schedule does not work for you:\n{{trackingUrl}}', '{reference,detail,trackingUrl}'),
+  ('booking_delivered', 'Delivery completed for booking {{reference}}', E'Hello,\n\nThe delivery for booking {{reference}} has been marked complete.\n\n{{detail}}\n\nPlease check that your delivery is complete and contact Urban Tanker support if you need assistance. Thank you for choosing Urban Tanker.\n{{trackingUrl}}', '{reference,detail,trackingUrl}'),
+  ('vendor_application_approved', 'Your Urban Tanker partner application is approved', E'Hello {{businessName}},\n\nWe are pleased to let you know that your Urban Tanker partner application (reference {{reference}}) has been approved.\n\nOur team will share the next steps for onboarding and account setup. Please keep this reference for your records. We look forward to working with you.', '{businessName,reference}'),
+  ('vendor_application_rejected', 'Update on your Urban Tanker partner application', E'Hello {{businessName}},\n\nWe have completed our review of your Urban Tanker partner application (reference {{reference}}). We are unable to approve the application at this time.\n\nReview details: {{reviewNote}}\n\nIf you would like clarification or believe additional information may help, please contact our partnerships team and include your application reference.', '{businessName,reference,reviewNote}'),
+  ('vendor_account_approved', 'Your Urban Tanker vendor account is approved', E'Hello {{name}},\n\nYour Urban Tanker vendor account has been approved. You can now sign in and continue with vendor onboarding:\n{{loginUrl}}\n\nPlease keep your account credentials secure. Contact support if you need assistance.', '{name,loginUrl}'),
+  ('vendor_account_rejected', 'Update on your Urban Tanker vendor account', E'Hello {{name}},\n\nWe have reviewed your Urban Tanker vendor account and are unable to approve it at this time.\n\nPlease contact Urban Tanker support if you need clarification or believe further information should be considered.', '{name}'),
+  ('vendor_profile_approved', 'Your Urban Tanker vendor profile is approved', E'Hello {{businessName}},\n\nYour Urban Tanker vendor profile has been approved. You can now sign in to manage your business profile and continue onboarding:\n{{loginUrl}}\n\nPlease keep your contact and service details up to date. Contact support if you need assistance.', '{businessName,loginUrl}'),
+  ('vendor_profile_rejected', 'Update on your Urban Tanker vendor profile', E'Hello {{businessName}},\n\nWe have reviewed your Urban Tanker vendor profile and are unable to approve it at this time.\n\nPlease contact Urban Tanker support if you need clarification or would like to provide additional information.', '{businessName}')
 on conflict (template_key) do nothing;
 alter table public.ratings drop constraint if exists ratings_customer_id_fkey;
 alter table public.ratings add constraint ratings_customer_id_fkey foreign key (customer_id) references public.profiles(id) on delete set null;
@@ -3196,3 +3255,191 @@ drop index if exists public.vendor_location_booking_recorded_idx;
 drop index if exists public.bookings_tracking_token_hash_idx;
 
 notify pgrst, 'reload schema';
+
+-- Additive migration for existing databases. Safe to run more than once.
+begin;
+
+create table if not exists public.email_templates (
+  template_key text primary key,
+  subject text not null,
+  body text not null,
+  variables text[] not null default '{}',
+  is_active boolean not null default true,
+  updated_at timestamptz not null default now()
+);
+alter table public.email_templates enable row level security;
+revoke all on public.email_templates from public, anon, authenticated;
+grant all on public.email_templates to service_role;
+
+insert into public.email_templates (template_key, subject, body, variables) values
+  (
+    'guest_booking_confirmation',
+    'Your booking {{reference}} is confirmed',
+    E'Hello,\n\nYour Urban Tanker booking {{reference}} is confirmed. We will keep you updated as it moves through each stage.\n\nTrack your booking: {{trackingUrl}}',
+    '{reference,trackingUrl}'
+  ),
+  (
+    'booking_status_update',
+    'Booking {{reference}}: {{status}}',
+    E'Hello,\n\nThere is an update to your Urban Tanker booking {{reference}}.\n\n{{status}}\n{{detail}}\n\nTrack your booking: {{trackingUrl}}',
+    '{reference,status,detail,trackingUrl}'
+  ),
+  (
+    'vendor_acceptance',
+    'Your Urban Tanker delivery team is assigned',
+    E'Hello,\n\nYour booking {{reference}} has an assigned delivery team.\n\nVehicle: {{vehicle}}\nDriver: {{driver}}\n\nFollow your delivery: {{trackingUrl}}\n{{customerMapDetail}}',
+    '{reference,vehicle,driver,trackingUrl,customerMapDetail}'
+  ),
+  (
+    'delivery_confirmation',
+    'Your booking {{reference}} is complete',
+    E'Hello,\n\nYour Urban Tanker delivery for booking {{reference}} is complete.\n\nThank you for choosing Urban Tanker. We appreciate your business.',
+    '{reference}'
+  )
+on conflict (template_key) do nothing;
+
+commit;
+
+-- Add email content for registration, each booking status, and vendor decisions.
+-- Existing customized templates are preserved.
+begin;
+
+insert into public.email_templates (template_key, subject, body, variables) values
+  (
+    'user_registration_otp',
+    'Confirm your Urban Tanker registration',
+    E'Hello,\n\nWelcome to Urban Tanker. Enter verification code {{otp}} to confirm your email address and complete your registration.\n\nThis code expires in 10 minutes. For your security, never share it with anyone. If you did not request this code, you can ignore this email.',
+    '{otp}'
+  ),
+  (
+    'booking_pending_vendor',
+    'We received booking {{reference}}',
+    E'Hello,\n\nWe have received booking {{reference}} and are finding a service partner for your request.\n\n{{detail}}\n\nThere is no action needed right now. We will email you again as soon as the booking moves to its next stage. You can check the latest information here:\n{{trackingUrl}}',
+    '{reference,detail,trackingUrl}'
+  ),
+  (
+    'booking_vendor_assigned',
+    'A service partner has been assigned to booking {{reference}}',
+    E'Hello,\n\nA service partner has been assigned to your Urban Tanker booking {{reference}}.\n\n{{detail}}\n\nPlease keep your phone available in case the service partner needs to reach you. View the booking and its latest details here:\n{{trackingUrl}}',
+    '{reference,detail,trackingUrl}'
+  ),
+  (
+    'booking_accepted',
+    'Booking {{reference}} has been accepted',
+    E'Hello,\n\nYour service partner has accepted booking {{reference}}.\n\n{{detail}}\n\nPlease make sure the delivery location is accessible at the scheduled time. You can review your booking here:\n{{trackingUrl}}',
+    '{reference,detail,trackingUrl}'
+  ),
+  (
+    'booking_en_route',
+    'Your delivery is on the way - booking {{reference}}',
+    E'Hello,\n\nThe tanker for booking {{reference}} is on its way to your delivery location.\n\n{{detail}}\n\nPlease ensure someone is available to receive the delivery. Follow the latest progress here:\n{{trackingUrl}}',
+    '{reference,detail,trackingUrl}'
+  ),
+  (
+    'booking_arrived',
+    'Your tanker has arrived - booking {{reference}}',
+    E'Hello,\n\nThe tanker for booking {{reference}} has arrived at the delivery location.\n\n{{detail}}\n\nPlease coordinate with the driver to complete your delivery. View the booking details here:\n{{trackingUrl}}',
+    '{reference,detail,trackingUrl}'
+  ),
+  (
+    'booking_cancelled',
+    'Booking {{reference}} has been cancelled',
+    E'Hello,\n\nBooking {{reference}} has been cancelled.\n\n{{detail}}\n\nIf you did not request this cancellation or need help with the booking, please contact Urban Tanker support. You can review the booking here:\n{{trackingUrl}}',
+    '{reference,detail,trackingUrl}'
+  ),
+  (
+    'booking_payment_online',
+    'Payment received for booking {{reference}}',
+    E'Hello,\n\nWe have received the online payment for booking {{reference}}.\n\n{{detail}}\n\nNo cash payment is due to the driver for this booking. View your booking and payment details here:\n{{trackingUrl}}',
+    '{reference,detail,trackingUrl}'
+  ),
+  (
+    'booking_payment_cod',
+    'Payment method updated for booking {{reference}}',
+    E'Hello,\n\nThe payment method for booking {{reference}} has been updated to cash on delivery.\n\n{{detail}}\n\nPlease pay the amount shown in your booking when the delivery is completed. Review the latest details here:\n{{trackingUrl}}',
+    '{reference,detail,trackingUrl}'
+  ),
+  (
+    'booking_rescheduled',
+    'Booking {{reference}} has been rescheduled',
+    E'Hello,\n\nThe schedule for booking {{reference}} has been changed.\n\n{{detail}}\n\nPlease check your booking for the latest delivery date and time, and contact support if the new schedule does not work for you:\n{{trackingUrl}}',
+    '{reference,detail,trackingUrl}'
+  ),
+  (
+    'booking_delivered',
+    'Delivery completed for booking {{reference}}',
+    E'Hello,\n\nThe delivery for booking {{reference}} has been marked complete.\n\n{{detail}}\n\nPlease check that your delivery is complete and contact Urban Tanker support if you need assistance. Thank you for choosing Urban Tanker.\n{{trackingUrl}}',
+    '{reference,detail,trackingUrl}'
+  ),
+  (
+    'vendor_application_approved',
+    'Your Urban Tanker partner application is approved',
+    E'Hello {{businessName}},\n\nWe are pleased to let you know that your Urban Tanker partner application (reference {{reference}}) has been approved.\n\nOur team will share the next steps for onboarding and account setup. Please keep this reference for your records. We look forward to working with you.',
+    '{businessName,reference}'
+  ),
+  (
+    'vendor_application_rejected',
+    'Update on your Urban Tanker partner application',
+    E'Hello {{businessName}},\n\nWe have completed our review of your Urban Tanker partner application (reference {{reference}}). We are unable to approve the application at this time.\n\nReview details: {{reviewNote}}\n\nIf you would like clarification or believe additional information may help, please contact our partnerships team and include your application reference.',
+    '{businessName,reference,reviewNote}'
+  ),
+  (
+    'vendor_account_approved',
+    'Your Urban Tanker vendor account is approved',
+    E'Hello {{name}},\n\nYour Urban Tanker vendor account has been approved. You can now sign in and continue with vendor onboarding:\n{{loginUrl}}\n\nPlease keep your account credentials secure. Contact support if you need assistance.',
+    '{name,loginUrl}'
+  ),
+  (
+    'vendor_account_rejected',
+    'Update on your Urban Tanker vendor account',
+    E'Hello {{name}},\n\nWe have reviewed your Urban Tanker vendor account and are unable to approve it at this time.\n\nPlease contact Urban Tanker support if you need clarification or believe further information should be considered.',
+    '{name}'
+  ),
+  (
+    'vendor_profile_approved',
+    'Your Urban Tanker vendor profile is approved',
+    E'Hello {{businessName}},\n\nYour Urban Tanker vendor profile has been approved. You can now sign in to manage your business profile and continue onboarding:\n{{loginUrl}}\n\nPlease keep your contact and service details up to date. Contact support if you need assistance.',
+    '{businessName,loginUrl}'
+  ),
+  (
+    'vendor_profile_rejected',
+    'Update on your Urban Tanker vendor profile',
+    E'Hello {{businessName}},\n\nWe have reviewed your Urban Tanker vendor profile and are unable to approve it at this time.\n\nPlease contact Urban Tanker support if you need clarification or would like to provide additional information.',
+    '{businessName}'
+  )
+on conflict (template_key) do nothing;
+
+update public.email_templates
+set subject = 'Your booking {{reference}} is confirmed',
+    body = E'Hello,\n\nYour Urban Tanker booking {{reference}} is confirmed. We have received your request and will keep you informed as the service partner is assigned, accepts the booking, and completes the delivery.\n\nYou can view your booking, check its scheduled details, and follow its progress here:\n{{trackingUrl}}\n\nPlease keep your contact number available for service updates. If any booking details need attention, contact Urban Tanker support and include your booking reference.',
+    updated_at = now()
+where template_key = 'guest_booking_confirmation'
+  and subject = 'Your booking {{reference}} is confirmed'
+  and body = E'Hello,\n\nYour Urban Tanker booking {{reference}} is confirmed. We will keep you updated as it moves through each stage.\n\nTrack your booking: {{trackingUrl}}';
+
+update public.email_templates
+set subject = 'Your Urban Tanker delivery team is assigned',
+    body = E'Hello,\n\nA delivery team has been assigned to booking {{reference}}.\n\nVehicle: {{vehicle}}\nDriver: {{driver}}\n\nPlease keep your phone available and ensure the delivery location is accessible. Follow your delivery and review the booking details here:\n{{trackingUrl}}\n\n{{customerMapDetail}}\n\nContact Urban Tanker support if you need help with this booking.',
+    updated_at = now()
+where template_key = 'vendor_acceptance'
+  and subject = 'Your Urban Tanker delivery team is assigned'
+  and body = E'Hello,\n\nYour booking {{reference}} has an assigned delivery team.\n\nVehicle: {{vehicle}}\nDriver: {{driver}}\n\nFollow your delivery: {{trackingUrl}}\n{{customerMapDetail}}';
+
+update public.email_templates
+set subject = 'Your booking {{reference}} is complete',
+    body = E'Hello,\n\nYour Urban Tanker delivery for booking {{reference}} has been marked complete.\n\nPlease check that your delivery is complete and contact our support team if anything needs attention. Thank you for choosing Urban Tanker; we appreciate your business.',
+    updated_at = now()
+where template_key = 'delivery_confirmation'
+  and subject = 'Your booking {{reference}} is complete'
+  and body = E'Hello,\n\nYour Urban Tanker delivery for booking {{reference}} is complete.\n\nThank you for choosing Urban Tanker. We appreciate your business.';
+
+commit;
+
+-- Store an optional guest email on the booking so status updates go to the
+-- address supplied for that booking, without changing the registered account email.
+begin;
+
+alter table public.bookings add column if not exists customer_email text;
+
+commit;
+

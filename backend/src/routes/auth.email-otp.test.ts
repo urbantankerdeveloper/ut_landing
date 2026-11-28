@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   refreshSession: vi.fn(),
   isEmailConfigured: vi.fn(() => true),
   sendEmail: vi.fn(),
+  sendTemplateEmail: vi.fn(),
   sendTemplateWhatsApp: vi.fn(),
   sendTemplateSms: vi.fn(),
   recentPhoneChallenge: null as null | { id: string; delivery_channel: string; created_at: string; expires_at: string },
@@ -73,6 +74,9 @@ vi.mock('../services/sms.js', () => ({
 vi.mock('../services/providers.js', () => ({
   isEmailConfigured: () => mocks.isEmailConfigured(),
   sendEmail: (...args: unknown[]) => mocks.sendEmail(...args),
+}))
+vi.mock('../services/emailTemplates.js', () => ({
+  sendTemplateEmail: (...args: unknown[]) => mocks.sendTemplateEmail(...args),
 }))
 vi.mock('../services/whatsapp.js', () => ({ sendTemplateWhatsApp: (...args: unknown[]) => mocks.sendTemplateWhatsApp(...args) }))
 
@@ -154,6 +158,8 @@ beforeEach(() => {
   mocks.isEmailConfigured.mockReturnValue(true)
   mocks.sendEmail.mockReset()
   mocks.sendEmail.mockResolvedValue({ queued: true })
+  mocks.sendTemplateEmail.mockReset()
+  mocks.sendTemplateEmail.mockResolvedValue({ queued: true })
   mocks.sendTemplateWhatsApp.mockReset()
   mocks.sendTemplateWhatsApp.mockResolvedValue({ queued: false, reason: 'Combirds WhatsApp is not configured' })
   mocks.authUser.id = 'user-1'
@@ -346,7 +352,7 @@ describe('POST /signup', () => {
     expect(response.status).toBe(201)
     expect(response.body).toMatchObject({ requiresEmailVerification: true, emailSent: true, phoneOtpSent: false, phoneChallengeId: null, challengeId: EMAIL_CHALLENGE })
     expect(mocks.createUser).toHaveBeenCalledWith(expect.objectContaining({ email: 'new@example.com', email_confirm: false }))
-    expect(mocks.sendEmail).toHaveBeenCalledWith('new@example.com', expect.any(String), expect.stringContaining('verification code'))
+    expect(mocks.sendTemplateEmail).toHaveBeenCalledWith('user_registration_otp', 'new@example.com', { otp: expect.any(String) })
     expect(mocks.sendTemplateWhatsApp).toHaveBeenCalledWith('user_registration_otp', expect.any(String), expect.any(Object))
     expect(mocks.deleteUser).not.toHaveBeenCalled()
   })

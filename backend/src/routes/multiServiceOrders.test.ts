@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   role: 'customer',
+  authEmail: 'guest-user@guest.urbantanker.local',
   calls: [] as Array<{ table: string; operations: Array<{ name: string; args: unknown[] }> }>,
   rpcCalls: [] as Array<{ name: string; args: unknown }>,
   rpcResult: { data: null as unknown, error: null as { message: string } | null },
@@ -42,7 +43,7 @@ vi.mock('../supabase.js', () => ({
 }))
 vi.mock('../middleware/auth.js', () => ({
   requireAuth: (request: object, _response: unknown, next: () => void) => {
-    Object.assign(request, { authUser: { id: 'auth-user' }, profile: { role: mocks.role } })
+    Object.assign(request, { authUser: { id: 'auth-user', email: mocks.authEmail }, profile: { role: mocks.role } })
     next()
   },
   requireRole: (...roles: string[]) => (request: object, response: { status: (code: number) => { json: (body: unknown) => void } }, next: () => void) => {
@@ -78,6 +79,7 @@ beforeEach(() => {
   config.BUNDLE_DISCOUNT_PAISE = 0
   config.REQUIRE_BOOKING_PHONE_VERIFICATION = true
   mocks.role = 'customer'
+  mocks.authEmail = 'guest-user@guest.urbantanker.local'
   mocks.calls = []
   mocks.rpcCalls = []
   mocks.rpcResult = { data: null, error: null }
@@ -148,6 +150,7 @@ describe('multi-service order contracts', () => {
     const response = await request(buildApp()).post('/customer/multi-service-orders').send({
       paymentMethod: 'cod',
       phone: '9876543210',
+      notificationEmail: 'guest@example.com',
       phoneVerificationChallengeId: '11111111-1111-4111-8111-111111111111',
       items: [
         { serviceId: 'water_tanker', quantity: 1, location: '12 Main Road, Chennai', deliveryDate: '2026-12-01', details: {} },
@@ -162,18 +165,23 @@ describe('multi-service order contracts', () => {
     expect(rpcArgs.p_items).toHaveLength(2)
     expect(rpcArgs.p_order.total_paise).toBe(11800)
     expect(rpcArgs.p_payment).toMatchObject({ provider: 'cash_on_delivery', status: 'pending' })
+    expect(mocks.calls.find((call) => call.table === 'bookings' && call.operations.some((operation) => operation.name === 'update'))?.operations)
+      .toContainEqual({ name: 'update', args: [{ customer_email: 'guest@example.com' }] })
   })
 
   it('returns an existing parent order without consuming another OTP on an idempotent retry', async () => {
     const response = await request(buildApp()).post('/customer/multi-service-orders').send({
       idempotencyKey: '11111111-1111-4111-8111-111111111111',
       paymentMethod: 'cod',
+      notificationEmail: 'guest@example.com',
       items: [{ serviceId: 'water_tanker', quantity: 1, location: '12 Main Road, Chennai', deliveryDate: '2026-12-01' }],
     })
     expect(response.status).toBe(200)
     expect(response.body.legacyBookingId).toBe('booking-1')
     expect(mocks.rpcCalls).toEqual([])
     expect(mocks.calls.some((call) => call.table === 'guest_otp_challenges')).toBe(false)
+    expect(mocks.calls.find((call) => call.table === 'bookings' && call.operations.some((operation) => operation.name === 'update'))?.operations)
+      .toContainEqual({ name: 'update', args: [{ customer_email: 'guest@example.com' }] })
   })
 
   it('returns parent orders with items and fulfilments', async () => {

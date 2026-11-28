@@ -245,6 +245,10 @@ export const bookingContent = {
   contact: {
     customerName: 'Customer / company name',
     customerNamePlaceholder: 'Your name or company',
+    emailAddress: 'Email address (optional)',
+    emailAddressPlaceholder: 'you@example.com',
+    guestEmailNoUpdates: 'If you do not provide an email address, booking status updates will not be shared by email.',
+    registeredUpdatesEmail: 'Booking status updates will be sent to your registered account email.',
     mobileNumber: 'Mobile number',
     mobileNumberPlaceholder: '10-digit mobile number',
     savedAddress: 'Use a saved address',
@@ -424,6 +428,7 @@ export const bookingContent = {
   validation: {
     selectService: 'Select at least one service.',
     phone: 'Enter a valid 10-digit mobile number.',
+    email: 'Enter a valid email address.',
     accessNotesMax: 'Access notes must be 500 characters or fewer.',
     guestNameMax: 'Name must be 60 characters or fewer.',
     capacity: 'Choose a tanker capacity.',

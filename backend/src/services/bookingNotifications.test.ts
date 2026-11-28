@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   getOrCreateTrackingToken: vi.fn(),
   notifyCustomer: vi.fn(),
-  notifyUser: vi.fn(),
+  sendTemplateEmail: vi.fn(),
   sendTemplateWhatsApp: vi.fn(),
   getUserById: vi.fn(),
   groupLeadId: 'booking-1' as string | null,
@@ -62,8 +62,20 @@ vi.mock('../supabase.js', () => ({
 vi.mock('./customerNotifications.js', () => ({
   notifyCustomer: mocks.notifyCustomer,
 }))
-vi.mock('./providers.js', () => ({
-  notifyUser: mocks.notifyUser,
+vi.mock('./emailTemplates.js', () => ({
+  bookingStatusEmailTemplates: {
+    pending_vendor: 'booking_pending_vendor',
+    vendor_assigned: 'booking_vendor_assigned',
+    accepted: 'booking_accepted',
+    en_route: 'booking_en_route',
+    arrived: 'booking_arrived',
+    cancelled: 'booking_cancelled',
+    payment_online: 'booking_payment_online',
+    payment_cod: 'booking_payment_cod',
+    rescheduled: 'booking_rescheduled',
+    delivered: 'booking_delivered',
+  },
+  sendTemplateEmail: mocks.sendTemplateEmail,
 }))
 vi.mock('./whatsapp.js', () => ({
   sendTemplateWhatsApp: mocks.sendTemplateWhatsApp,
@@ -91,6 +103,7 @@ describe('notifyCustomerOfAssignment', () => {
         id: 'booking-1',
         reference: 'UT-100',
         customer_id: 'customer-1',
+        customer_email: null,
         customer_phone_e164: '+919123456789',
       },
       error: null,
@@ -104,7 +117,7 @@ describe('notifyCustomerOfAssignment', () => {
       data: { user: { email: 'customer@example.com' } },
       error: null,
     })
-    mocks.notifyUser.mockResolvedValue([{ queued: true }, { queued: false }, { queued: false }])
+    mocks.sendTemplateEmail.mockResolvedValue({ queued: true })
     mocks.sendTemplateWhatsApp.mockResolvedValue({ queued: true })
   })
 
@@ -127,6 +140,16 @@ describe('notifyCustomerOfAssignment', () => {
         driver: 'Ravi',
         trackingUrl: 'https://urban-tanker.example/track/track-token',
       },
+    )
+    expect(mocks.sendTemplateEmail).toHaveBeenCalledWith(
+      'vendor_acceptance',
+      'customer@example.com',
+      expect.objectContaining({
+        reference: 'UT-100',
+        vehicle: 'TN-01-AB-1234',
+        driver: 'Ravi',
+        trackingUrl: 'https://urban-tanker.example/track/track-token',
+      }),
     )
   })
 
@@ -164,10 +187,13 @@ describe('notifyCustomerOfAssignment', () => {
         trackingUrl: 'https://urban-tanker.example/track/track-token',
       },
     )
-    expect(mocks.notifyUser).toHaveBeenCalledWith(
-      { email: 'customer@example.com' },
-      'Your Urban Tanker booking UT-100 is confirmed',
-      'Urban Tanker: Your booking UT-100 is confirmed. Track your order: https://urban-tanker.example/track/track-token',
+    expect(mocks.sendTemplateEmail).toHaveBeenCalledWith(
+      'guest_booking_confirmation',
+      'customer@example.com',
+      {
+        reference: 'UT-100',
+        trackingUrl: 'https://urban-tanker.example/track/track-token',
+      },
     )
   })
 
@@ -212,6 +238,27 @@ describe('notifyCustomerOfAssignment', () => {
     )
   })
 
+  it.each([
+    ['pending_vendor', 'booking_pending_vendor'],
+    ['vendor_assigned', 'booking_vendor_assigned'],
+    ['accepted', 'booking_accepted'],
+    ['en_route', 'booking_en_route'],
+    ['arrived', 'booking_arrived'],
+    ['cancelled', 'booking_cancelled'],
+    ['payment_online', 'booking_payment_online'],
+    ['payment_cod', 'booking_payment_cod'],
+    ['rescheduled', 'booking_rescheduled'],
+    ['delivered', 'booking_delivered'],
+  ] as const)('uses the %s email for that booking status', async (event, template) => {
+    await notifyCustomerOfBookingStatus('booking-1', event)
+
+    expect(mocks.sendTemplateEmail).toHaveBeenCalledWith(
+      template,
+      'customer@example.com',
+      expect.objectContaining({ reference: 'UT-100' }),
+    )
+  })
+
   it('sends status updates to the booking phone with its stable tracking link', async () => {
     await notifyCustomerOfBookingStatus('booking-1', 'en_route')
 
@@ -225,10 +272,15 @@ describe('notifyCustomerOfAssignment', () => {
         trackingUrl: 'https://urban-tanker.example/track/track-token',
       },
     )
-    expect(mocks.notifyUser).toHaveBeenCalledWith(
-      { email: 'customer@example.com' },
-      'Your Urban Tanker booking UT-100: Tanker on the way',
-      'Urban Tanker: Booking UT-100 update: Tanker on the way. Your tanker is on the way to the delivery location. Track your booking: https://urban-tanker.example/track/track-token',
+    expect(mocks.sendTemplateEmail).toHaveBeenCalledWith(
+      'booking_en_route',
+      'customer@example.com',
+      {
+        reference: 'UT-100',
+        status: 'Tanker on the way',
+        detail: 'Your tanker is on the way to the delivery location.',
+        trackingUrl: 'https://urban-tanker.example/track/track-token',
+      },
     )
   })
 
@@ -298,31 +350,45 @@ describe('notifyCustomerOfAssignment', () => {
       '+919123456789',
       { reference: 'UT-100' },
     )
-    expect(mocks.notifyUser).toHaveBeenCalledWith(
-      { email: 'customer@example.com' },
-      'Delivery complete for Urban Tanker booking UT-100',
-      'Urban Tanker: Delivery for booking UT-100 is complete. Thank you for choosing Urban Tanker.',
+    expect(mocks.sendTemplateEmail).toHaveBeenCalledWith(
+      'delivery_confirmation',
+      'customer@example.com',
+      { reference: 'UT-100' },
     )
   })
 
   it('does not email a guest account placeholder address', async () => {
     mocks.getUserById.mockResolvedValue({
-      data: { user: { email: 'guest_123@guest.urbantanker.local' } },
+      data: { user: { email: 'guest_123@guest.urbantanker.local', app_metadata: { booking_email: 'previous@example.com' } } },
       error: null,
     })
+    mocks.rows.bookings = {
+      data: { id: 'booking-1', customer_id: 'customer-1', customer_email: null, customer_phone_e164: '+919123456789' },
+      error: null,
+    }
 
     await notifyCustomerOfBookingStatus('booking-1', 'en_route')
 
-    expect(mocks.notifyUser).not.toHaveBeenCalled()
+    expect(mocks.sendTemplateEmail).not.toHaveBeenCalled()
     expect(mocks.sendTemplateWhatsApp).toHaveBeenCalledTimes(1)
   })
 
-  it('uses the OTP-verified booking email stored for a guest account', async () => {
+  it('uses the optional email stored on a guest booking instead of the placeholder account address', async () => {
+    mocks.rows.bookings = {
+      data: {
+        id: 'booking-1',
+        reference: 'UT-100',
+        customer_id: 'customer-1',
+        customer_email: 'guest@example.com',
+        customer_phone_e164: '+919123456789',
+      },
+      error: null,
+    }
     mocks.getUserById.mockResolvedValue({
       data: {
         user: {
           email: 'guest_123@guest.urbantanker.local',
-          app_metadata: { role: 'customer', booking_email: 'guest@example.com' },
+          app_metadata: { role: 'customer', booking_email: 'previous@example.com' },
         },
       },
       error: null,
@@ -330,10 +396,33 @@ describe('notifyCustomerOfAssignment', () => {
 
     await notifyCustomerOfBookingStatus('booking-1', 'en_route')
 
-    expect(mocks.notifyUser).toHaveBeenCalledWith(
-      { email: 'guest@example.com' },
-      'Your Urban Tanker booking UT-100: Tanker on the way',
-      expect.stringContaining('Track your booking: https://urban-tanker.example/track/track-token'),
+    expect(mocks.sendTemplateEmail).toHaveBeenCalledWith(
+      'booking_en_route',
+      'guest@example.com',
+      expect.objectContaining({
+        trackingUrl: 'https://urban-tanker.example/track/track-token',
+      }),
+    )
+  })
+
+  it('uses the registered account email even if a booking contains another email', async () => {
+    mocks.rows.bookings = {
+      data: {
+        id: 'booking-1',
+        reference: 'UT-100',
+        customer_id: 'customer-1',
+        customer_email: 'other@example.com',
+        customer_phone_e164: '+919123456789',
+      },
+      error: null,
+    }
+
+    await notifyCustomerOfBookingStatus('booking-1', 'en_route')
+
+    expect(mocks.sendTemplateEmail).toHaveBeenCalledWith(
+      'booking_en_route',
+      'customer@example.com',
+      expect.any(Object),
     )
   })
 

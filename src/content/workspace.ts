@@ -115,6 +115,7 @@ export const workspaceContent = {
       coupons: 'Coupons',
       whatsappTemplates: 'WhatsApp templates',
       smsTemplates: 'SMS templates',
+      emailTemplates: 'Email templates',
       systemHealth: 'System health',
     },
     dispatcher: {

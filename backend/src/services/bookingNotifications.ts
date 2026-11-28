@@ -2,7 +2,7 @@ import { config } from '../config.js'
 import { logger } from '../lib/logger.js'
 import { supabase } from '../supabase.js'
 import { notifyCustomer } from './customerNotifications.js'
-import { notifyUser } from './providers.js'
+import { bookingStatusEmailTemplates, sendTemplateEmail, type EmailTemplateKey } from './emailTemplates.js'
 import { sendTemplateWhatsApp, type SmsTemplateKey } from './whatsapp.js'
 import { getOrCreateTrackingToken } from './trackingTokens.js'
 
@@ -18,17 +18,7 @@ type AssignedBooking = {
   driver_id?: string | null
 }
 
-type CustomerBookingUpdate =
-  | 'pending_vendor'
-  | 'vendor_assigned'
-  | 'accepted'
-  | 'en_route'
-  | 'arrived'
-  | 'cancelled'
-  | 'payment_online'
-  | 'payment_cod'
-  | 'rescheduled'
-  | 'delivered'
+type CustomerBookingUpdate = keyof typeof bookingStatusEmailTemplates
 
 const customerBookingUpdates: Record<CustomerBookingUpdate, { status: string; detail: string }> = {
   pending_vendor: { status: 'Finding a vendor', detail: 'We are finding a vendor for your booking.' },
@@ -47,27 +37,27 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Unknown error'
 }
 
-async function loadCustomerEmail(customerId: string | null | undefined) {
+async function loadCustomerEmail(customerId: string | null | undefined, bookingEmail?: string | null) {
   if (!customerId) return null
   const { data, error } = await supabase.auth.admin.getUserById(customerId)
   if (error) throw new Error(`Customer email lookup failed: ${error.message}`)
   const accountEmail = data.user?.email?.trim()
   if (accountEmail && !accountEmail.toLowerCase().endsWith('@guest.urbantanker.local')) return accountEmail
-  const bookingEmail = data.user?.app_metadata?.booking_email
-  return typeof bookingEmail === 'string' ? bookingEmail.trim() || null : null
+  return bookingEmail?.trim() || null
 }
 
 async function notifyCustomerEmail(
   bookingId: string,
   customerId: string | null | undefined,
-  subject: string,
-  message: string,
+  template: EmailTemplateKey,
+  vars: Record<string, string>,
   event: string,
+  bookingEmail?: string | null,
 ) {
   try {
-    const email = await loadCustomerEmail(customerId)
+    const email = await loadCustomerEmail(customerId, bookingEmail)
     if (!email) return { queued: false, reason: 'No customer email' }
-    const [result] = await notifyUser({ email }, subject, message)
+    const result = await sendTemplateEmail(template, email, vars)
     if (!result.queued) logger.warn('booking.email_not_queued', {
       bookingId,
       event,
@@ -87,7 +77,7 @@ async function notifyCustomerEmail(
 async function loadBookingContact(bookingId: string) {
   const { data: booking, error } = await supabase
     .from('bookings')
-    .select('id,reference,customer_id,customer_phone_e164,order_group_id,order_group_reference')
+    .select('id,reference,customer_id,customer_email,customer_phone_e164,order_group_id,order_group_reference')
     .eq('id', bookingId)
     .maybeSingle()
   if (error) throw new Error(`Booking contact lookup failed: ${error.message}`)
@@ -127,7 +117,7 @@ export async function notifyCustomerOfAssignment(booking: AssignedBooking) {
   const queryError = vehicleResult.error ?? driverResult.error
   if (queryError) throw new Error(`Assignment notification lookup failed: ${queryError.message}`)
   const { token } = await getOrCreateTrackingToken(contact?.trackingBookingId ?? booking.id)
-  const email = await loadCustomerEmail(booking.customer_id)
+  const email = await loadCustomerEmail(booking.customer_id, contact?.booking.customer_email)
 
   const vehicle = vehicleResult.data?.registration_number ?? 'Assigned tanker'
   const driver = driverResult.data?.name ?? 'Assigned driver'
@@ -149,8 +139,20 @@ export async function notifyCustomerOfAssignment(booking: AssignedBooking) {
   })
 
   const reference = contact?.reference ?? booking.order_group_reference ?? booking.reference ?? booking.id
-  const message = `Urban Tanker ${reference}: ${detail} Live tracking: ${trackingUrl}${customerMapUrl ? ` Delivery location: ${customerMapUrl}` : ''}`
-  const providerResults = await notifyUser({ email: email ?? undefined }, 'Your Urban Tanker fleet is assigned', message)
+  const emailResult = email
+    ? await sendTemplateEmail('vendor_acceptance', email, {
+      reference,
+      vehicle,
+      driver,
+      trackingUrl,
+      customerMapDetail: customerMapUrl ? `Delivery location: ${customerMapUrl}` : '',
+    })
+    : { queued: false, reason: 'No customer email' }
+  if (email && !emailResult.queued) logger.warn('booking.email_not_queued', {
+    bookingId: booking.id,
+    event: 'vendor_acceptance',
+    reason: emailResult.reason ?? 'Email delivery was not queued',
+  })
   const whatsapp = await notifyCustomerWhatsApp(
     contact?.phone ?? booking.customer_phone_e164,
     'vendor_acceptance',
@@ -161,7 +163,7 @@ export async function notifyCustomerOfAssignment(booking: AssignedBooking) {
       trackingUrl,
     },
   )
-  return { vehicle, driver, trackingUrl, providerResults, whatsapp }
+  return { vehicle, driver, trackingUrl, email: emailResult, whatsapp }
 }
 
 export async function notifyCustomerOfBooking(phoneE164: string | null | undefined, bookingId: string, reference: string) {
@@ -217,6 +219,7 @@ export async function notifyCustomerOfBooking(phoneE164: string | null | undefin
       contact.trackingBookingId,
       confirmationReference,
       trackingUrl,
+      contact.booking.customer_email,
     )
     return { queued: whatsapp.queued || email.queued, whatsapp, email }
   } catch (error) {
@@ -234,12 +237,11 @@ async function notifyBookingConfirmationEmail(
   trackingBookingId: string,
   reference: string,
   trackingUrl: string,
+  bookingEmail?: string | null,
 ) {
-  const subject = `Your Urban Tanker booking ${reference} is confirmed`
-  const message = `Urban Tanker: Your booking ${reference} is confirmed. Track your order: ${trackingUrl}`
   let claimedAt: string | undefined
   try {
-    const email = await loadCustomerEmail(customerId)
+    const email = await loadCustomerEmail(customerId, bookingEmail)
     if (!email) return { queued: false, reason: 'No customer email' }
 
     claimedAt = new Date().toISOString()
@@ -253,7 +255,7 @@ async function notifyBookingConfirmationEmail(
     if (claimError) throw new Error(`Booking confirmation email claim failed: ${claimError.message}`)
     if (!claimed) return { queued: false, reason: 'Booking confirmation email already sent' }
 
-    const [result] = await notifyUser({ email }, subject, message)
+    const result = await sendTemplateEmail('guest_booking_confirmation', email, { reference, trackingUrl })
     if (!result.queued) {
       logger.warn('booking.email_not_queued', {
         bookingId,
@@ -310,9 +312,10 @@ export async function notifyCustomerOfBookingWhatsApp(
       const email = await notifyCustomerEmail(
         bookingId,
         contact.booking.customer_id,
-        `Delivery complete for Urban Tanker booking ${reference}`,
-        `Urban Tanker: Delivery for booking ${reference} is complete. Thank you for choosing Urban Tanker.`,
+        'delivery_confirmation',
+        { reference },
         key,
+        contact.booking.customer_email,
       )
       const whatsapp = await notifyCustomerWhatsApp(contact.phone, key, {
         ...vars,
@@ -346,8 +349,6 @@ export async function notifyCustomerOfBookingStatus(
     const update = customerBookingUpdates[event]
     const reference = contact.reference ?? bookingId
     const trackingUrl = `${config.FRONTEND_ORIGIN}/track/${token}`
-    const subject = `Your Urban Tanker booking ${reference}: ${update.status}`
-    const message = `Urban Tanker: Booking ${reference} update: ${update.status}. ${update.detail} Track your booking: ${trackingUrl}`
     const [whatsapp, email] = await Promise.all([
       notifyCustomerWhatsApp(contact.phone, 'booking_status_update', {
         reference,
@@ -355,7 +356,12 @@ export async function notifyCustomerOfBookingStatus(
         detail: update.detail,
         trackingUrl,
       }),
-      notifyCustomerEmail(bookingId, contact.booking.customer_id, subject, message, event),
+      notifyCustomerEmail(bookingId, contact.booking.customer_id, bookingStatusEmailTemplates[event], {
+        reference,
+        status: update.status,
+        detail: update.detail,
+        trackingUrl,
+      }, event, contact.booking.customer_email),
     ])
     return { queued: whatsapp.queued || email.queued, whatsapp, email }
   } catch (error) {

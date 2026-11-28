@@ -41,6 +41,7 @@ const bookingFormSchema = z.object({
   paymentMethod: z.enum(['wallet', 'gateway', 'cod']).optional(),
   couponCode: z.string().optional(),
   guestName: z.string().trim().max(60, c.validation.guestNameMax).optional(),
+  notificationEmail: z.string().trim().max(160).email(c.validation.email).or(z.literal('')).optional(),
 })
 type BookingFormValues = z.infer<typeof bookingFormSchema>
 type BookingDraft = {
@@ -60,6 +61,7 @@ type BookingDraft = {
   couponDiscount: number
   phone?: string
   guestName: string
+  notificationEmail?: string
   customerName?: string
   sharedDate?: string
   preferredTime?: string
@@ -372,9 +374,11 @@ export default function BookingScreen() {
       paymentMethod: draft.paymentMethod,
       couponCode: draft.couponCode ?? '',
       guestName: draft.guestName ?? user?.name ?? '',
+      notificationEmail: draft.notificationEmail ?? '',
     },
   })
   const phone = useWatch({ control, name: 'phone' }) ?? ''
+  const notificationEmail = useWatch({ control, name: 'notificationEmail' }) ?? ''
   const paymentMethod = useWatch({ control, name: 'paymentMethod' })
   const capacity = getValues('capacity') ?? '5000'
   const details = { notes: getValues('notes') ?? '' }
@@ -504,11 +508,11 @@ export default function BookingScreen() {
       return
     }
     const timer = window.setTimeout(() => {
-      const bookingDraft: BookingDraft = { idempotencyKey, selectedServices, serviceEntries, serviceItemsInitialized: hasInitializedServiceEntries, serviceDetails, capacity, step, details: { notes: getValues('notes') ?? '' }, locationAddress: sharedLocation, coordinates: sharedCoordinates ? { latitude: sharedCoordinates.lat, longitude: sharedCoordinates.lng } : null, region, addressLabel, addressCity, addressPincode, saveAddress: saveAddressForFuture, savedAddressId, sharedDate, preferredTime, phone, paymentMethod, couponCode, couponDiscount, guestName, phoneChallenges, bookingId, paymentBookingId, quotedTotal }
+      const bookingDraft: BookingDraft = { idempotencyKey, selectedServices, serviceEntries, serviceItemsInitialized: hasInitializedServiceEntries, serviceDetails, capacity, step, details: { notes: getValues('notes') ?? '' }, locationAddress: sharedLocation, coordinates: sharedCoordinates ? { latitude: sharedCoordinates.lat, longitude: sharedCoordinates.lng } : null, region, addressLabel, addressCity, addressPincode, saveAddress: saveAddressForFuture, savedAddressId, sharedDate, preferredTime, phone, paymentMethod, couponCode, couponDiscount, guestName, notificationEmail, phoneChallenges, bookingId, paymentBookingId, quotedTotal }
       sessionStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify(bookingDraft))
     }, DRAFT_PERSIST_DELAY_MS)
     return () => window.clearTimeout(timer)
-  }, [idempotencyKey, selectedServices, serviceEntries, hasInitializedServiceEntries, serviceDetails, capacity, step, getValues, sharedLocation, sharedCoordinates, sharedDate, region, addressLabel, addressCity, addressPincode, saveAddressForFuture, savedAddressId, preferredTime, phone, paymentMethod, couponCode, couponDiscount, guestName, phoneChallenges, bookingId, paymentBookingId, quotedTotal])
+  }, [idempotencyKey, selectedServices, serviceEntries, hasInitializedServiceEntries, serviceDetails, capacity, step, getValues, sharedLocation, sharedCoordinates, sharedDate, region, addressLabel, addressCity, addressPincode, saveAddressForFuture, savedAddressId, preferredTime, phone, paymentMethod, couponCode, couponDiscount, guestName, notificationEmail, phoneChallenges, bookingId, paymentBookingId, quotedTotal])
   useEffect(() => () => {
     sessionStorage.removeItem(BOOKING_DRAFT_KEY)
   }, [])
@@ -521,7 +525,7 @@ export default function BookingScreen() {
           const stored = sessionStorage.getItem(BOOKING_DRAFT_KEY)
           if (!stored) return
           const saved = JSON.parse(stored) as Partial<BookingDraft>
-          sessionStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify({ ...saved, idempotencyKey, phone: values.phone, capacity: values.capacity, paymentMethod: values.paymentMethod, couponCode: values.couponCode, guestName: values.guestName, details: { ...saved.details, notes: values.notes } }))
+          sessionStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify({ ...saved, idempotencyKey, phone: values.phone, capacity: values.capacity, paymentMethod: values.paymentMethod, couponCode: values.couponCode, guestName: values.guestName, notificationEmail: values.notificationEmail, details: { ...saved.details, notes: values.notes } }))
         } catch { /* Draft persistence must not interrupt typing. */ }
       }, DRAFT_PERSIST_DELAY_MS)
     })
@@ -795,7 +799,7 @@ export default function BookingScreen() {
       total: finalTotal,
     })
     setBookingCompleted(true)
-    reset({ selectedServices: [], capacity: '', phone: '', notes: '', paymentMethod: undefined, couponCode: '', guestName: user?.name ?? '' })
+    reset({ selectedServices: [], capacity: '', phone: '', notes: '', paymentMethod: undefined, couponCode: '', guestName: user?.name ?? '', notificationEmail: '' })
     setServiceEntries([])
     setServiceDetails({})
     setServiceToAdd('')
@@ -847,6 +851,7 @@ export default function BookingScreen() {
       return
     }
     bookingSubmitInProgress.current = true
+    const bookingNotificationEmail = isRegisteredCustomer ? undefined : notificationEmail.trim() || undefined
     try {
       const primaryService = serviceItems[0]
       if (!primaryService) throw new Error(c.errors.selectServiceBeforeConfirm)
@@ -868,6 +873,7 @@ export default function BookingScreen() {
             idempotencyKey,
             paymentMethod,
             phone: normalizedPhone,
+            notificationEmail: bookingNotificationEmail,
             phoneVerificationChallengeId: phoneChallenges[normalizedPhone],
             couponCode: couponCode || undefined,
             items: serviceItems.map((item) => {
@@ -900,6 +906,7 @@ export default function BookingScreen() {
           notes: details.notes,
           couponCode,
           phone: normalizedPhone,
+          notificationEmail: bookingNotificationEmail,
           phoneVerificationChallengeId: phoneChallenges[normalizedPhone],
           latitude: sharedCoordinates?.lat,
           longitude: sharedCoordinates?.lng,
@@ -1088,7 +1095,7 @@ export default function BookingScreen() {
   return <section className="booking-screen">
     <BookingHero onBack={() => navigate('home')} />
     <div className="booking-new-shell"><BookingProgress activeStep={1} />
-      <form noValidate className="booking-new-grid" onSubmit={handleSubmit(review, (invalid) => setError(invalid.selectedServices?.message ?? invalid.phone?.message ?? invalid.guestName?.message ?? invalid.notes?.message ?? c.submit.fallbackError))}>
+      <form noValidate className="booking-new-grid" onSubmit={handleSubmit(review, (invalid) => setError(invalid.selectedServices?.message ?? invalid.phone?.message ?? invalid.guestName?.message ?? invalid.notificationEmail?.message ?? invalid.notes?.message ?? c.submit.fallbackError))}>
         <div className="booking-form">
           <BookingSection number="01" title={c.sections.services.title} description={c.sections.services.description}>
             {activeServiceEntries.map((entry, index) => <BookingServiceItem key={entry.id} entry={entry} index={index} options={options} value={serviceDetails[entry.id] ?? serviceDraftFor(entry.serviceId)} errors={serviceFieldErrors[entry.id]} onServiceChange={changeServiceEntry} onFieldChange={updateServiceDetails} onRemove={removeServiceEntry} />)}
@@ -1099,6 +1106,12 @@ export default function BookingScreen() {
 
           <BookingSection number="02" title={c.sections.contact.title} description={c.sections.contact.description}>
             <label className="field">{c.contact.customerName}<input {...register('guestName')} required minLength={2} maxLength={60} placeholder={c.contact.customerNamePlaceholder} /></label>
+            {isRegisteredCustomer
+              ? <p className="booking-address-status">{c.contact.registeredUpdatesEmail}</p>
+              : <>
+                  <label className="field">{c.contact.emailAddress}<input {...register('notificationEmail')} type="email" autoComplete="email" maxLength={160} placeholder={c.contact.emailAddressPlaceholder} />{errors.notificationEmail?.message && <small className="booking-field-error" role="alert">{errors.notificationEmail.message}</small>}</label>
+                  <small className="booking-field-note">{c.contact.guestEmailNoUpdates}</small>
+                </>}
             <Controller control={control} name="phone" render={({ field }) => {
               const normalized = (field.value ?? '').replace(/\D/g, '').slice(-10)
               const verified = isPhoneVerified(field.value ?? '')
