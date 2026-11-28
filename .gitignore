@@ -190,3 +190,4 @@ scripts/image-originals/
 !docs/landing-motion.md
 !docs/image-prompts.md
 !docs/image-credits.md
+.env.production.local
